@@ -9,7 +9,10 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    // lets you insert/delete data
     @Environment(\.modelContext) private var modelContext
+    
+    // fetch Item objects from SwiftData
     @Query private var items: [Item]
 
     var body: some View {
@@ -78,3 +81,5 @@ fileprivate struct NavigationViewWrapper<Content: View>: View {
     ContentView()
         .modelContainer(for: Item.self, inMemory: true)
 }
+
+
