@@ -14,7 +14,8 @@ struct RegisterView: View {
     @State private var email = ""
     @State private var password = ""
 
-    var onAccountCreated: () -> Void // Closure to handle navigation after account creation
+    var onRegisterSuccess: () -> Void
+    var onCancel: () -> Void
 
     var body: some View {
         ScrollView {
@@ -26,24 +27,33 @@ struct RegisterView: View {
                 TextField("Type your email", text: $email)
                     .textFieldStyle(.roundedBorder)
                     .autocapitalization(.none)
+                    .padding(.horizontal)
 
                 SecureField("Type your password", text: $password)
                     .textFieldStyle(.roundedBorder)
+                    .autocapitalization(.none)
+                    .padding(.horizontal)
 
                 Button("Register") {
-                    auth.register(email: email, password: password)
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        if auth.errorMessage == nil {
-                            onAccountCreated()
+                    auth.register(email: email, password: password) { success in
+                        if success {
+                            onRegisterSuccess()   // ONLY runs if Firebase confirms success
                         }
                     }
                 }
                 .buttonStyle(.borderedProminent)
+                
+                Button("Cancel"){
+                    onCancel()
+                }
+                .foregroundColor(.red)
+                .padding(.top, 5)
 
                 if let errorMessage = auth.errorMessage {
                     Text(errorMessage)
                         .foregroundColor(.red)
+                        .padding(.top, 5)
                 }
             }
             .padding()

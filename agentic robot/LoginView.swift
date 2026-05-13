@@ -21,7 +21,16 @@ struct LoginView: View {
                 .padding()
 
             Button("Login") {
-                authViewModel.login(email: email, password: password) { _ in }
+                if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+
+                    authViewModel.errorMessage = "Please fill in all fields."
+                    return
+                }
+
+                authViewModel.login(email: email, password: password) { success in
+
+                }
             }
             .padding()
 

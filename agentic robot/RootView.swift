@@ -35,10 +35,18 @@ struct RootView: View {
                     }
                     
                     if showRegisterPage {
-                        RegisterView(onAccountCreated: {
-                            showRegisterPage = false
-                            successMessage = "User successfully created"
-                        })
+                        RegisterView(
+
+                            onRegisterSuccess: {
+                                showRegisterPage = false
+                                successMessage = "User successfully created!"
+                            },
+
+                            onCancel: {
+                                showRegisterPage = false
+                                successMessage = nil
+                            }
+                        )
                     } else {
                         LoginView(
                             onCreateAccount: {
