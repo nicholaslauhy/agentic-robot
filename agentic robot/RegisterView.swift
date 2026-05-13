@@ -35,10 +35,17 @@ struct RegisterView: View {
                     .padding(.horizontal)
 
                 Button("Register") {
+                    if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+
+                        auth.errorMessage = "Please fill in all fields."
+                        return
+                    }
 
                     auth.register(email: email, password: password) { success in
+
                         if success {
-                            onRegisterSuccess()   // ONLY runs if Firebase confirms success
+                            onRegisterSuccess()
                         }
                     }
                 }
