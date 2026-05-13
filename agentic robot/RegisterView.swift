@@ -13,62 +13,70 @@ struct RegisterView: View {
 
     @State private var email = ""
     @State private var password = ""
+    @State private var shakeTrigger: CGFloat = 0
 
     var onRegisterSuccess: () -> Void
     var onCancel: () -> Void
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
 
-                Text("Create Account")
-                    .font(.largeTitle)
+        VStack(spacing: 20) {
 
-                TextField("Type your email", text: $email)
-                    .textFieldStyle(.roundedBorder)
-                    .autocapitalization(.none)
+            // HEADER
+            Text("Create Account")
+                .font(.largeTitle)
+                .bold()
+
+            // ERROR MESSAGE
+            if let errorMessage = auth.errorMessage {
+                Text(errorMessage)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
+            }
 
-                SecureField("Type your password", text: $password)
-                    .textFieldStyle(.roundedBorder)
-                    .autocapitalization(.none)
-                    .padding(.horizontal)
+            // EMAIL FIELD
+            TextField("Email", text: $email)
+                .textFieldStyle(.roundedBorder)
+                .autocapitalization(.none)
+                .padding(.horizontal)
 
-                Button("Register") {
-                    if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                        password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // PASSWORD FIELD
+            SecureField("Password", text: $password)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal)
 
-                        auth.errorMessage = "Please fill in all fields."
-                        return
-                    }
+            // REGISTER BUTTON
+            Button("Register") {
 
-                    auth.register(email: email, password: password) { success in
+                if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 
-                        if success {
-                            onRegisterSuccess()
-                        }
-                    }
+                    auth.errorMessage = "Please fill in all fields."
+                    shakeTrigger += 1
+                    return
                 }
-                .buttonStyle(.borderedProminent)
-                
-                Button("Cancel"){
-                    onCancel()
-                }
-                .foregroundColor(.red)
-                .padding(.top, 5)
 
-                if let errorMessage = auth.errorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
-                        .padding(.top, 5)
+                auth.register(email: email, password: password) { success in
+
+                    if success {
+                        onRegisterSuccess()
+                    } else {
+                        shakeTrigger += 1
+                    }
                 }
             }
-            .padding()
+            .buttonStyle(.borderedProminent)
+
+            // CANCEL BUTTON
+            Button("Cancel") {
+                onCancel()
+            }
+            .foregroundColor(.red)
         }
-        .onTapGesture {
-            // Dismiss the keyboard when tapping outside
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
+        .padding()
+        .modifier(ShakeEffect(animatableData: shakeTrigger))
+        .animation(.default, value: shakeTrigger)
     }
 }
 

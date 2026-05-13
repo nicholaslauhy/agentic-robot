@@ -25,24 +25,17 @@ struct RootView: View {
                 
                 VStack(spacing: 20) {
                     
-                    Text("Login")
-                        .font(.largeTitle)
-                        .bold()
-                    
-                    if let msg = successMessage {
-                        Text(msg)
-                            .foregroundColor(.green)
-                    }
-                    
                     if showRegisterPage {
                         RegisterView(
 
                             onRegisterSuccess: {
+                                auth.errorMessage = nil
                                 showRegisterPage = false
-                                successMessage = "User successfully created!"
+                                successMessage = "User successfully created! Please log in with the same credentials."
                             },
 
                             onCancel: {
+                                auth.errorMessage = nil
                                 showRegisterPage = false
                                 successMessage = nil
                             }
@@ -50,9 +43,11 @@ struct RootView: View {
                     } else {
                         LoginView(
                             onCreateAccount: {
+                                auth.errorMessage = nil
                                 showRegisterPage = true
                                 successMessage = nil
-                            }
+                            },
+                            successMessage: $successMessage
                         )
                     }
                 }

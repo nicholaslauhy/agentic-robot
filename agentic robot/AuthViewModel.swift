@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import Combine
+import UIKit
 
 class AuthViewModel: ObservableObject {
 
@@ -53,6 +54,12 @@ class AuthViewModel: ObservableObject {
             return defaultMessage
         }
     }
+    
+    private func triggerErrorHaptic() {
+
+        let generator = UINotificationFeedbackGenerator()
+        generator.notificationOccurred(.error)
+    }
 
     func login(email: String, password: String, completion: @escaping (Bool) -> Void) {
 
@@ -67,6 +74,7 @@ class AuthViewModel: ObservableObject {
 
                 } else {
                     self.errorMessage = self.mapAuthError(error)
+                    self.triggerErrorHaptic()
                     completion(false)
                 }
             }
@@ -79,13 +87,23 @@ class AuthViewModel: ObservableObject {
 
             DispatchQueue.main.async {
 
-                if let user = result?.user {
-                    self.user = user
-                    self.errorMessage = nil
-                    completion(true)
+                if result?.user != nil {
 
+                    do {
+                        try Auth.auth().signOut()
+                    } catch {
+                        self.errorMessage = "Failed to sign out after registration."
+                        completion(false)
+                        return
+                    }
+
+                    self.user = nil
+                    self.errorMessage = nil
+
+                    completion(true)
                 } else {
                     self.errorMessage = self.mapAuthError(error)
+                    self.triggerErrorHaptic()
                     completion(false)
                 }
             }
