@@ -1,33 +1,36 @@
-//
-//  LoginView.swift
-//  agentic robot
-//
-//  Created by q2 on 12/5/26.
-//
-
 import SwiftUI
 
 struct LoginView: View {
 
-    @EnvironmentObject var auth: AuthViewModel
-
+    @EnvironmentObject var authViewModel: AuthViewModel
     @State private var email = ""
     @State private var password = ""
 
-    var body: some View {
-        VStack(spacing: 20) {
+    var onCreateAccount: () -> Void
 
-            Text("Login")
-                .font(.largeTitle)
+    var body: some View {
+        VStack {
 
             TextField("Email", text: $email)
                 .textFieldStyle(.roundedBorder)
+                .autocapitalization(.none)
+                .padding()
 
             SecureField("Password", text: $password)
                 .textFieldStyle(.roundedBorder)
+                .padding()
 
             Button("Login") {
-                auth.login(email: email, password: password)
+                authViewModel.login(email: email, password: password) { _ in }
+            }
+            .padding()
+
+            if let errorMessage = authViewModel.errorMessage {
+                Text(errorMessage).foregroundColor(.red)
+            }
+
+            Button("Create Account") {
+                onCreateAccount()
             }
         }
         .padding()

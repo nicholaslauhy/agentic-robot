@@ -3,7 +3,6 @@ import FirebaseCore
 
 @main
 struct agentic_robotApp: App {
-
     @StateObject var auth = AuthViewModel()
 
     init() {
@@ -12,12 +11,8 @@ struct agentic_robotApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if auth.user != nil {
-                ContentView()
-            } else {
-                LoginView()
-            }
+            RootView()
+                .environmentObject(auth)
         }
-        .environmentObject(auth)
     }
 }
