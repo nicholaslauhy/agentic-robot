@@ -27,7 +27,7 @@ struct ScratchScanView: View {
     let plate: String
     let carType: CarType
     var onLogout: () -> Void
-    var onScanComplete: ([UIImage]) -> Void
+    var onScanComplete: ([UIImage], @escaping () -> Void) -> Void
 
     @State private var currentAngleIndex = 0
     @State private var capturedImages: [UIImage?] = Array(repeating: nil, count: 4)
@@ -35,6 +35,7 @@ struct ScratchScanView: View {
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showCompletionScreen = false
     @State private var localErrorMessage: String? = nil
+    @State private var isSubmittingAnalysis = false
 
     // Replace flow — single source of truth
     @State private var replacingIndex: Int? = nil
@@ -83,6 +84,28 @@ struct ScratchScanView: View {
             .padding(.horizontal).padding(.bottom, 12)
 
             if showCompletionScreen { reviewView } else { scanGuideView }
+        }
+        .overlay {
+            if isSubmittingAnalysis {
+                ZStack {
+                    Color.black.opacity(0.25).ignoresSafeArea()
+
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .scaleEffect(1.3)
+
+                        Text("Analyzing your pictures for any dents or scratches...")
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .padding(24)
+                    .background(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .shadow(radius: 10)
+                    .padding(.horizontal, 28)
+                }
+            }
         }
 
         // ── Main capture ───────────────────────────────────────────────────
@@ -281,13 +304,18 @@ struct ScratchScanView: View {
                 }
 
                 Button {
-                    onScanComplete(capturedImages.compactMap { $0 })
+                    isSubmittingAnalysis = true
+                    onScanComplete(capturedImages.compactMap { $0 }) {
+                        isSubmittingAnalysis = false
+                    }
                 } label: {
                     Text("Submit for Analysis")
                         .font(.headline).frame(maxWidth: .infinity).padding()
                         .background(carType.accentColor).foregroundColor(.white)
                         .cornerRadius(14).padding(.horizontal)
                 }
+                .disabled(isSubmittingAnalysis)
+                .opacity(isSubmittingAnalysis ? 0.6 : 1)
                 .padding(.bottom, 32)
             }
         }
@@ -681,8 +709,9 @@ struct VehicleFaceDrawing: View {
     }
 
     private var mpvBoxFace: some View {
-        // More squeezed-in / compact box-car MPV.
-        let bodyW = w * 0.64
+        // MPV: intentionally squeezed-in box-car look.
+        // Shorter width + taller body makes it look like a literal box instead of a long van.
+        let bodyW = w * 0.33
         let bodyH = h * 0.66
         let topY = h * 0.125
         let leftX = cx - bodyW / 2
@@ -693,15 +722,14 @@ struct VehicleFaceDrawing: View {
             faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
 
             Path { p in
-                // Deliberately boxy MPV front/rear: flat roof, vertical sides, short bonnet impression.
                 p.roundedRect(
                     CGRect(
-                        x: leftX + bodyW * 0.015,
-                        y: topY + bodyH * 0.060,
-                        width: bodyW * 0.970,
-                        height: bodyH * 0.895
+                        x: leftX,
+                        y: topY + bodyH * 0.045,
+                        width: bodyW,
+                        height: bodyH * 0.910
                     ),
-                    radius: 18
+                    radius: 0
                 )
             }
             .fill(
@@ -715,39 +743,40 @@ struct VehicleFaceDrawing: View {
                 Path { p in
                     p.roundedRect(
                         CGRect(
-                            x: leftX + bodyW * 0.015,
-                            y: topY + bodyH * 0.060,
-                            width: bodyW * 0.970,
-                            height: bodyH * 0.905
+                            x: leftX,
+                            y: topY + bodyH * 0.045,
+                            width: bodyW,
+                            height: bodyH * 0.910
                         ),
-                        radius: 18
+                        radius: 0
                     )
                 }
                 .stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.2)
             )
 
-            RoundedRectangle(cornerRadius: 10)
+            // Large square windscreen/rear window.
+            RoundedRectangle(cornerRadius: 0)
                 .fill(palette.glass)
-                .frame(width: bodyW * 0.72, height: bodyH * 0.31)
-                .position(x: cx, y: topY + bodyH * 0.265)
+                .frame(width: bodyW * 0.78, height: bodyH * 0.31)
+                .position(x: cx, y: topY + bodyH * 0.250)
 
             Path { p in
-                p.move(to: CGPoint(x: cx, y: topY + bodyH * 0.120))
-                p.addLine(to: CGPoint(x: cx, y: topY + bodyH * 0.405))
+                p.move(to: CGPoint(x: cx, y: topY + bodyH * 0.105))
+                p.addLine(to: CGPoint(x: cx, y: topY + bodyH * 0.395))
             }
             .stroke(Color.white.opacity(0.35), lineWidth: 1)
 
-            // Tall MPV nose / grille area.
-            RoundedRectangle(cornerRadius: 7)
+            // Boxy MPV front/rear grille panel.
+            RoundedRectangle(cornerRadius: 0)
                 .fill(Color(.systemGray5).opacity(0.90))
-                .frame(width: bodyW * 0.46, height: bodyH * 0.135)
+                .frame(width: bodyW * 0.58, height: bodyH * 0.145)
                 .position(x: cx, y: topY + bodyH * 0.625)
 
             VStack(spacing: 3) {
                 ForEach(0..<4, id: \.self) { _ in
                     RoundedRectangle(cornerRadius: 1)
                         .fill(Color(.systemGray3).opacity(0.95))
-                        .frame(width: bodyW * 0.38, height: 2)
+                        .frame(width: bodyW * 0.48, height: 2)
                 }
             }
             .position(x: cx, y: topY + bodyH * 0.625)
@@ -757,7 +786,6 @@ struct VehicleFaceDrawing: View {
             mirrorPair(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
         }
     }
-
 
     private func boxyPassengerFace(
         bodyW: CGFloat,
@@ -1303,7 +1331,7 @@ struct VehicleSideDrawing: View {
             windowPath.stroke(Color.white.opacity(0.35), lineWidth: 1)
 
             passengerDetails(style, m: m, transform: transform)
-            wheels(frontX: m.left + m.width * 0.23, rearX: m.left + m.width * 0.72, y: m.groundY, r: m.wheelR, transform: transform)
+            wheels(frontX: m.left + m.width * (style == .mpv ? 0.11 : 0.22), rearX: m.left + m.width * (style == .mpv ? 0.89 : 0.76), y: m.groundY, r: m.wheelR, transform: transform)
             passengerLightsAndMirror(style, m: m, transform: transform)
         }
     }
@@ -1316,17 +1344,18 @@ struct VehicleSideDrawing: View {
         case .suv:
             bodyW = w * 0.78
         case .mpv:
-            bodyW = w * 0.72
+            // Final MPV tweak: another 0.75x shorter, literal box profile.
+            bodyW = w * 0.345
         }
 
         let left = (w - bodyW) / 2
         let right = left + bodyW
         let wheelR = min(
-            w * (style == .suv ? 0.053 : style == .mpv ? 0.047 : 0.048),
-            h * (style == .suv ? 0.130 : style == .mpv ? 0.112 : 0.118)
+            w * (style == .suv ? 0.053 : style == .mpv ? 0.043 : 0.048),
+            h * (style == .suv ? 0.130 : style == .mpv ? 0.105 : 0.118)
         )
         let groundY = h * 0.775
-        let sillY = groundY - wheelR * (style == .suv ? 0.15 : 0.28)
+        let sillY = groundY - wheelR * (style == .suv ? 0.15 : style == .mpv ? 0.20 : 0.28)
 
         return SideMetrics(left: left, right: right, width: bodyW, wheelR: wheelR, groundY: groundY, sillY: sillY)
     }
@@ -1356,7 +1385,7 @@ struct VehicleSideDrawing: View {
             p.closeSubpath()
 
         case .suv:
-            // SUV with a shorter rear portion and more boxed cabin.
+            // New SUV: short bonnet, upright cabin, high rear quarter; much boxier than sedan.
             let hoodTop = m.sillY - h * 0.215
             let roofTop = m.sillY - h * 0.385
             let rearTop = m.sillY - h * 0.285
@@ -1365,34 +1394,32 @@ struct VehicleSideDrawing: View {
             p.addLine(to: CGPoint(x: m.left + m.width * 0.030, y: hoodTop + h * 0.055))
             p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.095, y: hoodTop),
                            control: CGPoint(x: m.left + m.width * 0.028, y: hoodTop + h * 0.012))
+            // Shorter front bonnet
             p.addLine(to: CGPoint(x: m.left + m.width * 0.220, y: hoodTop - h * 0.006))
+            // Upright A-pillar
             p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.335, y: roofTop + h * 0.040),
                            control: CGPoint(x: m.left + m.width * 0.270, y: hoodTop - h * 0.035))
-            // Slightly shorter roof / rear section
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.720, y: roofTop + h * 0.040))
-            // Back portion ~3/4 the previous length
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.840, y: rearTop))
-            p.addLine(to: CGPoint(x: m.right - m.width * 0.045, y: rearTop + h * 0.022))
+            // Flat SUV roof
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.760, y: roofTop + h * 0.040))
+            // Tall, high rear portion
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.900, y: rearTop))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.030, y: rearTop + h * 0.025))
             p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.020, y: m.sillY),
-                           control: CGPoint(x: m.right - m.width * 0.005, y: rearTop + h * 0.105))
+                           control: CGPoint(x: m.right + m.width * 0.005, y: rearTop + h * 0.115))
             p.closeSubpath()
 
         case .mpv:
-            // MPV box car: compact, squeezed-in, tall and very boxy.
-            let roofTop = m.sillY - h * 0.395
-            let frontTop = m.sillY - h * 0.210
-            let rearTop = m.sillY - h * 0.245
+            // MPV: extremely short, tall, and angular. No rounded edges.
+            let roofTop = m.sillY - h * 0.390
+            let frontTop = m.sillY - h * 0.250
+            let rearTop = m.sillY - h * 0.250
 
-            p.move(to: CGPoint(x: m.left + m.width * 0.020, y: m.sillY))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.025, y: frontTop + h * 0.045))
-            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.110, y: frontTop),
-                           control: CGPoint(x: m.left + m.width * 0.025, y: frontTop + h * 0.005))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.185, y: frontTop))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.285, y: roofTop + h * 0.020))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.810, y: roofTop + h * 0.020))
-            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.885, y: rearTop),
-                           control: CGPoint(x: m.left + m.width * 0.875, y: roofTop + h * 0.070))
-            p.addLine(to: CGPoint(x: m.right - m.width * 0.020, y: m.sillY))
+            p.move(to: CGPoint(x: m.left + m.width * 0.010, y: m.sillY))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.010, y: frontTop))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.135, y: roofTop))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.010, y: roofTop))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.010, y: rearTop))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.010, y: m.sillY))
             p.closeSubpath()
         }
 
@@ -1413,20 +1440,21 @@ struct VehicleSideDrawing: View {
             p.addLine(to: CGPoint(x: m.left + m.width * 0.84, y: base))
             p.closeSubpath()
         case .suv:
+            // SUV window area shortened by about half so it no longer looks like a long sedan cabin.
             let top = m.sillY - h * 0.345
             let base = m.sillY - h * 0.160
-            p.move(to: CGPoint(x: m.left + m.width * 0.230, y: base))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.335, y: top + h * 0.042))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.730, y: top + h * 0.042))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.840, y: base))
+            p.move(to: CGPoint(x: m.left + m.width * 0.310, y: base))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.405, y: top + h * 0.042))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.635, y: top + h * 0.042))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.725, y: base))
             p.closeSubpath()
         case .mpv:
-            let top = m.sillY - h * 0.365
-            let base = m.sillY - h * 0.160
-            p.move(to: CGPoint(x: m.left + m.width * 0.170, y: base))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.280, y: top + h * 0.040))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.800, y: top + h * 0.040))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.875, y: base))
+            let top = m.sillY - h * 0.358
+            let base = m.sillY - h * 0.162
+            p.move(to: CGPoint(x: m.left + m.width * 0.145, y: base))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.260, y: top + h * 0.040))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.740, y: top + h * 0.040))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.860, y: base))
             p.closeSubpath()
         }
 
@@ -1444,8 +1472,8 @@ struct VehicleSideDrawing: View {
                 p.move(to: CGPoint(x: m.left + m.width * 0.18, y: lowerY))
                 p.addLine(to: CGPoint(x: m.right - m.width * 0.18, y: lowerY))
 
-                let door1 = m.left + m.width * (style == .mpv ? 0.42 : 0.48)
-                let door2 = m.left + m.width * (style == .mpv ? 0.65 : 0.64)
+                let door1 = m.left + m.width * (style == .mpv ? 0.36 : 0.48)
+                let door2 = m.left + m.width * (style == .mpv ? 0.60 : 0.64)
                 p.move(to: CGPoint(x: door1, y: m.sillY - h * 0.135))
                 p.addLine(to: CGPoint(x: door1, y: m.sillY - h * 0.010))
                 p.move(to: CGPoint(x: door2, y: m.sillY - h * 0.130))
@@ -1456,9 +1484,9 @@ struct VehicleSideDrawing: View {
 
             if style == .suv || style == .mpv {
                 Path { p in
-                    p.move(to: CGPoint(x: m.left + m.width * (style == .mpv ? 0.30 : 0.36),
+                    p.move(to: CGPoint(x: m.left + m.width * (style == .mpv ? 0.22 : 0.36),
                                        y: m.sillY - h * (style == .mpv ? 0.365 : 0.348)))
-                    p.addLine(to: CGPoint(x: m.left + m.width * (style == .mpv ? 0.82 : 0.74),
+                    p.addLine(to: CGPoint(x: m.left + m.width * (style == .mpv ? 0.78 : 0.74),
                                           y: m.sillY - h * (style == .mpv ? 0.365 : 0.348)))
                 }
                 .applying(transform)
@@ -1466,8 +1494,8 @@ struct VehicleSideDrawing: View {
             }
 
             Path { p in
-                let pillar1 = m.left + m.width * (style == .mpv ? 0.42 : style == .suv ? 0.49 : 0.51)
-                let pillar2 = m.left + m.width * (style == .mpv ? 0.61 : style == .suv ? 0.66 : 0.65)
+                let pillar1 = m.left + m.width * (style == .mpv ? 0.36 : style == .suv ? 0.49 : 0.51)
+                let pillar2 = m.left + m.width * (style == .mpv ? 0.60 : style == .suv ? 0.66 : 0.65)
                 p.move(to: CGPoint(x: pillar1, y: m.sillY - h * 0.288))
                 p.addLine(to: CGPoint(x: pillar1, y: m.sillY - h * 0.135))
                 p.move(to: CGPoint(x: pillar2, y: m.sillY - h * 0.288))
