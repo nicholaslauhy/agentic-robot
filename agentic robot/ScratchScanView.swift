@@ -86,6 +86,9 @@ struct ScratchScanView: View {
         }
 
         // ── Main capture ───────────────────────────────────────────────────
+        .navigationBarBackButtonHidden(true)
+
+        // ── Main capture ───────────────────────────────────────────────────
         .sheet(isPresented: $showCamera) {
             ImagePicker(sourceType: .camera) { image in
                 capturedImages[currentAngleIndex] = image
@@ -399,6 +402,7 @@ struct ReviewThumbnail: View {
 }
 
 
+
 // MARK: - Car Silhouette View
 
 struct CarSilhouetteView: View {
@@ -420,10 +424,75 @@ struct CarSilhouetteView: View {
 
                 Text(scanAngles[angleId].label)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.75))
+                    .foregroundColor(.secondary.opacity(0.72))
                     .position(x: w / 2, y: h - 12)
             }
         }
+    }
+}
+
+// MARK: - Vehicle Kind
+
+enum VehicleVisualKind {
+    case sedan
+    case suv
+    case mpv
+    case lightFireAttackVehicle
+    case ambulance
+    case medicalSupportVehicle
+    case pumpLadder
+    case responderPerformanceVehicle
+    case hazmat
+    case fireTruck
+    case genericLarge
+}
+
+extension CarType {
+    var visualKind: VehicleVisualKind {
+        let name = rawValue.lowercased()
+
+        if name.contains("hazmat") || name.contains("hazardous") || name.contains("haz mat") {
+            return .hazmat
+        }
+
+        if name.contains("responder performance") || name.contains("performance vehicle") || name.contains("rpv") {
+            return .responderPerformanceVehicle
+        }
+
+        if name.contains("pump ladder") || name.contains("platform ladder") || name.contains("combined platform") ||
+           name.contains("ladder") || name.contains("pl ") || name == "pl" {
+            return .pumpLadder
+        }
+
+        if name.contains("medical support") || name.contains("msv") {
+            return .medicalSupportVehicle
+        }
+
+        if name.contains("ambulance") || name.contains("emergency ambulance") {
+            return .ambulance
+        }
+
+        if name.contains("light fire") || name.contains("red rhino") || name.contains("lfav") || name.contains("lf6g") {
+            return .lightFireAttackVehicle
+        }
+
+        if name.contains("pump") || name.contains("fire engine") || name.contains("fire truck") {
+            return .fireTruck
+        }
+
+        if self == .suv || name.contains("suv") {
+            return .suv
+        }
+
+        if self == .mpv || name.contains("mpv") || name.contains("multi purpose") || name.contains("multi-purpose") {
+            return .mpv
+        }
+
+        if category == .scdf {
+            return .genericLarge
+        }
+
+        return .sedan
     }
 }
 
@@ -435,26 +504,27 @@ struct VehicleGuideDrawing: View {
     let w: CGFloat
     let h: CGFloat
 
+    private var kind: VehicleVisualKind { carType.visualKind }
     private var isFront: Bool { angleId == 0 }
     private var isRear: Bool { angleId == 1 }
-    private var isLeftSide: Bool { angleId == 2 }
-    private var isRightSide: Bool { angleId == 3 }
+    private var isSide: Bool { angleId == 2 || angleId == 3 }
+    private var flipped: Bool { angleId == 3 }
 
     var body: some View {
         ZStack {
             SoftGroundShadow(w: w, h: h)
 
-            if isFront || isRear {
-                VehicleFaceDrawing(
-                    carType: carType,
-                    isFront: isFront,
+            if isSide {
+                VehicleSideDrawing(
+                    kind: kind,
+                    flipped: flipped,
                     w: w,
                     h: h
                 )
             } else {
-                VehicleSideDrawing(
-                    carType: carType,
-                    flipped: isRightSide,
+                VehicleFaceDrawing(
+                    kind: kind,
+                    isFront: isFront,
                     w: w,
                     h: h
                 )
@@ -472,8 +542,8 @@ struct SoftGroundShadow: View {
     var body: some View {
         Ellipse()
             .fill(Color.black.opacity(0.045))
-            .frame(width: w * 0.72, height: h * 0.055)
-            .position(x: w / 2, y: h * 0.80)
+            .frame(width: w * 0.72, height: h * 0.052)
+            .position(x: w / 2, y: h * 0.805)
     }
 }
 
@@ -497,179 +567,404 @@ extension Path {
     }
 }
 
+struct VehiclePalette {
+    let body: Color
+    let bodyDark: Color
+    let glass: Color
+    let stripe: Color?
+    let marking: Color?
+
+    static func forKind(_ kind: VehicleVisualKind) -> VehiclePalette {
+        switch kind {
+        case .lightFireAttackVehicle, .pumpLadder, .responderPerformanceVehicle, .hazmat, .fireTruck, .genericLarge:
+            return VehiclePalette(
+                body: Color.red.opacity(0.80),
+                bodyDark: Color.red.opacity(0.95),
+                glass: Color(.systemGray6).opacity(0.86),
+                stripe: Color.white.opacity(0.95),
+                marking: Color.yellow.opacity(0.90)
+            )
+        case .ambulance:
+            return VehiclePalette(
+                body: Color.white.opacity(0.96),
+                bodyDark: Color(.systemGray4).opacity(0.75),
+                glass: Color(.systemGray6).opacity(0.88),
+                stripe: Color.red.opacity(0.78),
+                marking: Color.blue.opacity(0.72)
+            )
+        case .medicalSupportVehicle:
+            return VehiclePalette(
+                body: Color.white.opacity(0.96),
+                bodyDark: Color(.systemGray4).opacity(0.78),
+                glass: Color(.systemGray6).opacity(0.88),
+                stripe: Color.blue.opacity(0.70),
+                marking: Color.red.opacity(0.72)
+            )
+        default:
+            return VehiclePalette(
+                body: Color(.systemGray3).opacity(0.92),
+                bodyDark: Color(.systemGray2).opacity(0.72),
+                glass: Color(.systemGray6).opacity(0.82),
+                stripe: nil,
+                marking: nil
+            )
+        }
+    }
+}
+
 // MARK: - Face View
 
 struct VehicleFaceDrawing: View {
-    let carType: CarType
+    let kind: VehicleVisualKind
     let isFront: Bool
     let w: CGFloat
     let h: CGFloat
 
-    private var isLarge: Bool { carType.category == .scdf }
-    private var isSUV: Bool { carType == .suv }
-    private var isMPV: Bool { carType == .mpv }
-    private var isTall: Bool { isSUV || isMPV || isLarge }
-
+    private var palette: VehiclePalette { .forKind(kind) }
     private var cx: CGFloat { w / 2 }
-    private var bodyW: CGFloat { w * (isLarge ? 0.64 : isTall ? 0.58 : 0.54) }
-    private var bodyH: CGFloat { h * (isLarge ? 0.58 : isTall ? 0.54 : 0.49) }
-    private var topY: CGFloat { h * (isLarge ? 0.18 : isTall ? 0.22 : 0.25) }
-    private var bottomY: CGFloat { topY + bodyH }
-    private var leftX: CGFloat { cx - bodyW / 2 }
-    private var rightX: CGFloat { cx + bodyW / 2 }
-
-    private var bodyColor: Color { Color(.systemGray3).opacity(0.92) }
-    private var lineColor: Color { Color(.systemGray2).opacity(0.55) }
-    private var glassColor: Color { Color(.systemGray6).opacity(0.82) }
 
     var body: some View {
-        ZStack {
-            rearWheelStubs
-            mainBody
-            windshield
-            hoodOrBootLines
-            lights
-            grilleOrRearPanel
-            licensePlate
-            mirrors
-            roofAccent
+        switch kind {
+        case .lightFireAttackVehicle:
+            compactEmergencyFace
+        case .ambulance:
+            ambulanceFace(isMSV: false)
+        case .medicalSupportVehicle:
+            ambulanceFace(isMSV: true)
+        case .pumpLadder:
+            ladderTruckFace
+        case .responderPerformanceVehicle:
+            boxyEmergencyFaceNoLight(title: "RPV")
+        case .hazmat:
+            boxyEmergencyFaceNoLight(title: "HAZMAT")
+        case .fireTruck, .genericLarge:
+            boxyEmergencyFace(title: "SCDF")
+        case .mpv:
+            mpvFace
+        case .suv:
+            suvFace
+        case .sedan:
+            sedanFace
         }
     }
 
-    private var mainBody: some View {
-        faceBodyPath
+    // MARK: Normal vehicles
+
+    private var sedanFace: some View {
+        // User preferred the previous SUV-like face proportions for sedan:
+        // wider, clearer, less squashed than the original sedan.
+        boxyPassengerFace(
+            bodyW: w * 0.64,
+            bodyH: h * 0.56,
+            topY: h * 0.195,
+            roofWRatio: 0.72,
+            glassWRatio: 0.64,
+            label: nil
+        )
+    }
+
+    private var suvFace: some View {
+        // More boxed-in SUV: higher rear/cabin and less sedan-like front.
+        boxyPassengerFace(
+            bodyW: w * 0.66,
+            bodyH: h * 0.60,
+            topY: h * 0.170,
+            roofWRatio: 0.82,
+            glassWRatio: 0.70,
+            label: nil
+        )
+    }
+
+    private var mpvFace: some View {
+        // MPV should look like a box car/minivan: very tall, wide, and flat.
+        mpvBoxFace
+    }
+
+    private var mpvBoxFace: some View {
+        // More squeezed-in / compact box-car MPV.
+        let bodyW = w * 0.64
+        let bodyH = h * 0.66
+        let topY = h * 0.125
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
+
+        return ZStack {
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            Path { p in
+                // Deliberately boxy MPV front/rear: flat roof, vertical sides, short bonnet impression.
+                p.roundedRect(
+                    CGRect(
+                        x: leftX + bodyW * 0.015,
+                        y: topY + bodyH * 0.060,
+                        width: bodyW * 0.970,
+                        height: bodyH * 0.895
+                    ),
+                    radius: 18
+                )
+            }
             .fill(
                 LinearGradient(
-                    colors: [
-                        Color(.systemGray2).opacity(0.78),
-                        bodyColor,
-                        Color(.systemGray4).opacity(0.95)
-                    ],
+                    colors: [palette.bodyDark, palette.body, Color(.systemGray4).opacity(0.90)],
                     startPoint: .top,
                     endPoint: .bottom
                 )
             )
-            .overlay(faceBodyPath.stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.2))
-    }
+            .overlay(
+                Path { p in
+                    p.roundedRect(
+                        CGRect(
+                            x: leftX + bodyW * 0.015,
+                            y: topY + bodyH * 0.060,
+                            width: bodyW * 0.970,
+                            height: bodyH * 0.905
+                        ),
+                        radius: 18
+                    )
+                }
+                .stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.2)
+            )
 
-    private var faceBodyPath: Path {
-        var p = Path()
-
-        if isLarge {
-            p.move(to: CGPoint(x: leftX + bodyW * 0.06, y: bottomY))
-            p.addLine(to: CGPoint(x: leftX, y: topY + bodyH * 0.28))
-            p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.10, y: topY + bodyH * 0.08),
-                           control: CGPoint(x: leftX + bodyW * 0.02, y: topY + bodyH * 0.12))
-            p.addLine(to: CGPoint(x: rightX - bodyW * 0.10, y: topY + bodyH * 0.08))
-            p.addQuadCurve(to: CGPoint(x: rightX, y: topY + bodyH * 0.28),
-                           control: CGPoint(x: rightX - bodyW * 0.02, y: topY + bodyH * 0.12))
-            p.addLine(to: CGPoint(x: rightX - bodyW * 0.06, y: bottomY))
-            p.closeSubpath()
-        } else {
-            p.move(to: CGPoint(x: leftX + bodyW * 0.08, y: bottomY))
-            p.addLine(to: CGPoint(x: leftX, y: topY + bodyH * 0.58))
-            p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.11, y: topY + bodyH * 0.22),
-                           control: CGPoint(x: leftX + bodyW * 0.01, y: topY + bodyH * 0.32))
-            p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.31, y: topY + bodyH * 0.06),
-                           control: CGPoint(x: leftX + bodyW * 0.18, y: topY + bodyH * 0.08))
-            p.addLine(to: CGPoint(x: rightX - bodyW * 0.31, y: topY + bodyH * 0.06))
-            p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.11, y: topY + bodyH * 0.22),
-                           control: CGPoint(x: rightX - bodyW * 0.18, y: topY + bodyH * 0.08))
-            p.addQuadCurve(to: CGPoint(x: rightX, y: topY + bodyH * 0.58),
-                           control: CGPoint(x: rightX - bodyW * 0.01, y: topY + bodyH * 0.32))
-            p.addLine(to: CGPoint(x: rightX - bodyW * 0.08, y: bottomY))
-            p.closeSubpath()
-        }
-
-        return p
-    }
-
-    private var windshield: some View {
-        let winW = bodyW * (isLarge ? 0.62 : isTall ? 0.58 : 0.54)
-        let winH = bodyH * (isLarge ? 0.28 : 0.26)
-        let winY = topY + bodyH * (isLarge ? 0.24 : 0.23)
-
-        return ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(glassColor)
-                .frame(width: winW, height: winH)
-                .position(x: cx, y: winY)
+            RoundedRectangle(cornerRadius: 10)
+                .fill(palette.glass)
+                .frame(width: bodyW * 0.72, height: bodyH * 0.31)
+                .position(x: cx, y: topY + bodyH * 0.265)
 
             Path { p in
-                p.move(to: CGPoint(x: cx, y: winY - winH * 0.42))
-                p.addLine(to: CGPoint(x: cx, y: winY + winH * 0.40))
+                p.move(to: CGPoint(x: cx, y: topY + bodyH * 0.120))
+                p.addLine(to: CGPoint(x: cx, y: topY + bodyH * 0.405))
             }
             .stroke(Color.white.opacity(0.35), lineWidth: 1)
 
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color(.systemGray4).opacity(0.75))
-                .frame(width: winW * 0.11, height: winH * 0.12)
-                .position(x: cx, y: winY + winH * 0.05)
-        }
-    }
+            // Tall MPV nose / grille area.
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color(.systemGray5).opacity(0.90))
+                .frame(width: bodyW * 0.46, height: bodyH * 0.135)
+                .position(x: cx, y: topY + bodyH * 0.625)
 
-    private var hoodOrBootLines: some View {
-        let upperY = topY + bodyH * (isLarge ? 0.44 : 0.48)
-        let lowerY = topY + bodyH * 0.66
-
-        return ZStack {
-            Path { p in
-                if isFront {
-                    p.move(to: CGPoint(x: leftX + bodyW * 0.18, y: upperY))
-                    p.addQuadCurve(to: CGPoint(x: cx, y: lowerY),
-                                   control: CGPoint(x: leftX + bodyW * 0.37, y: upperY + bodyH * 0.05))
-                    p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.18, y: upperY),
-                                   control: CGPoint(x: rightX - bodyW * 0.37, y: upperY + bodyH * 0.05))
-                } else {
-                    p.move(to: CGPoint(x: leftX + bodyW * 0.16, y: upperY))
-                    p.addLine(to: CGPoint(x: rightX - bodyW * 0.16, y: upperY))
-                    p.move(to: CGPoint(x: leftX + bodyW * 0.24, y: lowerY))
-                    p.addLine(to: CGPoint(x: rightX - bodyW * 0.24, y: lowerY))
+            VStack(spacing: 3) {
+                ForEach(0..<4, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color(.systemGray3).opacity(0.95))
+                        .frame(width: bodyW * 0.38, height: 2)
                 }
             }
-            .stroke(lineColor, lineWidth: 1.4)
+            .position(x: cx, y: topY + bodyH * 0.625)
+
+            carLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            numberPlate(bodyW: bodyW, bodyH: bodyH, topY: topY, yRatio: isFront ? 0.80 : 0.70)
+            mirrorPair(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
         }
     }
 
-    private var lights: some View {
-        let y = topY + bodyH * (isFront ? 0.56 : 0.50)
-        let lightW = bodyW * (isLarge ? 0.23 : 0.20)
-        let lightH = bodyH * 0.052
+
+    private func boxyPassengerFace(
+        bodyW: CGFloat,
+        bodyH: CGFloat,
+        topY: CGFloat,
+        roofWRatio: CGFloat,
+        glassWRatio: CGFloat,
+        label: String?
+    ) -> some View {
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
+        let roofW = bodyW * roofWRatio
+        let roofLeft = cx - roofW / 2
+        let roofRight = cx + roofW / 2
 
         return ZStack {
-            lightShape(left: true)
-                .fill(isFront ? Color.white.opacity(0.9) : Color.red.opacity(0.68))
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            Path { p in
+                // squarer/boxier front profile: taller cabin, flatter roof, more vertical sides
+                p.move(to: CGPoint(x: leftX + bodyW * 0.07, y: bottomY))
+                p.addLine(to: CGPoint(x: leftX + bodyW * 0.02, y: topY + bodyH * 0.43))
+                p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.15, y: topY + bodyH * 0.16),
+                               control: CGPoint(x: leftX + bodyW * 0.03, y: topY + bodyH * 0.20))
+                p.addLine(to: CGPoint(x: roofLeft, y: topY + bodyH * 0.075))
+                p.addQuadCurve(to: CGPoint(x: roofRight, y: topY + bodyH * 0.075),
+                               control: CGPoint(x: cx, y: topY + bodyH * 0.025))
+                p.addLine(to: CGPoint(x: rightX - bodyW * 0.15, y: topY + bodyH * 0.16))
+                p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.02, y: topY + bodyH * 0.43),
+                               control: CGPoint(x: rightX - bodyW * 0.03, y: topY + bodyH * 0.20))
+                p.addLine(to: CGPoint(x: rightX - bodyW * 0.07, y: bottomY))
+                p.closeSubpath()
+            }
+            .fill(
+                LinearGradient(
+                    colors: [palette.bodyDark, palette.body, Color(.systemGray4).opacity(0.90)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay(
+                Path { p in
+                    p.move(to: CGPoint(x: leftX + bodyW * 0.07, y: bottomY))
+                    p.addLine(to: CGPoint(x: leftX + bodyW * 0.02, y: topY + bodyH * 0.43))
+                    p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.15, y: topY + bodyH * 0.16),
+                                   control: CGPoint(x: leftX + bodyW * 0.03, y: topY + bodyH * 0.20))
+                    p.addLine(to: CGPoint(x: roofLeft, y: topY + bodyH * 0.075))
+                    p.addQuadCurve(to: CGPoint(x: roofRight, y: topY + bodyH * 0.075),
+                                   control: CGPoint(x: cx, y: topY + bodyH * 0.025))
+                    p.addLine(to: CGPoint(x: rightX - bodyW * 0.15, y: topY + bodyH * 0.16))
+                    p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.02, y: topY + bodyH * 0.43),
+                                   control: CGPoint(x: rightX - bodyW * 0.03, y: topY + bodyH * 0.20))
+                    p.addLine(to: CGPoint(x: rightX - bodyW * 0.07, y: bottomY))
+                    p.closeSubpath()
+                }
+                .stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.2)
+            )
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: bodyW * glassWRatio, height: bodyH * 0.27)
+                .position(x: cx, y: topY + bodyH * 0.255)
+
+            Path { p in
+                p.move(to: CGPoint(x: cx, y: topY + bodyH * 0.12))
+                p.addLine(to: CGPoint(x: cx, y: topY + bodyH * 0.39))
+            }
+            .stroke(Color.white.opacity(0.35), lineWidth: 1)
+
+            mirrorPair(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            carLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            grilleOrBoot(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            numberPlate(bodyW: bodyW, bodyH: bodyH, topY: topY, yRatio: isFront ? 0.78 : 0.68)
+
+            if let label {
+                Text(label)
+                    .font(.system(size: max(8, h * 0.032), weight: .black))
+                    .foregroundColor(Color(.systemGray2).opacity(0.85))
+                    .position(x: cx, y: topY + bodyH * 0.88)
+            }
+        }
+    }
+
+    private func realisticCarFace(bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat, roofRatio: CGFloat, tallness: CGFloat) -> some View {
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
+        let winW = bodyW * (0.53 + tallness * 0.10)
+        let winH = bodyH * (0.245 + tallness * 0.035)
+
+        return ZStack {
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            faceShell(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY, bottomY: bottomY)
+                .fill(
+                    LinearGradient(
+                        colors: [palette.bodyDark, palette.body, Color(.systemGray4).opacity(0.90)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(faceShell(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY, bottomY: bottomY)
+                    .stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.2))
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: winW, height: winH)
+                .position(x: cx, y: topY + bodyH * 0.255)
+
+            Path { p in
+                p.move(to: CGPoint(x: cx, y: topY + bodyH * 0.125))
+                p.addLine(to: CGPoint(x: cx, y: topY + bodyH * 0.375))
+            }
+            .stroke(Color.white.opacity(0.35), lineWidth: 1)
+
+            mirrorPair(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            carLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            grilleOrBoot(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            numberPlate(bodyW: bodyW, bodyH: bodyH, topY: topY, yRatio: isFront ? 0.78 : 0.68)
+
+            Path { p in
+                p.move(to: CGPoint(x: leftX + bodyW * (1 - roofRatio) / 2, y: topY + bodyH * 0.06))
+                p.addQuadCurve(to: CGPoint(x: rightX - bodyW * (1 - roofRatio) / 2, y: topY + bodyH * 0.06),
+                               control: CGPoint(x: cx, y: topY + bodyH * 0.01))
+            }
+            .stroke(Color.white.opacity(0.35), lineWidth: 1)
+        }
+    }
+
+    private func faceShell(leftX: CGFloat, rightX: CGFloat, bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat, bottomY: CGFloat) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: leftX + bodyW * 0.08, y: bottomY))
+        p.addLine(to: CGPoint(x: leftX, y: topY + bodyH * 0.60))
+        p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.11, y: topY + bodyH * 0.24),
+                       control: CGPoint(x: leftX + bodyW * 0.01, y: topY + bodyH * 0.35))
+        p.addQuadCurve(to: CGPoint(x: leftX + bodyW * 0.31, y: topY + bodyH * 0.06),
+                       control: CGPoint(x: leftX + bodyW * 0.18, y: topY + bodyH * 0.08))
+        p.addLine(to: CGPoint(x: rightX - bodyW * 0.31, y: topY + bodyH * 0.06))
+        p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.11, y: topY + bodyH * 0.24),
+                       control: CGPoint(x: rightX - bodyW * 0.18, y: topY + bodyH * 0.08))
+        p.addQuadCurve(to: CGPoint(x: rightX, y: topY + bodyH * 0.60),
+                       control: CGPoint(x: rightX - bodyW * 0.01, y: topY + bodyH * 0.35))
+        p.addLine(to: CGPoint(x: rightX - bodyW * 0.08, y: bottomY))
+        p.closeSubpath()
+        return p
+    }
+
+    private func faceTyres(leftX: CGFloat, rightX: CGFloat, bodyW: CGFloat, bodyH: CGFloat, bottomY: CGFloat) -> some View {
+        let wheelW = bodyW * 0.105
+        let wheelH = bodyH * 0.205
+        let y = bottomY - wheelH * 0.35
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(.systemGray2).opacity(0.95))
+                .frame(width: wheelW, height: wheelH)
+                .position(x: leftX + bodyW * 0.10, y: y)
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(.systemGray2).opacity(0.95))
+                .frame(width: wheelW, height: wheelH)
+                .position(x: rightX - bodyW * 0.10, y: y)
+        }
+    }
+
+    private func mirrorPair(leftX: CGFloat, rightX: CGFloat, bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat) -> some View {
+        let y = topY + bodyH * 0.43
+        let mirrorW = bodyW * 0.12
+        let mirrorH = bodyH * 0.075
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(palette.bodyDark.opacity(0.72))
+                .frame(width: mirrorW, height: mirrorH)
+                .rotationEffect(.degrees(-5))
+                .position(x: leftX - mirrorW * 0.26, y: y)
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(palette.bodyDark.opacity(0.72))
+                .frame(width: mirrorW, height: mirrorH)
+                .rotationEffect(.degrees(5))
+                .position(x: rightX + mirrorW * 0.26, y: y)
+        }
+    }
+
+    private func carLights(leftX: CGFloat, rightX: CGFloat, bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat) -> some View {
+        let y = topY + bodyH * (isFront ? 0.56 : 0.50)
+        let lightW = bodyW * 0.20
+        let lightH = bodyH * 0.052
+        let color = isFront ? Color.white.opacity(0.92) : Color.red.opacity(0.70)
+
+        return ZStack {
+            Capsule()
+                .fill(color)
                 .frame(width: lightW, height: lightH)
+                .rotationEffect(.degrees(5))
                 .position(x: leftX + bodyW * 0.22, y: y)
 
-            lightShape(left: false)
-                .fill(isFront ? Color.white.opacity(0.9) : Color.red.opacity(0.68))
+            Capsule()
+                .fill(color)
                 .frame(width: lightW, height: lightH)
+                .rotationEffect(.degrees(-5))
                 .position(x: rightX - bodyW * 0.22, y: y)
         }
     }
 
-    private func lightShape(left: Bool) -> Path {
-        var p = Path()
-        let skew: CGFloat = left ? 1 : -1
-
-        p.move(to: CGPoint(x: 0, y: 0.15))
-        p.addLine(to: CGPoint(x: 0.80, y: 0.00))
-        p.addQuadCurve(to: CGPoint(x: 1.00, y: 0.35),
-                       control: CGPoint(x: 0.98, y: 0.02))
-        p.addLine(to: CGPoint(x: 0.94, y: 0.90))
-        p.addQuadCurve(to: CGPoint(x: 0.08, y: 0.78),
-                       control: CGPoint(x: 0.45, y: 1.00))
-        p.closeSubpath()
-
-        let scale = CGAffineTransform(scaleX: 1, y: 1)
-        let flip = left ? CGAffineTransform.identity :
-            CGAffineTransform(translationX: 1, y: 0).scaledBy(x: -1, y: 1)
-        let skewTransform = CGAffineTransform(a: 1, b: 0, c: 0.06 * skew, d: 1, tx: 0, ty: 0)
-        return p.applying(scale).applying(flip).applying(skewTransform)
-    }
-
-    private var grilleOrRearPanel: some View {
+    private func grilleOrBoot(leftX: CGFloat, rightX: CGFloat, bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat) -> some View {
         let y = topY + bodyH * (isFront ? 0.65 : 0.61)
 
         return ZStack {
@@ -690,7 +985,7 @@ struct VehicleFaceDrawing: View {
 
                 Circle()
                     .fill(Color(.systemGray2).opacity(0.75))
-                    .frame(width: bodyH * 0.095, height: bodyH * 0.095)
+                    .frame(width: bodyH * 0.09, height: bodyH * 0.09)
                     .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 1))
                     .position(x: cx, y: y)
             } else {
@@ -698,68 +993,243 @@ struct VehicleFaceDrawing: View {
                     .fill(Color(.systemGray4).opacity(0.45))
                     .frame(width: bodyW * 0.50, height: bodyH * 0.14)
                     .position(x: cx, y: y)
-
-                Path { p in
-                    p.move(to: CGPoint(x: leftX + bodyW * 0.20, y: y - bodyH * 0.10))
-                    p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.20, y: y - bodyH * 0.10),
-                                   control: CGPoint(x: cx, y: y - bodyH * 0.03))
-                }
-                .stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.3)
             }
         }
     }
 
-    private var licensePlate: some View {
+    private func numberPlate(bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat, yRatio: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 3)
             .fill(Color(.systemGray5).opacity(0.96))
             .frame(width: bodyW * 0.23, height: bodyH * 0.075)
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.55), lineWidth: 0.8))
-            .position(x: cx, y: topY + bodyH * (isFront ? 0.78 : 0.67))
+            .position(x: cx, y: topY + bodyH * yRatio)
     }
 
-    private var mirrors: some View {
-        let y = topY + bodyH * 0.43
-        let mirrorW = bodyW * 0.12
-        let mirrorH = bodyH * 0.08
+    // MARK: Emergency faces
+
+    private var compactEmergencyFace: some View {
+        let bodyW = w * 0.62
+        let bodyH = h * 0.54
+        let topY = h * 0.21
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
 
         return ZStack {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.systemGray3).opacity(0.95))
-                .frame(width: mirrorW, height: mirrorH)
-                .rotationEffect(.degrees(-5))
-                .position(x: leftX - mirrorW * 0.26, y: y)
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
 
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.systemGray3).opacity(0.95))
-                .frame(width: mirrorW, height: mirrorH)
-                .rotationEffect(.degrees(5))
-                .position(x: rightX + mirrorW * 0.26, y: y)
+            Path { p in
+                p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.10, width: bodyW, height: bodyH * 0.86), radius: 16)
+            }
+            .fill(LinearGradient(colors: [palette.bodyDark, palette.body], startPoint: .top, endPoint: .bottom))
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: bodyW * 0.60, height: bodyH * 0.28)
+                .position(x: cx, y: topY + bodyH * 0.30)
+
+            EmergencyLightBar(width: bodyW * 0.34, height: bodyH * 0.060)
+                .position(x: cx, y: topY + bodyH * 0.10)
+
+            Capsule()
+                .fill(Color.white.opacity(0.95))
+                .frame(width: bodyW * 0.80, height: bodyH * 0.075)
+                .position(x: cx, y: topY + bodyH * 0.53)
+
+            Text("RED RHINO")
+                .font(.system(size: max(8, h * 0.032), weight: .black))
+                .foregroundColor(.white)
+                .position(x: cx, y: topY + bodyH * 0.66)
+
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(.systemGray6).opacity(0.90))
+                .frame(width: bodyW * 0.46, height: bodyH * 0.11)
+                .position(x: cx, y: topY + bodyH * 0.77)
+
+            emergencyFaceLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
         }
     }
 
-    private var roofAccent: some View {
-        Path { p in
-            p.move(to: CGPoint(x: leftX + bodyW * 0.30, y: topY + bodyH * 0.05))
-            p.addQuadCurve(to: CGPoint(x: rightX - bodyW * 0.30, y: topY + bodyH * 0.05),
-                           control: CGPoint(x: cx, y: topY))
-        }
-        .stroke(Color.white.opacity(0.38), lineWidth: 1)
-    }
-
-    private var rearWheelStubs: some View {
-        let wheelW = bodyW * 0.11
-        let wheelH = bodyH * 0.21
-        let y = bottomY - wheelH * 0.38
+    private func ambulanceFace(isMSV: Bool) -> some View {
+        let bodyW = w * (isMSV ? 0.66 : 0.62)
+        let bodyH = h * 0.58
+        let topY = h * 0.19
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
 
         return ZStack {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color(.systemGray2).opacity(0.95))
-                .frame(width: wheelW, height: wheelH)
-                .position(x: leftX + bodyW * 0.10, y: y)
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color(.systemGray2).opacity(0.95))
-                .frame(width: wheelW, height: wheelH)
-                .position(x: rightX - bodyW * 0.10, y: y)
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            Path { p in
+                p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.05, width: bodyW, height: bodyH * 0.90), radius: 16)
+            }
+            .fill(LinearGradient(colors: [palette.body, Color(.systemGray5).opacity(0.93)], startPoint: .top, endPoint: .bottom))
+            .overlay(
+                Path { p in
+                    p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.05, width: bodyW, height: bodyH * 0.90), radius: 16)
+                }
+                .stroke(Color(.systemGray3).opacity(0.65), lineWidth: 1.2)
+            )
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: bodyW * 0.58, height: bodyH * 0.25)
+                .position(x: cx, y: topY + bodyH * 0.27)
+
+            EmergencyLightBar(width: bodyW * 0.30, height: bodyH * 0.055)
+                .position(x: cx, y: topY + bodyH * 0.075)
+
+            Capsule()
+                .fill((isMSV ? Color.blue : Color.red).opacity(0.72))
+                .frame(width: bodyW * 0.82, height: bodyH * 0.070)
+                .position(x: cx, y: topY + bodyH * 0.54)
+
+            MedicalCross(size: bodyH * 0.22, color: isMSV ? .blue : .red)
+                .position(x: cx, y: topY + bodyH * 0.68)
+
+            Text(isMSV ? "MSV" : "AMB")
+                .font(.system(size: max(9, h * 0.040), weight: .black))
+                .foregroundColor((isMSV ? Color.blue : Color.red).opacity(0.72))
+                .position(x: cx, y: topY + bodyH * 0.84)
+
+            emergencyFaceLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+        }
+    }
+
+    private var ladderTruckFace: some View {
+        let bodyW = w * 0.68
+        let bodyH = h * 0.58
+        let topY = h * 0.19
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
+
+        return ZStack {
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            Path { p in
+                p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.14, width: bodyW, height: bodyH * 0.80), radius: 15)
+            }
+            .fill(LinearGradient(colors: [palette.bodyDark, palette.body], startPoint: .top, endPoint: .bottom))
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: bodyW * 0.58, height: bodyH * 0.24)
+                .position(x: cx, y: topY + bodyH * 0.31)
+
+            // Folded ladder visible even from front.
+            ZStack {
+                Capsule()
+                    .fill(Color(.systemGray5).opacity(0.95))
+                    .frame(width: bodyW * 0.72, height: bodyH * 0.060)
+                Capsule()
+                    .stroke(Color(.systemGray2).opacity(0.75), lineWidth: 2)
+                    .frame(width: bodyW * 0.72, height: bodyH * 0.060)
+            }
+            .position(x: cx, y: topY + bodyH * 0.09)
+
+            EmergencyLightBar(width: bodyW * 0.26, height: bodyH * 0.050)
+                .position(x: cx, y: topY + bodyH * 0.17)
+
+            Text("PL")
+                .font(.system(size: max(10, h * 0.040), weight: .black))
+                .foregroundColor(.white)
+                .position(x: cx, y: topY + bodyH * 0.66)
+
+            Capsule()
+                .fill(Color.white.opacity(0.95))
+                .frame(width: bodyW * 0.78, height: bodyH * 0.070)
+                .position(x: cx, y: topY + bodyH * 0.54)
+
+            emergencyFaceLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+            numberPlate(bodyW: bodyW, bodyH: bodyH, topY: topY, yRatio: 0.80)
+        }
+    }
+
+    private func boxyEmergencyFace(title: String) -> some View {
+        let bodyW = w * 0.66
+        let bodyH = h * 0.57
+        let topY = h * 0.20
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
+
+        return ZStack {
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            Path { p in
+                p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.10, width: bodyW, height: bodyH * 0.84), radius: 14)
+            }
+            .fill(LinearGradient(colors: [palette.bodyDark, palette.body], startPoint: .top, endPoint: .bottom))
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: bodyW * 0.60, height: bodyH * 0.26)
+                .position(x: cx, y: topY + bodyH * 0.29)
+
+            EmergencyLightBar(width: bodyW * 0.32, height: bodyH * 0.055)
+                .position(x: cx, y: topY + bodyH * 0.09)
+
+            Capsule()
+                .fill(Color.white.opacity(0.95))
+                .frame(width: bodyW * 0.78, height: bodyH * 0.070)
+                .position(x: cx, y: topY + bodyH * 0.54)
+
+            Text(title)
+                .font(.system(size: max(9, h * 0.040), weight: .black))
+                .foregroundColor(.white)
+                .position(x: cx, y: topY + bodyH * 0.67)
+
+            emergencyFaceLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+        }
+    }
+
+    private func boxyEmergencyFaceNoLight(title: String) -> some View {
+        let bodyW = w * (title == "RPV" ? 0.70 : 0.66)
+        let bodyH = h * (title == "HAZMAT" ? 0.61 : 0.57)
+        let topY = h * (title == "HAZMAT" ? 0.17 : 0.20)
+        let leftX = cx - bodyW / 2
+        let rightX = cx + bodyW / 2
+        let bottomY = topY + bodyH
+
+        return ZStack {
+            faceTyres(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, bottomY: bottomY)
+
+            Path { p in
+                p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.10, width: bodyW, height: bodyH * 0.84), radius: 14)
+            }
+            .fill(LinearGradient(colors: [palette.bodyDark, palette.body], startPoint: .top, endPoint: .bottom))
+
+            RoundedRectangle(cornerRadius: 8)
+                .fill(palette.glass)
+                .frame(width: bodyW * 0.60, height: bodyH * 0.26)
+                .position(x: cx, y: topY + bodyH * 0.29)
+
+            Capsule()
+                .fill(Color.white.opacity(0.95))
+                .frame(width: bodyW * 0.78, height: bodyH * 0.070)
+                .position(x: cx, y: topY + bodyH * 0.54)
+
+            Text(title)
+                .font(.system(size: max(9, h * 0.040), weight: .black))
+                .foregroundColor(.white)
+                .position(x: cx, y: topY + bodyH * 0.67)
+
+            emergencyFaceLights(leftX: leftX, rightX: rightX, bodyW: bodyW, bodyH: bodyH, topY: topY)
+        }
+    }
+
+    private func emergencyFaceLights(leftX: CGFloat, rightX: CGFloat, bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.white.opacity(0.88))
+                .frame(width: bodyW * 0.16, height: bodyH * 0.055)
+                .position(x: leftX + bodyW * 0.22, y: topY + bodyH * 0.77)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.white.opacity(0.88))
+                .frame(width: bodyW * 0.16, height: bodyH * 0.055)
+                .position(x: rightX - bodyW * 0.22, y: topY + bodyH * 0.77)
         }
     }
 }
@@ -767,214 +1237,204 @@ struct VehicleFaceDrawing: View {
 // MARK: - Side View
 
 struct VehicleSideDrawing: View {
-    let carType: CarType
+    let kind: VehicleVisualKind
     let flipped: Bool
     let w: CGFloat
     let h: CGFloat
 
-    private var isLarge: Bool { carType.category == .scdf }
-    private var isSUV: Bool { carType == .suv }
-    private var isMPV: Bool { carType == .mpv }
-
-    private var bodyColor: Color { Color(.systemGray3).opacity(0.92) }
-    private var detailColor: Color { Color(.systemGray2).opacity(0.55) }
-    private var glassColor: Color { Color(.systemGray6).opacity(0.82) }
+    private var palette: VehiclePalette { .forKind(kind) }
 
     var body: some View {
-        ZStack {
-            let transform = flipped
-                ? CGAffineTransform(translationX: w, y: 0).scaledBy(x: -1, y: 1)
-                : CGAffineTransform.identity
+        let transform = flipped
+            ? CGAffineTransform(translationX: w, y: 0).scaledBy(x: -1, y: 1)
+            : CGAffineTransform.identity
 
-            sideBodyPath
-                .applying(transform)
+        ZStack {
+            switch kind {
+            case .suv:
+                passengerVehicleSide(.suv, transform: transform)
+            case .mpv:
+                passengerVehicleSide(.mpv, transform: transform)
+            case .lightFireAttackVehicle:
+                lightFireAttackVehicleSide(transform: transform)
+            case .ambulance:
+                medicalVanSide(isMSV: false, transform: transform)
+            case .medicalSupportVehicle:
+                medicalVanSide(isMSV: true, transform: transform)
+            case .pumpLadder:
+                pumpLadderSide(transform: transform)
+            case .responderPerformanceVehicle:
+                responderPerformanceVehicleSide(transform: transform)
+            case .hazmat:
+                hazmatTruckSide(transform: transform)
+            case .fireTruck, .genericLarge:
+                fireTruckSide(transform: transform)
+            case .sedan:
+                passengerVehicleSide(.sedan, transform: transform)
+            }
+        }
+    }
+
+    private enum PassengerStyle {
+        case sedan
+        case suv
+        case mpv
+    }
+
+    // MARK: Passenger side drawings
+
+    private func passengerVehicleSide(_ style: PassengerStyle, transform: CGAffineTransform) -> some View {
+        let m = passengerMetrics(style)
+        let bodyPath = passengerBodyPath(style, m: m).applying(transform)
+        let windowPath = passengerWindowPath(style, m: m).applying(transform)
+
+        return ZStack {
+            bodyPath
                 .fill(
                     LinearGradient(
-                        colors: [
-                            Color(.systemGray2).opacity(0.72),
-                            bodyColor,
-                            Color(.systemGray4).opacity(0.90)
-                        ],
+                        colors: [palette.bodyDark, palette.body, Color(.systemGray4).opacity(0.90)],
                         startPoint: .top,
                         endPoint: .bottom
                     )
                 )
-                .overlay(sideBodyPath.applying(transform).stroke(Color(.systemGray2).opacity(0.35), lineWidth: 1.2))
+                .overlay(bodyPath.stroke(Color(.systemGray2).opacity(0.38), lineWidth: 1.2))
 
-            sideWindowPath
-                .applying(transform)
-                .fill(glassColor)
+            windowPath.fill(palette.glass)
+            windowPath.stroke(Color.white.opacity(0.35), lineWidth: 1)
 
-            sideWindowPath
-                .applying(transform)
-                .stroke(Color.white.opacity(0.35), lineWidth: 1)
-
-            sideDetailLines(transform: transform)
-            wheelLayer(transform: transform)
-            mirrorsAndLights(transform: transform)
-            doorHandles(transform: transform)
+            passengerDetails(style, m: m, transform: transform)
+            wheels(frontX: m.left + m.width * 0.23, rearX: m.left + m.width * 0.72, y: m.groundY, r: m.wheelR, transform: transform)
+            passengerLightsAndMirror(style, m: m, transform: transform)
         }
     }
 
-    private var metrics: SideMetrics {
-        let bodyW = w * (isLarge ? 0.82 : 0.84)
+    private func passengerMetrics(_ style: PassengerStyle) -> SideMetrics {
+        let bodyW: CGFloat
+        switch style {
+        case .sedan:
+            bodyW = w * 0.80
+        case .suv:
+            bodyW = w * 0.78
+        case .mpv:
+            bodyW = w * 0.72
+        }
+
         let left = (w - bodyW) / 2
         let right = left + bodyW
-
-        // This fixes the monster-truck issue: wheel size is capped by height, not driven mostly by width.
-        let wheelR = min(w * (isLarge ? 0.050 : isSUV ? 0.052 : 0.048),
-                         h * (isLarge ? 0.145 : isSUV ? 0.135 : 0.125))
-        let groundY = h * 0.77
-        let sillY = groundY - wheelR * 0.35
-
-        return SideMetrics(
-            left: left,
-            right: right,
-            width: bodyW,
-            wheelR: wheelR,
-            groundY: groundY,
-            sillY: sillY
+        let wheelR = min(
+            w * (style == .suv ? 0.053 : style == .mpv ? 0.047 : 0.048),
+            h * (style == .suv ? 0.130 : style == .mpv ? 0.112 : 0.118)
         )
+        let groundY = h * 0.775
+        let sillY = groundY - wheelR * (style == .suv ? 0.15 : 0.28)
+
+        return SideMetrics(left: left, right: right, width: bodyW, wheelR: wheelR, groundY: groundY, sillY: sillY)
     }
 
-    private var sideBodyPath: Path {
-        let m = metrics
+    private func passengerBodyPath(_ style: PassengerStyle, m: SideMetrics) -> Path {
         var p = Path()
 
-        if isLarge {
-            largeVehicleBody(path: &p, m: m)
-        } else if isMPV {
-            mpvBody(path: &p, m: m)
-        } else if isSUV {
-            suvBody(path: &p, m: m)
-        } else {
-            sedanBody(path: &p, m: m)
+        switch style {
+        case .sedan:
+            // User asked to reuse the previous SUV-looking silhouette for sedan.
+            let hoodTop = m.sillY - h * 0.178
+            let roofTop = m.sillY - h * 0.330
+            let rearTop = m.sillY - h * 0.185
+
+            p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.09, y: hoodTop + h * 0.030),
+                           control: CGPoint(x: m.left + m.width * 0.02, y: hoodTop + h * 0.070))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.27, y: hoodTop))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.36, y: roofTop + h * 0.035),
+                           control: CGPoint(x: m.left + m.width * 0.31, y: hoodTop - h * 0.012))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.73, y: roofTop + h * 0.035))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.84, y: rearTop),
+                           control: CGPoint(x: m.left + m.width * 0.80, y: roofTop + h * 0.075))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.06, y: rearTop + h * 0.018))
+            p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY),
+                           control: CGPoint(x: m.right - m.width * 0.01, y: rearTop + h * 0.080))
+            p.closeSubpath()
+
+        case .suv:
+            // SUV with a shorter rear portion and more boxed cabin.
+            let hoodTop = m.sillY - h * 0.215
+            let roofTop = m.sillY - h * 0.385
+            let rearTop = m.sillY - h * 0.285
+
+            p.move(to: CGPoint(x: m.left + m.width * 0.025, y: m.sillY))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.030, y: hoodTop + h * 0.055))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.095, y: hoodTop),
+                           control: CGPoint(x: m.left + m.width * 0.028, y: hoodTop + h * 0.012))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.220, y: hoodTop - h * 0.006))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.335, y: roofTop + h * 0.040),
+                           control: CGPoint(x: m.left + m.width * 0.270, y: hoodTop - h * 0.035))
+            // Slightly shorter roof / rear section
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.720, y: roofTop + h * 0.040))
+            // Back portion ~3/4 the previous length
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.840, y: rearTop))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.045, y: rearTop + h * 0.022))
+            p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.020, y: m.sillY),
+                           control: CGPoint(x: m.right - m.width * 0.005, y: rearTop + h * 0.105))
+            p.closeSubpath()
+
+        case .mpv:
+            // MPV box car: compact, squeezed-in, tall and very boxy.
+            let roofTop = m.sillY - h * 0.395
+            let frontTop = m.sillY - h * 0.210
+            let rearTop = m.sillY - h * 0.245
+
+            p.move(to: CGPoint(x: m.left + m.width * 0.020, y: m.sillY))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.025, y: frontTop + h * 0.045))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.110, y: frontTop),
+                           control: CGPoint(x: m.left + m.width * 0.025, y: frontTop + h * 0.005))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.185, y: frontTop))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.285, y: roofTop + h * 0.020))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.810, y: roofTop + h * 0.020))
+            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.885, y: rearTop),
+                           control: CGPoint(x: m.left + m.width * 0.875, y: roofTop + h * 0.070))
+            p.addLine(to: CGPoint(x: m.right - m.width * 0.020, y: m.sillY))
+            p.closeSubpath()
         }
 
         return p
     }
 
-    private var sideWindowPath: Path {
-        let m = metrics
+    private func passengerWindowPath(_ style: PassengerStyle, m: SideMetrics) -> Path {
         var p = Path()
 
-        if isLarge {
-            let x = m.left + m.width * 0.055
-            let y = m.sillY - h * 0.335
-            p.roundedRect(CGRect(x: x, y: y, width: m.width * 0.22, height: h * 0.145), radius: 8)
-        } else if isMPV {
-            let top = m.sillY - h * 0.330
-            let base = m.sillY - h * 0.155
-            p.move(to: CGPoint(x: m.left + m.width * 0.20, y: base))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.29, y: top + h * 0.035))
-            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.80, y: top + h * 0.020),
-                           control: CGPoint(x: m.left + m.width * 0.48, y: top - h * 0.012))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.88, y: base))
-            p.closeSubpath()
-        } else if isSUV {
+        switch style {
+        case .sedan:
+            // Match the previous SUV-like window style.
             let top = m.sillY - h * 0.300
             let base = m.sillY - h * 0.145
             p.move(to: CGPoint(x: m.left + m.width * 0.25, y: base))
             p.addLine(to: CGPoint(x: m.left + m.width * 0.34, y: top + h * 0.035))
-            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.76, y: top + h * 0.030),
-                           control: CGPoint(x: m.left + m.width * 0.55, y: top + h * 0.005))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.72, y: top + h * 0.035))
             p.addLine(to: CGPoint(x: m.left + m.width * 0.84, y: base))
             p.closeSubpath()
-        } else {
-            let top = m.sillY - h * 0.285
-            let base = m.sillY - h * 0.135
-            p.move(to: CGPoint(x: m.left + m.width * 0.28, y: base))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.38, y: top + h * 0.035))
-            p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.70, y: top + h * 0.020),
-                           control: CGPoint(x: m.left + m.width * 0.54, y: top - h * 0.010))
-            p.addLine(to: CGPoint(x: m.left + m.width * 0.78, y: base))
+        case .suv:
+            let top = m.sillY - h * 0.345
+            let base = m.sillY - h * 0.160
+            p.move(to: CGPoint(x: m.left + m.width * 0.230, y: base))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.335, y: top + h * 0.042))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.730, y: top + h * 0.042))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.840, y: base))
+            p.closeSubpath()
+        case .mpv:
+            let top = m.sillY - h * 0.365
+            let base = m.sillY - h * 0.160
+            p.move(to: CGPoint(x: m.left + m.width * 0.170, y: base))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.280, y: top + h * 0.040))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.800, y: top + h * 0.040))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.875, y: base))
             p.closeSubpath()
         }
 
         return p
     }
 
-    private func sedanBody(path p: inout Path, m: SideMetrics) {
-        let hoodTop = m.sillY - h * 0.155
-        let roofTop = m.sillY - h * 0.305
-        let bootTop = m.sillY - h * 0.130
-
-        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.08, y: hoodTop + h * 0.030),
-                       control: CGPoint(x: m.left + m.width * 0.02, y: hoodTop + h * 0.070))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.25, y: hoodTop))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.37, y: roofTop + h * 0.035),
-                       control: CGPoint(x: m.left + m.width * 0.30, y: hoodTop - h * 0.015))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.69, y: roofTop + h * 0.030),
-                       control: CGPoint(x: m.left + m.width * 0.52, y: roofTop - h * 0.020))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.78, y: bootTop),
-                       control: CGPoint(x: m.left + m.width * 0.74, y: roofTop + h * 0.045))
-        p.addLine(to: CGPoint(x: m.right - m.width * 0.08, y: bootTop + h * 0.015))
-        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY),
-                       control: CGPoint(x: m.right - m.width * 0.01, y: bootTop + h * 0.075))
-        p.closeSubpath()
-    }
-
-    private func suvBody(path p: inout Path, m: SideMetrics) {
-        let hoodTop = m.sillY - h * 0.185
-        let roofTop = m.sillY - h * 0.335
-        let rearTop = m.sillY - h * 0.170
-
-        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.09, y: hoodTop + h * 0.030),
-                       control: CGPoint(x: m.left + m.width * 0.02, y: hoodTop + h * 0.075))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.26, y: hoodTop))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.35, y: roofTop + h * 0.025))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.76, y: roofTop + h * 0.030),
-                       control: CGPoint(x: m.left + m.width * 0.55, y: roofTop - h * 0.005))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.84, y: rearTop))
-        p.addLine(to: CGPoint(x: m.right - m.width * 0.06, y: rearTop + h * 0.015))
-        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY),
-                       control: CGPoint(x: m.right - m.width * 0.01, y: rearTop + h * 0.075))
-        p.closeSubpath()
-    }
-
-    private func mpvBody(path p: inout Path, m: SideMetrics) {
-        let hoodTop = m.sillY - h * 0.170
-        let roofTop = m.sillY - h * 0.350
-        let rearTop = m.sillY - h * 0.175
-
-        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.07, y: hoodTop + h * 0.040),
-                       control: CGPoint(x: m.left + m.width * 0.02, y: hoodTop + h * 0.075))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.18, y: hoodTop))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.28, y: roofTop + h * 0.020))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.82, y: roofTop + h * 0.025),
-                       control: CGPoint(x: m.left + m.width * 0.55, y: roofTop - h * 0.010))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.90, y: rearTop))
-        p.addLine(to: CGPoint(x: m.right - m.width * 0.05, y: rearTop + h * 0.020))
-        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY),
-                       control: CGPoint(x: m.right - m.width * 0.01, y: rearTop + h * 0.080))
-        p.closeSubpath()
-    }
-
-    private func largeVehicleBody(path p: inout Path, m: SideMetrics) {
-        let cabTop = m.sillY - h * 0.395
-        let boxTop = m.sillY - h * 0.350
-        let cabEnd = m.left + m.width * 0.33
-
-        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
-        p.addLine(to: CGPoint(x: m.left + m.width * 0.02, y: cabTop + h * 0.090))
-        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.08, y: cabTop),
-                       control: CGPoint(x: m.left + m.width * 0.025, y: cabTop + h * 0.020))
-        p.addLine(to: CGPoint(x: cabEnd - m.width * 0.04, y: cabTop))
-        p.addLine(to: CGPoint(x: cabEnd, y: boxTop))
-        p.addLine(to: CGPoint(x: m.right - m.width * 0.03, y: boxTop))
-        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: boxTop + h * 0.030),
-                       control: CGPoint(x: m.right - m.width * 0.01, y: boxTop))
-        p.addLine(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY))
-        p.closeSubpath()
-    }
-
-    private func sideDetailLines(transform: CGAffineTransform) -> some View {
-        let m = metrics
-        let window = sideWindowPath.applying(transform)
-        let beltY = isLarge ? m.sillY - h * 0.145 : m.sillY - h * 0.118
+    private func passengerDetails(_ style: PassengerStyle, m: SideMetrics, transform: CGAffineTransform) -> some View {
+        let beltY = m.sillY - h * (style == .mpv ? 0.124 : 0.116)
         let lowerY = m.sillY - h * 0.050
 
         return ZStack {
@@ -983,84 +1443,52 @@ struct VehicleSideDrawing: View {
                 p.addLine(to: CGPoint(x: m.right - m.width * 0.10, y: beltY))
                 p.move(to: CGPoint(x: m.left + m.width * 0.18, y: lowerY))
                 p.addLine(to: CGPoint(x: m.right - m.width * 0.18, y: lowerY))
+
+                let door1 = m.left + m.width * (style == .mpv ? 0.42 : 0.48)
+                let door2 = m.left + m.width * (style == .mpv ? 0.65 : 0.64)
+                p.move(to: CGPoint(x: door1, y: m.sillY - h * 0.135))
+                p.addLine(to: CGPoint(x: door1, y: m.sillY - h * 0.010))
+                p.move(to: CGPoint(x: door2, y: m.sillY - h * 0.130))
+                p.addLine(to: CGPoint(x: door2, y: m.sillY - h * 0.015))
             }
             .applying(transform)
-            .stroke(detailColor, lineWidth: 1.2)
+            .stroke(Color(.systemGray2).opacity(0.50), lineWidth: 1.15)
 
-            if !isLarge {
-                let firstDoor = m.left + m.width * (isMPV ? 0.43 : 0.48)
-                let secondDoor = m.left + m.width * (isMPV ? 0.66 : 0.64)
+            if style == .suv || style == .mpv {
                 Path { p in
-                    p.move(to: CGPoint(x: firstDoor, y: m.sillY - h * 0.135))
-                    p.addLine(to: CGPoint(x: firstDoor, y: m.sillY - h * 0.010))
-                    p.move(to: CGPoint(x: secondDoor, y: m.sillY - h * 0.130))
-                    p.addLine(to: CGPoint(x: secondDoor, y: m.sillY - h * 0.015))
+                    p.move(to: CGPoint(x: m.left + m.width * (style == .mpv ? 0.30 : 0.36),
+                                       y: m.sillY - h * (style == .mpv ? 0.365 : 0.348)))
+                    p.addLine(to: CGPoint(x: m.left + m.width * (style == .mpv ? 0.82 : 0.74),
+                                          y: m.sillY - h * (style == .mpv ? 0.365 : 0.348)))
                 }
                 .applying(transform)
-                .stroke(Color(.systemGray2).opacity(0.42), lineWidth: 1.1)
+                .stroke(Color(.systemGray2).opacity(0.50), lineWidth: 1.4)
             }
 
             Path { p in
-                let pillar1 = m.left + m.width * (isMPV ? 0.43 : isSUV ? 0.50 : 0.51)
-                let pillar2 = m.left + m.width * (isMPV ? 0.62 : isSUV ? 0.66 : 0.65)
-
-                if !isLarge {
-                    p.move(to: CGPoint(x: pillar1, y: m.sillY - h * 0.285))
-                    p.addLine(to: CGPoint(x: pillar1, y: m.sillY - h * 0.135))
-                    p.move(to: CGPoint(x: pillar2, y: m.sillY - h * 0.285))
-                    p.addLine(to: CGPoint(x: pillar2, y: m.sillY - h * 0.135))
-                }
+                let pillar1 = m.left + m.width * (style == .mpv ? 0.42 : style == .suv ? 0.49 : 0.51)
+                let pillar2 = m.left + m.width * (style == .mpv ? 0.61 : style == .suv ? 0.66 : 0.65)
+                p.move(to: CGPoint(x: pillar1, y: m.sillY - h * 0.288))
+                p.addLine(to: CGPoint(x: pillar1, y: m.sillY - h * 0.135))
+                p.move(to: CGPoint(x: pillar2, y: m.sillY - h * 0.288))
+                p.addLine(to: CGPoint(x: pillar2, y: m.sillY - h * 0.135))
             }
             .applying(transform)
             .stroke(Color(.systemGray3).opacity(0.75), lineWidth: 3)
 
-            window
-                .stroke(Color(.systemGray2).opacity(0.18), lineWidth: 0.8)
-        }
-    }
-
-    private func wheelLayer(transform: CGAffineTransform) -> some View {
-        let m = metrics
-        let frontX = isLarge ? m.left + m.width * 0.19 : m.left + m.width * 0.21
-        let rearX = isLarge ? m.left + m.width * 0.76 : m.left + m.width * 0.76
-        let archR = m.wheelR * 1.33
-
-        return ZStack {
-            ForEach([frontX, rearX], id: \.self) { x in
-                let pt = CGPoint(x: x, y: m.groundY).applying(transform)
-
-                Circle()
-                    .fill(Color(.secondarySystemBackground))
-                    .frame(width: archR * 2, height: archR * 2)
-                    .position(pt)
-
-                Circle()
-                    .fill(Color(.systemGray2).opacity(0.96))
-                    .frame(width: m.wheelR * 2, height: m.wheelR * 2)
-                    .position(pt)
-
-                Circle()
-                    .fill(Color(.systemGray5))
-                    .frame(width: m.wheelR * 1.05, height: m.wheelR * 1.05)
-                    .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 1))
-                    .position(pt)
-
-                ForEach(0..<6, id: \.self) { spoke in
-                    Capsule()
-                        .fill(Color(.systemGray3))
-                        .frame(width: m.wheelR * 0.08, height: m.wheelR * 0.80)
-                        .rotationEffect(.degrees(Double(spoke) * 30))
-                        .position(pt)
-                }
+            ForEach([m.left + m.width * 0.43, m.left + m.width * 0.61], id: \.self) { x in
+                Capsule()
+                    .fill(Color(.systemGray2).opacity(0.60))
+                    .frame(width: w * 0.032, height: h * 0.010)
+                    .position(CGPoint(x: x, y: m.sillY - h * 0.105).applying(transform))
             }
         }
     }
 
-    private func mirrorsAndLights(transform: CGAffineTransform) -> some View {
-        let m = metrics
+    private func passengerLightsAndMirror(_ style: PassengerStyle, m: SideMetrics, transform: CGAffineTransform) -> some View {
         let frontLight = CGPoint(x: m.left + m.width * 0.055, y: m.sillY - h * 0.135).applying(transform)
         let rearLight = CGPoint(x: m.right - m.width * 0.055, y: m.sillY - h * 0.115).applying(transform)
-        let mirror = CGPoint(x: m.left + m.width * (isMPV ? 0.225 : 0.265), y: m.sillY - h * 0.175).applying(transform)
+        let mirror = CGPoint(x: m.left + m.width * (style == .mpv ? 0.225 : 0.265), y: m.sillY - h * 0.175).applying(transform)
 
         return ZStack {
             Capsule()
@@ -1080,32 +1508,539 @@ struct VehicleSideDrawing: View {
         }
     }
 
-    private func doorHandles(transform: CGAffineTransform) -> some View {
-        let m = metrics
-        guard !isLarge else { return AnyView(EmptyView()) }
+    // MARK: SCDF / medical side drawings
 
-        let y = m.sillY - h * 0.105
-        let h1 = CGPoint(x: m.left + m.width * 0.43, y: y).applying(transform)
-        let h2 = CGPoint(x: m.left + m.width * 0.61, y: y).applying(transform)
+    private func lightFireAttackVehicleSide(transform: CGAffineTransform) -> some View {
+        // LFAV / Red Rhino should read as a compact red 4x4 pickup/SUV with an equipment pod,
+        // not a full-size box truck.
+        let m = passengerMetrics(.suv)
+        let bodyPath = redRhinoBody(m: m).applying(transform)
+        let windowPath = redRhinoWindow(m: m).applying(transform)
 
-        return AnyView(
-            ZStack {
-                Capsule()
-                    .fill(Color(.systemGray2).opacity(0.60))
-                    .frame(width: w * 0.032, height: h * 0.010)
-                    .position(h1)
-                Capsule()
-                    .fill(Color(.systemGray2).opacity(0.60))
-                    .frame(width: w * 0.032, height: h * 0.010)
-                    .position(h2)
+        return ZStack {
+            bodyPath
+                .fill(LinearGradient(colors: [Color.red.opacity(0.96), Color.red.opacity(0.72)],
+                                     startPoint: .top,
+                                     endPoint: .bottom))
+                .overlay(bodyPath.stroke(Color.red.opacity(0.60), lineWidth: 1.2))
+
+            windowPath.fill(palette.glass)
+            windowPath.stroke(Color.white.opacity(0.35), lineWidth: 1)
+
+            // Rear equipment module/pod like the reference image.
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.red.opacity(0.78))
+                .frame(width: m.width * 0.24, height: h * 0.235)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.white.opacity(0.28), lineWidth: 1)
+                )
+                .position(CGPoint(x: m.left + m.width * 0.73, y: m.sillY - h * 0.215).applying(transform))
+
+            // Equipment panel details.
+            ForEach(0..<3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(Color.white.opacity(0.38), lineWidth: 1)
+                    .frame(width: m.width * 0.055, height: h * 0.072)
+                    .position(CGPoint(x: m.left + m.width * (0.66 + CGFloat(i) * 0.055),
+                                      y: m.sillY - h * 0.220).applying(transform))
             }
+
+            Capsule()
+                .fill(Color.white.opacity(0.94))
+                .frame(width: m.width * 0.70, height: h * 0.040)
+                .position(CGPoint(x: m.left + m.width * 0.52, y: m.sillY - h * 0.112).applying(transform))
+
+            Text("RED\nRHINO")
+                .font(.system(size: max(7, h * 0.028), weight: .black))
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+                .position(CGPoint(x: m.left + m.width * 0.50, y: m.sillY - h * 0.205).applying(transform))
+
+            EmergencyLightBar(width: m.width * 0.15, height: h * 0.030)
+                .position(CGPoint(x: m.left + m.width * 0.32, y: m.sillY - h * 0.348).applying(transform))
+
+            wheels(frontX: m.left + m.width * 0.23,
+                   rearX: m.left + m.width * 0.72,
+                   y: m.groundY,
+                   r: m.wheelR * 1.03,
+                   transform: transform)
+
+            emergencySideLights(m: SideMetrics(left: m.left, right: m.right, width: m.width,
+                                               wheelR: m.wheelR, groundY: m.groundY, sillY: m.sillY),
+                                transform: transform)
+        }
+    }
+
+    private func medicalVanSide(isMSV: Bool, transform: CGAffineTransform) -> some View {
+        // Ambulance should read as a shorter van, not a tall lorry.
+        let m = truckMetrics(widthRatio: isMSV ? 0.73 : 0.525, wheelRatio: 0.045)
+        let body = ambulanceBody(m: m, boxier: isMSV).applying(transform)
+        let mainColor = isMSV ? Color.blue.opacity(0.66) : Color.red.opacity(0.72)
+
+        return ZStack {
+            body.fill(LinearGradient(colors: [Color.white.opacity(0.98), Color(.systemGray5).opacity(0.95)],
+                                     startPoint: .top,
+                                     endPoint: .bottom))
+                .overlay(body.stroke(Color(.systemGray3).opacity(0.65), lineWidth: 1.2))
+
+            RoundedRectangle(cornerRadius: 7)
+                .fill(palette.glass)
+                .frame(width: m.width * 0.22, height: h * 0.118)
+                .position(CGPoint(x: m.left + m.width * 0.20, y: m.sillY - h * 0.238).applying(transform))
+
+            RoundedRectangle(cornerRadius: 7)
+                .fill(palette.glass)
+                .frame(width: m.width * (isMSV ? 0.25 : 0.21), height: h * 0.108)
+                .position(CGPoint(x: m.left + m.width * (isMSV ? 0.52 : 0.56), y: m.sillY - h * 0.225).applying(transform))
+
+            Capsule()
+                .fill(mainColor)
+                .frame(width: m.width * 0.72, height: h * 0.044)
+                .position(CGPoint(x: m.left + m.width * 0.55, y: m.sillY - h * 0.125).applying(transform))
+
+            MedicalCross(size: h * 0.105, color: isMSV ? .blue : .red)
+                .position(CGPoint(x: m.left + m.width * (isMSV ? 0.74 : 0.78), y: m.sillY - h * 0.230).applying(transform))
+
+            Text(isMSV ? "MSV" : "AMBULANCE")
+                .font(.system(size: max(7, h * 0.028), weight: .black))
+                .foregroundColor(mainColor)
+                .position(CGPoint(x: m.left + m.width * 0.50, y: m.sillY - h * 0.183).applying(transform))
+
+            EmergencyLightBar(width: m.width * 0.14, height: h * 0.028)
+                .position(CGPoint(x: m.left + m.width * 0.31, y: m.sillY - h * 0.335).applying(transform))
+
+            wheels(frontX: m.left + m.width * 0.24, rearX: m.left + m.width * 0.76, y: m.groundY, r: m.wheelR, transform: transform)
+            emergencySideLights(m: m, transform: transform)
+        }
+    }
+
+    private func pumpLadderSide(transform: CGAffineTransform) -> some View {
+        let m = truckMetrics(widthRatio: 0.86, wheelRatio: 0.046)
+        let body = fireTruckBody(m: m).applying(transform)
+
+        return ZStack {
+            body.fill(LinearGradient(colors: [Color.red.opacity(0.96), Color.red.opacity(0.74)], startPoint: .top, endPoint: .bottom))
+                .overlay(body.stroke(Color.red.opacity(0.55), lineWidth: 1.2))
+
+            RoundedRectangle(cornerRadius: 6)
+                .fill(palette.glass)
+                .frame(width: m.width * 0.18, height: h * 0.145)
+                .position(CGPoint(x: m.left + m.width * 0.15, y: m.sillY - h * 0.245).applying(transform))
+
+            // The important part: visibly show the folded ladder and platform bucket.
+            LadderAssembly(m: m, transform: transform, w: w, h: h)
+
+            Capsule()
+                .fill(Color.white.opacity(0.92))
+                .frame(width: m.width * 0.52, height: h * 0.042)
+                .position(CGPoint(x: m.left + m.width * 0.58, y: m.sillY - h * 0.118).applying(transform))
+
+            Text("PL")
+                .font(.system(size: max(8, h * 0.034), weight: .black))
+                .foregroundColor(.white)
+                .position(CGPoint(x: m.left + m.width * 0.45, y: m.sillY - h * 0.205).applying(transform))
+
+            equipmentLines(m: m, transform: transform)
+            wheels(frontX: m.left + m.width * 0.18, rearX: m.left + m.width * 0.78, y: m.groundY, r: m.wheelR, transform: transform)
+            emergencySideLights(m: m, transform: transform)
+        }
+    }
+
+    private func responderPerformanceVehicleSide(transform: CGAffineTransform) -> some View {
+        // RPV reference reads like a long red bus/coach: low, long, many window panels.
+        let m = truckMetrics(widthRatio: 0.88, wheelRatio: 0.043)
+        let body = responderBusBody(m: m).applying(transform)
+
+        return ZStack {
+            body.fill(LinearGradient(colors: [Color.red.opacity(0.95), Color.red.opacity(0.70)],
+                                     startPoint: .top,
+                                     endPoint: .bottom))
+                .overlay(body.stroke(Color.red.opacity(0.55), lineWidth: 1.2))
+
+            // Long dark windscreen + side windows.
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color(.systemGray6).opacity(0.86))
+                .frame(width: m.width * 0.17, height: h * 0.145)
+                .position(CGPoint(x: m.left + m.width * 0.14, y: m.sillY - h * 0.250).applying(transform))
+
+            ForEach(0..<5, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(.systemGray6).opacity(0.84))
+                    .frame(width: m.width * 0.090, height: h * 0.115)
+                    .position(CGPoint(x: m.left + m.width * (0.33 + CGFloat(i) * 0.105),
+                                      y: m.sillY - h * 0.250).applying(transform))
+            }
+
+            Capsule()
+                .fill(Color.white.opacity(0.95))
+                .frame(width: m.width * 0.60, height: h * 0.045)
+                .position(CGPoint(x: m.left + m.width * 0.58, y: m.sillY - h * 0.120).applying(transform))
+
+            Text("RPV")
+                .font(.system(size: max(8, h * 0.034), weight: .black))
+                .foregroundColor(.white)
+                .position(CGPoint(x: m.left + m.width * 0.54, y: m.sillY - h * 0.190).applying(transform))
+
+            wheels(frontX: m.left + m.width * 0.18, rearX: m.left + m.width * 0.79, y: m.groundY, r: m.wheelR, transform: transform)
+            emergencySideLights(m: m, transform: transform)
+        }
+    }
+
+    private func hazmatTruckSide(transform: CGAffineTransform) -> some View {
+        // HazMat should read as a taller heavy appliance with a high rear module.
+        let m = truckMetrics(widthRatio: 0.84, wheelRatio: 0.047)
+        let body = hazmatBody(m: m).applying(transform)
+
+        return ZStack {
+            body.fill(LinearGradient(colors: [Color.red.opacity(0.96), Color.red.opacity(0.72)],
+                                     startPoint: .top,
+                                     endPoint: .bottom))
+                .overlay(body.stroke(Color.red.opacity(0.55), lineWidth: 1.2))
+
+            RoundedRectangle(cornerRadius: 7)
+                .fill(palette.glass)
+                .frame(width: m.width * 0.20, height: h * 0.145)
+                .position(CGPoint(x: m.left + m.width * 0.16, y: m.sillY - h * 0.258).applying(transform))
+
+            // Tall equipment/container section.
+            ForEach(0..<4, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.white.opacity(0.35), lineWidth: 1)
+                    .frame(width: m.width * 0.115, height: h * 0.145)
+                    .position(CGPoint(x: m.left + m.width * (0.41 + CGFloat(i) * 0.12),
+                                      y: m.sillY - h * 0.240).applying(transform))
+            }
+
+            Capsule()
+                .fill(Color.white.opacity(0.95))
+                .frame(width: m.width * 0.58, height: h * 0.044)
+                .position(CGPoint(x: m.left + m.width * 0.60, y: m.sillY - h * 0.120).applying(transform))
+
+            Text("HAZMAT")
+                .font(.system(size: max(8, h * 0.032), weight: .black))
+                .foregroundColor(.white)
+                .position(CGPoint(x: m.left + m.width * 0.58, y: m.sillY - h * 0.200).applying(transform))
+
+            wheels(frontX: m.left + m.width * 0.18, rearX: m.left + m.width * 0.77, y: m.groundY, r: m.wheelR, transform: transform)
+            emergencySideLights(m: m, transform: transform)
+        }
+    }
+
+    private func responderBusBody(m: SideMetrics) -> Path {
+        var p = Path()
+        let roofTop = m.sillY - h * 0.365
+        let bodyTop = m.sillY - h * 0.315
+        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.02, y: bodyTop + h * 0.055))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.10, y: roofTop),
+                       control: CGPoint(x: m.left + m.width * 0.035, y: roofTop + h * 0.020))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.07, y: roofTop + h * 0.010))
+        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.025, y: bodyTop + h * 0.040),
+                       control: CGPoint(x: m.right - m.width * 0.020, y: roofTop + h * 0.060))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY))
+        p.closeSubpath()
+        return p
+    }
+
+    private func hazmatBody(m: SideMetrics) -> Path {
+        var p = Path()
+        let cabTop = m.sillY - h * 0.382
+        let boxTop = m.sillY - h * 0.380
+        let boxEnd = m.right - m.width * 0.025
+        let cabEnd = m.left + m.width * 0.30
+
+        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.02, y: cabTop + h * 0.070))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.08, y: cabTop),
+                       control: CGPoint(x: m.left + m.width * 0.025, y: cabTop + h * 0.015))
+        p.addLine(to: CGPoint(x: cabEnd - m.width * 0.035, y: cabTop))
+        p.addLine(to: CGPoint(x: cabEnd, y: boxTop + h * 0.025))
+        p.addLine(to: CGPoint(x: boxEnd, y: boxTop))
+        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.015, y: boxTop + h * 0.040),
+                       control: CGPoint(x: boxEnd + m.width * 0.015, y: boxTop))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.020, y: m.sillY))
+        p.closeSubpath()
+        return p
+    }
+
+    private func fireTruckSide(transform: CGAffineTransform) -> some View {
+        let m = truckMetrics(widthRatio: 0.84, wheelRatio: 0.047)
+        let body = fireTruckBody(m: m).applying(transform)
+
+        return ZStack {
+            body.fill(LinearGradient(colors: [Color.red.opacity(0.96), Color.red.opacity(0.75)], startPoint: .top, endPoint: .bottom))
+                .overlay(body.stroke(Color.red.opacity(0.55), lineWidth: 1.2))
+
+            RoundedRectangle(cornerRadius: 6)
+                .fill(palette.glass)
+                .frame(width: m.width * 0.19, height: h * 0.145)
+                .position(CGPoint(x: m.left + m.width * 0.15, y: m.sillY - h * 0.245).applying(transform))
+
+            Capsule()
+                .fill(Color.white.opacity(0.92))
+                .frame(width: m.width * 0.55, height: h * 0.042)
+                .position(CGPoint(x: m.left + m.width * 0.58, y: m.sillY - h * 0.118).applying(transform))
+
+            Text("SCDF")
+                .font(.system(size: max(8, h * 0.034), weight: .black))
+                .foregroundColor(.white)
+                .position(CGPoint(x: m.left + m.width * 0.54, y: m.sillY - h * 0.205).applying(transform))
+
+            equipmentLines(m: m, transform: transform)
+            wheels(frontX: m.left + m.width * 0.18, rearX: m.left + m.width * 0.76, y: m.groundY, r: m.wheelR, transform: transform)
+            emergencySideLights(m: m, transform: transform)
+        }
+    }
+
+    private func redRhinoBody(m: SideMetrics) -> Path {
+        var p = Path()
+        let hoodTop = m.sillY - h * 0.175
+        let roofTop = m.sillY - h * 0.335
+        let rearTop = m.sillY - h * 0.210
+
+        p.move(to: CGPoint(x: m.left + m.width * 0.03, y: m.sillY))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.09, y: hoodTop + h * 0.035),
+                       control: CGPoint(x: m.left + m.width * 0.02, y: hoodTop + h * 0.080))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.26, y: hoodTop))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.36, y: roofTop + h * 0.035),
+                       control: CGPoint(x: m.left + m.width * 0.31, y: hoodTop - h * 0.012))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.55, y: roofTop + h * 0.040))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.61, y: rearTop),
+                       control: CGPoint(x: m.left + m.width * 0.59, y: roofTop + h * 0.080))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.055, y: rearTop))
+        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.025, y: m.sillY),
+                       control: CGPoint(x: m.right - m.width * 0.005, y: rearTop + h * 0.080))
+        p.closeSubpath()
+        return p
+    }
+
+    private func redRhinoWindow(m: SideMetrics) -> Path {
+        var p = Path()
+        let top = m.sillY - h * 0.300
+        let base = m.sillY - h * 0.150
+        p.move(to: CGPoint(x: m.left + m.width * 0.25, y: base))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.34, y: top + h * 0.035))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.53, y: top + h * 0.040))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.60, y: base))
+        p.closeSubpath()
+        return p
+    }
+
+    private func truckMetrics(widthRatio: CGFloat, wheelRatio: CGFloat) -> SideMetrics {
+        let bodyW = w * widthRatio
+        let left = (w - bodyW) / 2
+        let right = left + bodyW
+        let wheelR = min(w * wheelRatio, h * 0.120)
+        let groundY = h * 0.778
+        let sillY = groundY - wheelR * 0.34
+        return SideMetrics(left: left, right: right, width: bodyW, wheelR: wheelR, groundY: groundY, sillY: sillY)
+    }
+
+    private func compactFireBody(m: SideMetrics) -> Path {
+        var p = Path()
+        let roofY = m.sillY - h * 0.365
+        let bodyTop = m.sillY - h * 0.265
+        p.move(to: CGPoint(x: m.left + m.width * 0.04, y: m.sillY))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.04, y: bodyTop + h * 0.05))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.18, y: roofY),
+                       control: CGPoint(x: m.left + m.width * 0.06, y: roofY + h * 0.03))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.38, y: roofY))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.48, y: bodyTop),
+                       control: CGPoint(x: m.left + m.width * 0.44, y: roofY + h * 0.06))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.05, y: bodyTop))
+        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: bodyTop + h * 0.05),
+                       control: CGPoint(x: m.right, y: bodyTop))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY))
+        p.closeSubpath()
+        return p
+    }
+
+    private func ambulanceBody(m: SideMetrics, boxier: Bool) -> Path {
+        var p = Path()
+        let cabTop = m.sillY - h * 0.335
+        let boxTop = m.sillY - h * (boxier ? 0.325 : 0.300)
+        let noseTop = m.sillY - h * 0.230
+
+        p.move(to: CGPoint(x: m.left + m.width * 0.03, y: m.sillY))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.03, y: noseTop))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.20, y: cabTop),
+                       control: CGPoint(x: m.left + m.width * 0.07, y: cabTop + h * 0.030))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.36, y: boxTop))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.035, y: boxTop))
+        p.addQuadCurve(to: CGPoint(x: m.right - m.width * 0.02, y: boxTop + h * 0.030),
+                       control: CGPoint(x: m.right - m.width * 0.01, y: boxTop))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY))
+        p.closeSubpath()
+        return p
+    }
+
+    private func fireTruckBody(m: SideMetrics) -> Path {
+        var p = Path()
+        let cabTop = m.sillY - h * 0.365
+        let boxTop = m.sillY - h * 0.315
+        let cabEnd = m.left + m.width * 0.30
+        p.move(to: CGPoint(x: m.left + m.width * 0.02, y: m.sillY))
+        p.addLine(to: CGPoint(x: m.left + m.width * 0.02, y: cabTop + h * 0.070))
+        p.addQuadCurve(to: CGPoint(x: m.left + m.width * 0.08, y: cabTop),
+                       control: CGPoint(x: m.left + m.width * 0.025, y: cabTop + h * 0.015))
+        p.addLine(to: CGPoint(x: cabEnd - m.width * 0.035, y: cabTop))
+        p.addLine(to: CGPoint(x: cabEnd, y: boxTop))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.025, y: boxTop))
+        p.addLine(to: CGPoint(x: m.right - m.width * 0.02, y: m.sillY))
+        p.closeSubpath()
+        return p
+    }
+
+    private func wheels(frontX: CGFloat, rearX: CGFloat, y: CGFloat, r: CGFloat, transform: CGAffineTransform) -> some View {
+        ZStack {
+            ForEach([frontX, rearX], id: \.self) { x in
+                let pt = CGPoint(x: x, y: y).applying(transform)
+
+                Circle()
+                    .fill(Color(.secondarySystemBackground))
+                    .frame(width: r * 2.58, height: r * 2.58)
+                    .position(pt)
+
+                Circle()
+                    .fill(Color(.systemGray2).opacity(0.96))
+                    .frame(width: r * 2, height: r * 2)
+                    .position(pt)
+
+                Circle()
+                    .fill(Color(.systemGray5))
+                    .frame(width: r * 1.05, height: r * 1.05)
+                    .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 1))
+                    .position(pt)
+
+                ForEach(0..<6, id: \.self) { spoke in
+                    Capsule()
+                        .fill(Color(.systemGray3))
+                        .frame(width: r * 0.08, height: r * 0.78)
+                        .rotationEffect(.degrees(Double(spoke) * 30))
+                        .position(pt)
+                }
+            }
+        }
+    }
+
+    private func equipmentLines(m: SideMetrics, transform: CGAffineTransform) -> some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 3)
+                    .stroke(Color.white.opacity(0.34), lineWidth: 1)
+                    .frame(width: m.width * 0.14, height: h * 0.090)
+                    .position(CGPoint(x: m.left + m.width * (0.46 + CGFloat(i) * 0.16),
+                                      y: m.sillY - h * 0.220).applying(transform))
+            }
+        }
+    }
+
+    private func emergencySideLights(m: SideMetrics, transform: CGAffineTransform) -> some View {
+        ZStack {
+            Capsule()
+                .fill(Color.white.opacity(0.88))
+                .frame(width: w * 0.036, height: h * 0.020)
+                .position(CGPoint(x: m.left + m.width * 0.055, y: m.sillY - h * 0.115).applying(transform))
+
+            Capsule()
+                .fill(Color.yellow.opacity(0.85))
+                .frame(width: w * 0.030, height: h * 0.018)
+                .position(CGPoint(x: m.left + m.width * 0.45, y: m.sillY - h * 0.090).applying(transform))
+
+            Capsule()
+                .fill(Color.red.opacity(0.70))
+                .frame(width: w * 0.036, height: h * 0.022)
+                .position(CGPoint(x: m.right - m.width * 0.050, y: m.sillY - h * 0.115).applying(transform))
+        }
+    }
+}
+
+// MARK: - Emergency Drawing Components
+
+struct EmergencyLightBar: View {
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        HStack(spacing: 2) {
+            RoundedRectangle(cornerRadius: height * 0.25)
+                .fill(Color.blue.opacity(0.82))
+            RoundedRectangle(cornerRadius: height * 0.25)
+                .fill(Color.red.opacity(0.82))
+        }
+        .frame(width: width, height: height)
+        .overlay(
+            RoundedRectangle(cornerRadius: height * 0.25)
+                .stroke(Color.white.opacity(0.60), lineWidth: 0.8)
         )
+    }
+}
+
+struct MedicalCross: View {
+    let size: CGFloat
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.06)
+                .fill(color.opacity(0.78))
+                .frame(width: size * 0.32, height: size)
+            RoundedRectangle(cornerRadius: size * 0.06)
+                .fill(color.opacity(0.78))
+                .frame(width: size, height: size * 0.32)
+        }
+    }
+}
+
+struct LadderAssembly: View {
+    let m: SideMetrics
+    let transform: CGAffineTransform
+    let w: CGFloat
+    let h: CGFloat
+
+    var body: some View {
+        ZStack {
+            ladderRail(yOffset: 0)
+            ladderRail(yOffset: h * 0.032)
+
+            ForEach(0..<9, id: \.self) { i in
+                let x = m.left + m.width * (0.34 + CGFloat(i) * 0.050)
+                Path { p in
+                    p.move(to: CGPoint(x: x, y: m.sillY - h * 0.410))
+                    p.addLine(to: CGPoint(x: x + m.width * 0.015, y: m.sillY - h * 0.378))
+                }
+                .applying(transform)
+                .stroke(Color(.systemGray3).opacity(0.95), lineWidth: 1.3)
+            }
+
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5).opacity(0.95))
+                .frame(width: m.width * 0.09, height: h * 0.062)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(.systemGray2), lineWidth: 1))
+                .position(CGPoint(x: m.left + m.width * 0.84, y: m.sillY - h * 0.388).applying(transform))
+
+            Circle()
+                .fill(Color(.systemGray4))
+                .frame(width: h * 0.080, height: h * 0.080)
+                .overlay(Circle().stroke(Color(.systemGray2), lineWidth: 1))
+                .position(CGPoint(x: m.left + m.width * 0.38, y: m.sillY - h * 0.330).applying(transform))
+        }
+    }
+
+    private func ladderRail(yOffset: CGFloat) -> some View {
+        Path { p in
+            p.move(to: CGPoint(x: m.left + m.width * 0.30, y: m.sillY - h * 0.410 + yOffset))
+            p.addLine(to: CGPoint(x: m.left + m.width * 0.83, y: m.sillY - h * 0.390 + yOffset))
+        }
+        .applying(transform)
+        .stroke(Color(.systemGray5).opacity(0.98), lineWidth: 3)
     }
 }
 
 // MARK: - Side Metrics
 
-private struct SideMetrics {
+struct SideMetrics {
     let left: CGFloat
     let right: CGFloat
     let width: CGFloat
