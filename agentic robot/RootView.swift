@@ -12,6 +12,7 @@ struct RootView: View {
                 
                 if auth.user != nil {
                     LoggedInView()
+                        .environmentObject(auth)
                 } else {
                     
                     VStack(spacing: 20) {

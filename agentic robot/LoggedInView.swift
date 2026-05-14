@@ -8,6 +8,7 @@ struct LoggedInView: View {
 
     @State private var selectedImage: UIImage?
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var plateResult: String = ""
 
     @State private var showCamera = false
     @State private var showImagePicker = false
@@ -25,6 +26,49 @@ struct LoggedInView: View {
     
     @State private var localErrorMessage: String? = nil
     
+    func sendToANPRServer(image: UIImage) {
+
+        guard let url = URL(string: "http://127.0.0.1:8000/detect") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        let imageData = image.jpegData(compressionQuality: 0.8)!
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append(imageData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        URLSession.shared.uploadTask(with: request, from: body) { data, _, error in
+
+            guard let data = data,
+                  let response = try? JSONDecoder().decode([String: String].self, from: data),
+                  let rawPlate = response["plate"] else {
+                return
+            }
+            
+            let plate: String
+            if rawPlate.contains("text='") {
+                let components = rawPlate.components(separatedBy: "text='")
+                plate = components[1].components(separatedBy: "'").first ?? rawPlate
+            } else {
+                plate = rawPlate
+            }
+
+            DispatchQueue.main.async {
+                self.plateResult = plate
+                self.navigateToResultPage = true
+            }
+
+        }.resume()
+    }
+    
     var body: some View {
         VStack(spacing: 25) {
 
@@ -40,8 +84,11 @@ struct LoggedInView: View {
                 Button("Logout") {
                     hasAnimatedText = false
                     displayedText = ""
-                    
+                    auth.didShowIntroAnimation = false
                     auth.logout()
+                    localErrorMessage = nil
+                    selectedImage = nil
+                    plateResult = ""
                 }
                 .foregroundColor(.red)
             }
@@ -70,7 +117,7 @@ struct LoggedInView: View {
                     .buttonStyle(.bordered)
 
                     Button("Confirm") {
-                        navigateToResultPage = true
+                        sendToANPRServer(image: selectedImage)
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -195,9 +242,17 @@ struct LoggedInView: View {
                 }
             }
         }
+        .onChange(of: showCamera) { _, value in
+            if value == true {
+                localErrorMessage = nil
+            }
+        }
         .navigationDestination(isPresented: $navigateToResultPage) {
-            CarPlateResultView(image: selectedImage)
-                .environmentObject(auth)
+            CarPlateResultView(plate: plateResult) {
+                navigateToResultPage = false
+                auth.logout()
+            }
+            .environmentObject(auth)
         }
     }
 }
