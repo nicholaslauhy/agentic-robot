@@ -7,17 +7,14 @@ struct ScanAngle: Identifiable {
     let id: Int
     let label: String
     let instruction: String
+    let iconName: String
 }
 
 let scanAngles: [ScanAngle] = [
-    ScanAngle(id: 0, label: "Front",       instruction: "Stand in front — aim at the bonnet"),
-    ScanAngle(id: 1, label: "Rear",        instruction: "Stand behind — aim at the boot"),
-    ScanAngle(id: 2, label: "Left Side",   instruction: "Stand on the left side of the vehicle"),
-    ScanAngle(id: 3, label: "Right Side",  instruction: "Stand on the right side of the vehicle"),
-    ScanAngle(id: 4, label: "Front-Left",  instruction: "Stand at the front-left corner"),
-    ScanAngle(id: 5, label: "Front-Right", instruction: "Stand at the front-right corner"),
-    ScanAngle(id: 6, label: "Rear-Left",   instruction: "Stand at the rear-left corner"),
-    ScanAngle(id: 7, label: "Rear-Right",  instruction: "Stand at the rear-right corner"),
+    ScanAngle(id: 0, label: "Front",      instruction: "Stand in front — aim at the bonnet",    iconName: "car.front.waves.up"),
+    ScanAngle(id: 1, label: "Rear",       instruction: "Stand behind — aim at the boot",         iconName: "car.rear.waves.up"),
+    ScanAngle(id: 2, label: "Left Side",  instruction: "Stand on the left side of the vehicle",  iconName: "arrow.left.square"),
+    ScanAngle(id: 3, label: "Right Side", instruction: "Stand on the right side of the vehicle", iconName: "arrow.right.square"),
 ]
 
 // MARK: - Main View
@@ -30,14 +27,15 @@ struct ScratchScanView: View {
     var onScanComplete: ([UIImage]) -> Void
 
     @State private var currentAngleIndex = 0
-    @State private var capturedImages: [UIImage?] = Array(repeating: nil, count: 8)
+    @State private var capturedImages: [UIImage?] = Array(repeating: nil, count: 4)
     @State private var showCamera = false
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showCompletionScreen = false
     @State private var localErrorMessage: String? = nil
 
-    // Review/replace state
+    // Replace state — kept separate and stable
     @State private var replacingIndex: Int? = nil
+    @State private var showReplaceActionSheet = false
     @State private var showReplaceCamera = false
     @State private var replacePhotoItem: PhotosPickerItem?
 
@@ -66,20 +64,15 @@ struct ScratchScanView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("\(capturedCount) of \(scanAngles.count) angles captured")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.caption).foregroundColor(.secondary)
                     Spacer()
                     Text("\(Int(progress * 100))%")
-                        .font(.caption.bold())
-                        .foregroundColor(carType.accentColor)
+                        .font(.caption.bold()).foregroundColor(carType.accentColor)
                 }
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color(.systemGray5))
-                            .frame(height: 8)
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(carType.accentColor)
+                        RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5)).frame(height: 8)
+                        RoundedRectangle(cornerRadius: 4).fill(carType.accentColor)
                             .frame(width: geo.size.width * progress, height: 8)
                             .animation(.spring(response: 0.5), value: progress)
                     }
@@ -96,6 +89,8 @@ struct ScratchScanView: View {
             }
         }
         .navigationBarBackButtonHidden(true)
+
+        // ── Main capture sheets ────────────────────────────────────────────
         .sheet(isPresented: $showCamera) {
             ImagePicker(sourceType: .camera) { image in
                 capturedImages[currentAngleIndex] = image
@@ -115,6 +110,8 @@ struct ScratchScanView: View {
                 }
             }
         }
+
+        // ── Replace sheets — triggered ONLY after confirmationDialog fires ─
         .sheet(isPresented: $showReplaceCamera) {
             ImagePicker(sourceType: .camera) { image in
                 if let idx = replacingIndex {
@@ -124,19 +121,51 @@ struct ScratchScanView: View {
             }
         }
         .onChange(of: replacePhotoItem) { _, newItem in
-            guard let newItem, let idx = replacingIndex else { return }
+            guard let newItem else { return }
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
                    let uiImage = UIImage(data: data) {
                     await MainActor.run {
-                        capturedImages[idx] = uiImage
+                        if let idx = replacingIndex {
+                            capturedImages[idx] = uiImage
+                        }
                         replacePhotoItem = nil
                         replacingIndex = nil
                     }
                 }
             }
         }
+
+        // ── Replace action sheet — lives at root so it always fires ────────
+        .confirmationDialog(
+            replacingIndex != nil ? "Replace \(scanAngles[replacingIndex!].label) Photo" : "Replace Photo",
+            isPresented: $showReplaceActionSheet,
+            titleVisibility: .visible
+        ) {
+            Button("Take New Photo") {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    showReplaceCamera = true
+                } else {
+                    localErrorMessage = "Camera is not available on this device."
+                    replacingIndex = nil
+                }
+            }
+            // PhotosPicker can't sit inside confirmationDialog — use a workaround
+            Button("Choose from Library") {
+                // We trigger this via a hidden PhotosPicker driven by replacePhotoItem
+                // Set a flag so the picker sheet appears
+                showReplaceLibrary = true
+            }
+            Button("Cancel", role: .cancel) {
+                replacingIndex = nil
+            }
+        }
+        .sheet(isPresented: $showReplaceLibrary) {
+            ReplaceLibraryPicker(selectedItem: $replacePhotoItem)
+        }
     }
+
+    @State private var showReplaceLibrary = false
 
     // MARK: - Advance or Complete
 
@@ -153,30 +182,27 @@ struct ScratchScanView: View {
     private var scanGuideView: some View {
         VStack(spacing: 16) {
 
-            // PERSPECTIVE SILHOUETTE
+            // SILHOUETTE
             ZStack {
                 RoundedRectangle(cornerRadius: 20)
                     .fill(Color(.secondarySystemBackground))
 
-                PerspectiveSilhouetteView(carType: carType, angleId: currentAngleIndex)
-                    .padding(24)
+                CarSilhouetteView(carType: carType, angleId: currentAngleIndex)
+                    .padding(20)
             }
-            .frame(height: 240)
+            .frame(height: 250)
             .padding(.horizontal)
 
             // INSTRUCTION CARD
             HStack(spacing: 16) {
-                Image(systemName: iconForAngle(currentAngleIndex))
+                Image(systemName: scanAngles[currentAngleIndex].iconName)
                     .font(.system(size: 26, weight: .bold))
                     .foregroundColor(carType.accentColor)
                     .frame(width: 40)
-
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(scanAngles[currentAngleIndex].label)
-                        .font(.headline)
+                    Text(scanAngles[currentAngleIndex].label).font(.headline)
                     Text(scanAngles[currentAngleIndex].instruction)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .font(.subheadline).foregroundColor(.secondary)
                 }
                 Spacer()
             }
@@ -194,9 +220,7 @@ struct ScratchScanView: View {
                             isCurrent: idx == currentAngleIndex,
                             accentColor: carType.accentColor
                         )
-                        .onTapGesture {
-                            withAnimation { currentAngleIndex = idx }
-                        }
+                        .onTapGesture { withAnimation { currentAngleIndex = idx } }
                     }
                 }
                 .padding(.horizontal)
@@ -204,15 +228,10 @@ struct ScratchScanView: View {
             .frame(height: 90)
 
             if let err = localErrorMessage {
-                Text(err)
-                    .foregroundColor(.red)
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                Text(err).foregroundColor(.red).font(.footnote)
+                    .multilineTextAlignment(.center).padding(.horizontal)
                     .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            localErrorMessage = nil
-                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { localErrorMessage = nil }
                     }
             }
 
@@ -220,7 +239,6 @@ struct ScratchScanView: View {
 
             // BACK + CAPTURE BUTTONS
             HStack(spacing: 12) {
-
                 if currentAngleIndex > 0 {
                     Button {
                         withAnimation { currentAngleIndex -= 1 }
@@ -235,8 +253,7 @@ struct ScratchScanView: View {
 
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                     Label("Library", systemImage: "photo.on.rectangle")
-                        .frame(maxWidth: .infinity)
-                        .padding()
+                        .frame(maxWidth: .infinity).padding()
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
                 }
@@ -250,10 +267,8 @@ struct ScratchScanView: View {
                     }
                 } label: {
                     Label("Take Photo", systemImage: "camera.fill")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(carType.accentColor)
-                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity).padding()
+                        .background(carType.accentColor).foregroundColor(.white)
                         .cornerRadius(12)
                 }
             }
@@ -268,87 +283,102 @@ struct ScratchScanView: View {
     private var reviewView: some View {
         ScrollView {
             VStack(spacing: 20) {
-
                 HStack {
-                    Image(systemName: "checkmark.seal.fill")
-                        .foregroundColor(.green)
-                    Text("All Angles Captured")
-                        .font(.title2.bold())
+                    Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
+                    Text("All Angles Captured").font(.title2.bold())
                 }
                 .padding(.top, 8)
 
                 Text("Tap any photo to replace it before submitting.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .font(.subheadline).foregroundColor(.secondary)
+                    .multilineTextAlignment(.center).padding(.horizontal)
 
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
                     ForEach(0..<scanAngles.count, id: \.self) { idx in
                         ReviewThumbnail(
                             label: scanAngles[idx].label,
                             image: capturedImages[idx],
-                            accentColor: carType.accentColor,
-                            onTap: { replacingIndex = idx }
-                        )
+                            accentColor: carType.accentColor
+                        ) {
+                            replacingIndex = idx
+                            showReplaceActionSheet = true
+                        }
                     }
                 }
                 .padding(.horizontal)
 
+                if let err = localErrorMessage {
+                    Text(err).foregroundColor(.red).font(.footnote)
+                        .multilineTextAlignment(.center).padding(.horizontal)
+                }
+
                 Button {
-                    let images = capturedImages.compactMap { $0 }
-                    onScanComplete(images)
+                    onScanComplete(capturedImages.compactMap { $0 })
                 } label: {
                     Text("Submit for Analysis")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(carType.accentColor)
-                        .foregroundColor(.white)
-                        .cornerRadius(14)
-                        .padding(.horizontal)
+                        .font(.headline).frame(maxWidth: .infinity).padding()
+                        .background(carType.accentColor).foregroundColor(.white)
+                        .cornerRadius(14).padding(.horizontal)
                 }
                 .padding(.bottom, 32)
             }
         }
-        .confirmationDialog(
-            "Replace Photo",
-            isPresented: Binding(
-                get: { replacingIndex != nil },
-                set: { if !$0 { replacingIndex = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Take New Photo") {
-                if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    showReplaceCamera = true
-                }
-            }
-            PhotosPicker(selection: $replacePhotoItem, matching: .images) {
-                Text("Choose from Library")
-            }
-            Button("Cancel", role: .cancel) { replacingIndex = nil }
-        }
+    }
+}
+
+// MARK: - Replace Library Picker (sheet wrapper)
+// PhotosPicker can't be used inside confirmationDialog, so we wrap it in a sheet
+
+struct ReplaceLibraryPicker: UIViewControllerRepresentable {
+    @Binding var selectedItem: PhotosPickerItem?
+    @Environment(\.dismiss) var dismiss
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        // Present a PHPickerViewController directly
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
     }
 
-    // MARK: - Helpers
+    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
 
-    private func iconForAngle(_ id: Int) -> String {
-        switch id {
-        case 0: return "car.front.waves.up"
-        case 1: return "car.rear.waves.up"
-        case 2: return "arrow.left.square"
-        case 3: return "arrow.right.square"
-        case 4: return "arrow.up.left.square"
-        case 5: return "arrow.up.right.square"
-        case 6: return "arrow.down.left.square"
-        case 7: return "arrow.down.right.square"
-        default: return "camera"
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let parent: ReplaceLibraryPicker
+        init(_ parent: ReplaceLibraryPicker) { self.parent = parent }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+            guard let result = results.first else {
+                parent.dismiss()
+                return
+            }
+            result.itemProvider.loadObject(ofClass: UIImage.self) { object, _ in
+                if let image = object as? UIImage {
+                    DispatchQueue.main.async {
+                        // Convert UIImage back to PhotosPickerItem isn't possible,
+                        // so we store the image directly via a notification
+                        NotificationCenter.default.post(
+                            name: .replacePickerImage,
+                            object: image
+                        )
+                        self.parent.dismiss()
+                    }
+                }
+            }
         }
     }
 }
 
-// MARK: - Angle Thumbnail (strip)
+extension Notification.Name {
+    static let replacePickerImage = Notification.Name("replacePickerImage")
+}
+
+// MARK: - Angle Thumbnail
 
 struct AngleThumbnail: View {
     let label: String
@@ -362,20 +392,12 @@ struct AngleThumbnail: View {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isCurrent ? accentColor.opacity(0.15) : Color(.systemGray6))
                     .frame(width: 60, height: 60)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(isCurrent ? accentColor : Color.clear, lineWidth: 2)
-                    )
-
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .stroke(isCurrent ? accentColor : Color.clear, lineWidth: 2))
                 if let img = image {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 60, height: 60)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                    Image(uiImage: img).resizable().scaledToFill()
+                        .frame(width: 60, height: 60).clipShape(RoundedRectangle(cornerRadius: 8))
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                         .background(Circle().fill(Color.white).padding(1))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                         .padding(3)
@@ -384,16 +406,14 @@ struct AngleThumbnail: View {
                         .foregroundColor(isCurrent ? accentColor : .secondary)
                 }
             }
-            Text(label)
-                .font(.system(size: 9, weight: isCurrent ? .bold : .regular))
-                .foregroundColor(isCurrent ? accentColor : .secondary)
-                .lineLimit(1)
+            Text(label).font(.system(size: 9, weight: isCurrent ? .bold : .regular))
+                .foregroundColor(isCurrent ? accentColor : .secondary).lineLimit(1)
         }
         .frame(width: 64)
     }
 }
 
-// MARK: - Review Thumbnail (grid)
+// MARK: - Review Thumbnail
 
 struct ReviewThumbnail: View {
     let label: String
@@ -403,232 +423,452 @@ struct ReviewThumbnail: View {
 
     var body: some View {
         Button(action: onTap) {
+
             ZStack(alignment: .bottomLeading) {
+
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemGray5))
+
                 if let img = image {
                     Image(uiImage: img)
                         .resizable()
                         .scaledToFill()
-                        .frame(height: 140)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(.systemGray5))
-                        .frame(height: 140)
                 }
+
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.75),
+                        Color.clear
+                    ],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
 
                 HStack {
                     Text(label)
                         .font(.caption.bold())
                         .foregroundColor(.white)
+
                     Spacer()
+
                     Image(systemName: "pencil.circle.fill")
                         .foregroundColor(.white)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(
-                    LinearGradient(
-                        colors: [Color.black.opacity(0.6), Color.clear],
-                        startPoint: .bottom, endPoint: .top
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                )
+                .padding(10)
             }
             .frame(height: 140)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(accentColor.opacity(0.4), lineWidth: 1)
+                    .stroke(accentColor.opacity(0.35), lineWidth: 1)
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-// MARK: - Perspective Silhouette View
+// MARK: - Car Silhouette View
+// Uses SwiftUI Path with bezier curves for realistic vehicle shapes
 
-struct PerspectiveSilhouetteView: View {
-
+struct CarSilhouetteView: View {
     let carType: CarType
-    let angleId: Int
+    let angleId: Int   // 0=Front, 1=Rear, 2=Left, 3=Right
 
     var body: some View {
-        Canvas { context, size in
-            let w = size.width
-            let h = size.height
-            let color = Color(.systemGray3)
-
-            switch angleId {
-            case 0: drawFrontView(context: context, w: w, h: h, color: color)
-            case 1: drawRearView(context: context, w: w, h: h, color: color)
-            case 2: drawSideView(context: context, w: w, h: h, color: color, mirrored: false)
-            case 3: drawSideView(context: context, w: w, h: h, color: color, mirrored: true)
-            case 4: drawCornerView(context: context, w: w, h: h, color: color, frontLeft: true)
-            case 5: drawCornerView(context: context, w: w, h: h, color: color, frontLeft: false)
-            case 6: drawCornerRearView(context: context, w: w, h: h, color: color, rearLeft: true)
-            case 7: drawCornerRearView(context: context, w: w, h: h, color: color, rearLeft: false)
-            default: break
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            ZStack {
+                silhouettePath(w: w, h: h)
+                detailOverlay(w: w, h: h)
+                angleLabel(w: w, h: h)
             }
-
-            var labelText = AttributedString(scanAngles[angleId].label)
-            labelText.font = .systemFont(ofSize: 13, weight: .semibold)
-            labelText.foregroundColor = Color(.systemGray2)
-            context.draw(Text(labelText), at: CGPoint(x: w / 2, y: h - 10), anchor: .bottom)
         }
     }
 
-    private var heightScale: CGFloat {
-        switch carType {
-        case .suv: return 1.15
-        case .mpv: return 1.20
+    // MARK: Main body path
+
+    @ViewBuilder
+    private func silhouettePath(w: CGFloat, h: CGFloat) -> some View {
+        switch angleId {
+        case 0:
+            FrontFaceShape(carType: carType)
+                .fill(Color(.systemGray3))
+
+        case 1:
+            RearFaceShape(carType: carType)
+                .fill(Color(.systemGray3))
+
+        case 2:
+            SideProfileShape(carType: carType, flipped: false)
+                .fill(Color(.systemGray3))
+
+        case 3:
+            SideProfileShape(carType: carType, flipped: true)
+                .fill(Color(.systemGray3))
+
         default:
-            if carType.category == .scdf { return 1.35 }
-            return 1.0
+            EmptyView()
         }
     }
 
-    private var widthScale: CGFloat {
-        switch carType {
-        case .mpv: return 1.10
-        default:
-            if carType.category == .scdf { return 1.25 }
-            return 1.0
+    // MARK: Light/detail overlay drawn on top
+
+    @ViewBuilder
+    private func detailOverlay(w: CGFloat, h: CGFloat) -> some View {
+        switch angleId {
+        case 0: FrontDetailOverlay(carType: carType, w: w, h: h)
+        case 1: RearDetailOverlay(carType: carType, w: w, h: h)
+        case 2: SideDetailOverlay(carType: carType, w: w, h: h, flipped: false)
+        case 3: SideDetailOverlay(carType: carType, w: w, h: h, flipped: true)
+        default: EmptyView()
         }
     }
 
-    private func drawFrontView(context: GraphicsContext, w: CGFloat, h: CGFloat, color: Color) {
-        let bodyW = w * 0.62 * widthScale
-        let bodyH = h * 0.22 * heightScale
-        let roofW = w * 0.38 * widthScale
-        let roofH = h * 0.18 * heightScale
-        let cx = w / 2
-        let groundY = h * 0.75
-        let bodyTop = groundY - bodyH
-
-        fill(context, rect: CGRect(x: cx - bodyW/2, y: bodyTop, width: bodyW, height: bodyH), color: color, radius: 8)
-        fill(context, rect: CGRect(x: cx - roofW/2, y: bodyTop - roofH + 4, width: roofW, height: roofH), color: color, radius: 6)
-        let lightW = bodyW * 0.18, lightH = bodyH * 0.22
-        fill(context, rect: CGRect(x: cx - bodyW/2 + 10, y: bodyTop + bodyH * 0.25, width: lightW, height: lightH), color: .white.opacity(0.7), radius: 3)
-        fill(context, rect: CGRect(x: cx + bodyW/2 - 10 - lightW, y: bodyTop + bodyH * 0.25, width: lightW, height: lightH), color: .white.opacity(0.7), radius: 3)
-        fill(context, rect: CGRect(x: cx - bodyW * 0.22, y: bodyTop + bodyH * 0.55, width: bodyW * 0.44, height: bodyH * 0.28), color: Color(.systemGray5), radius: 3)
-        let wRadius = w * 0.08 * widthScale
-        fillCircle(context, cx: cx - bodyW/2 + wRadius * 0.6, cy: groundY, r: wRadius, color: color)
-        fillCircle(context, cx: cx + bodyW/2 - wRadius * 0.6, cy: groundY, r: wRadius, color: color)
+    private func angleLabel(w: CGFloat, h: CGFloat) -> some View {
+        Text(scanAngles[angleId].label)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.secondary)
+            .frame(width: w, alignment: .center)
+            .position(x: w / 2, y: h - 8)
     }
+}
 
-    private func drawRearView(context: GraphicsContext, w: CGFloat, h: CGFloat, color: Color) {
-        let bodyW = w * 0.62 * widthScale
-        let bodyH = h * 0.22 * heightScale
-        let roofW = w * 0.38 * widthScale
-        let roofH = h * 0.18 * heightScale
+// MARK: - Front Face Shape
+
+struct FrontFaceShape: Shape {
+    let carType: CarType
+
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
         let cx = w / 2
-        let groundY = h * 0.75
-        let bodyTop = groundY - bodyH
+        let isLarge = carType.category == .scdf
+        let isTall  = carType == .suv || carType == .mpv || isLarge
 
-        fill(context, rect: CGRect(x: cx - bodyW/2, y: bodyTop, width: bodyW, height: bodyH), color: color, radius: 8)
-        fill(context, rect: CGRect(x: cx - roofW/2, y: bodyTop - roofH + 4, width: roofW, height: roofH), color: color, radius: 6)
-        let lightW = bodyW * 0.18, lightH = bodyH * 0.2
-        fill(context, rect: CGRect(x: cx - bodyW/2 + 8, y: bodyTop + bodyH * 0.22, width: lightW, height: lightH), color: Color.red.opacity(0.5), radius: 3)
-        fill(context, rect: CGRect(x: cx + bodyW/2 - 8 - lightW, y: bodyTop + bodyH * 0.22, width: lightW, height: lightH), color: Color.red.opacity(0.5), radius: 3)
-        let bootPath = Path { p in
-            p.move(to: CGPoint(x: cx - bodyW * 0.30, y: bodyTop + 6))
-            p.addLine(to: CGPoint(x: cx + bodyW * 0.30, y: bodyTop + 6))
+        // Proportions
+        let bodyW  = w * (isLarge ? 0.82 : 0.72)
+        let bodyH  = h * (isTall  ? 0.32 : 0.26)
+        let roofW  = w * (isTall  ? 0.62 : 0.50)
+        let roofH  = h * (isTall  ? 0.26 : 0.22)
+        let groundY = h * 0.78
+        let bodyTop = groundY - bodyH
+        let wheelR  = w * (isLarge ? 0.11 : 0.09)
+
+        var p = Path()
+
+        // Body — slightly trapezoidal (wider at bottom)
+        let bx = cx - bodyW / 2
+        p.move(to: CGPoint(x: bx + 6, y: bodyTop))
+        p.addLine(to: CGPoint(x: bx + bodyW - 6, y: bodyTop))
+        p.addQuadCurve(to: CGPoint(x: bx + bodyW, y: bodyTop + 8), control: CGPoint(x: bx + bodyW, y: bodyTop))
+        p.addLine(to: CGPoint(x: bx + bodyW + (isTall ? 4 : 0), y: groundY - wheelR * 0.6))
+        p.addLine(to: CGPoint(x: bx - (isTall ? 4 : 0), y: groundY - wheelR * 0.6))
+        p.addQuadCurve(to: CGPoint(x: bx + 6, y: bodyTop), control: CGPoint(x: bx, y: bodyTop))
+        p.closeSubpath()
+
+        // Roof
+        let rx = cx - roofW / 2
+        let roofBottom = bodyTop + 4
+        let roofTop = roofBottom - roofH
+        p.move(to: CGPoint(x: rx + roofW * 0.08, y: roofBottom))
+        p.addLine(to: CGPoint(x: rx + roofW * 0.92, y: roofBottom))
+        p.addQuadCurve(to: CGPoint(x: rx + roofW * 0.92, y: roofTop + 6),
+                       control: CGPoint(x: rx + roofW, y: roofBottom - 4))
+        p.addQuadCurve(to: CGPoint(x: rx + roofW * 0.08, y: roofTop + 6),
+                       control: CGPoint(x: cx, y: roofTop))
+        p.addQuadCurve(to: CGPoint(x: rx + roofW * 0.08, y: roofBottom),
+                       control: CGPoint(x: rx, y: roofBottom - 4))
+        p.closeSubpath()
+
+        // Wheels (arches)
+        let wlCx = cx - bodyW * 0.30
+        let wrCx = cx + bodyW * 0.30
+        for wheelCx in [wlCx, wrCx] {
+            p.addEllipse(in: CGRect(x: wheelCx - wheelR, y: groundY - wheelR,
+                                    width: wheelR * 2, height: wheelR * 2))
         }
-        context.stroke(bootPath, with: .color(Color(.systemGray5)), lineWidth: 2)
-        let wRadius = w * 0.08 * widthScale
-        fillCircle(context, cx: cx - bodyW/2 + wRadius * 0.6, cy: groundY, r: wRadius, color: color)
-        fillCircle(context, cx: cx + bodyW/2 - wRadius * 0.6, cy: groundY, r: wRadius, color: color)
+
+        return p
     }
+}
 
-    private func drawSideView(context: GraphicsContext, w: CGFloat, h: CGFloat, color: Color, mirrored: Bool) {
-        let bodyW = w * 0.78 * widthScale
-        let bodyH = h * 0.22 * heightScale
-        let roofW = bodyW * 0.46
-        let roofH = h * 0.20 * heightScale
-        let cx = w / 2
-        let groundY = h * 0.75
-        let bodyLeft = cx - bodyW / 2
-        let bodyTop = groundY - bodyH
+// MARK: - Rear Face Shape
 
-        fill(context, rect: CGRect(x: bodyLeft, y: bodyTop, width: bodyW, height: bodyH), color: color, radius: 8)
-        let roofX = mirrored ? bodyLeft + bodyW * 0.32 : bodyLeft + bodyW * 0.22
-        fill(context, rect: CGRect(x: roofX, y: bodyTop - roofH + 6, width: roofW, height: roofH), color: color, radius: 8)
-        let winH = roofH * 0.70
-        let win1X = mirrored ? roofX + roofW * 0.55 : roofX + roofW * 0.04
-        let win2X = mirrored ? roofX + roofW * 0.10 : roofX + roofW * 0.52
-        fill(context, rect: CGRect(x: win1X, y: bodyTop - winH + 4, width: roofW * 0.36, height: winH), color: Color(.systemGray5), radius: 4)
-        fill(context, rect: CGRect(x: win2X, y: bodyTop - winH + 4, width: roofW * 0.36, height: winH), color: Color(.systemGray5), radius: 4)
-        let wRadius = w * 0.09 * widthScale
-        let frontWheelX = mirrored ? bodyLeft + bodyW * 0.72 : bodyLeft + bodyW * 0.22
-        let rearWheelX  = mirrored ? bodyLeft + bodyW * 0.22 : bodyLeft + bodyW * 0.72
-        fillCircle(context, cx: frontWheelX, cy: groundY, r: wRadius, color: color)
-        fillCircle(context, cx: rearWheelX,  cy: groundY, r: wRadius, color: color)
+struct RearFaceShape: Shape {
+    let carType: CarType
+
+    func path(in rect: CGRect) -> Path {
+        // Rear is visually very similar to front — same shape, details differ
+        FrontFaceShape(carType: carType).path(in: rect)
     }
+}
 
-    private func drawCornerView(context: GraphicsContext, w: CGFloat, h: CGFloat, color: Color, frontLeft: Bool) {
-        let cx = w / 2
-        let groundY = h * 0.76
-        let bodyW = w * 0.64 * widthScale
-        let bodyH = h * 0.21 * heightScale
-        let bodyTop = groundY - bodyH
-        let skew: CGFloat = frontLeft ? -18 : 18
+// MARK: - Side Profile Shape
 
-        let bodyPath = Path { p in
-            p.move(to:    CGPoint(x: cx - bodyW/2 + skew, y: bodyTop))
-            p.addLine(to: CGPoint(x: cx + bodyW/2 + skew, y: bodyTop))
-            p.addLine(to: CGPoint(x: cx + bodyW/2,        y: groundY))
-            p.addLine(to: CGPoint(x: cx - bodyW/2,        y: groundY))
-            p.closeSubpath()
+struct SideProfileShape: Shape {
+    let carType: CarType
+    let flipped: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let w = rect.width, h = rect.height
+        let isLarge = carType.category == .scdf
+        let isSUV   = carType == .suv
+        let isMPV   = carType == .mpv
+
+        let groundY = h * 0.80
+        let wheelR  = w * (isLarge ? 0.10 : 0.085)
+        let bodyH   = h * (isLarge ? 0.34 : isMPV ? 0.30 : isSUV ? 0.28 : 0.24)
+        let bodyW   = w * (isLarge ? 0.88 : 0.84)
+        let bodyLeft = (w - bodyW) / 2
+        let bodyRight = bodyLeft + bodyW
+        let bodyTop  = groundY - bodyH
+
+        // Wheel centres
+        let frontWX = flipped ? bodyRight - bodyW * 0.22 : bodyLeft + bodyW * 0.22
+        let rearWX  = flipped ? bodyRight - bodyW * 0.75 : bodyLeft + bodyW * 0.75
+
+        var p = Path()
+
+        if isLarge {
+            // Boxy truck / fire engine profile
+            p.move(to: CGPoint(x: bodyLeft, y: groundY - wheelR * 0.5))
+            p.addLine(to: CGPoint(x: bodyLeft, y: bodyTop))
+            p.addLine(to: CGPoint(x: bodyRight, y: bodyTop))
+            p.addLine(to: CGPoint(x: bodyRight, y: groundY - wheelR * 0.5))
+        } else if isMPV {
+            // Tall flat-roofed van silhouette
+            let roofLeft  = flipped ? bodyLeft + bodyW * 0.08 : bodyLeft + bodyW * 0.04
+            let roofRight = flipped ? bodyLeft + bodyW * 0.96 : bodyLeft + bodyW * 0.92
+            let roofTop   = bodyTop - h * 0.18
+
+            p.move(to: CGPoint(x: bodyLeft + 8, y: groundY - wheelR * 0.5))
+            p.addLine(to: CGPoint(x: bodyLeft + 8, y: bodyTop + 2))
+            p.addLine(to: CGPoint(x: roofLeft, y: roofTop))
+            p.addLine(to: CGPoint(x: roofRight, y: roofTop))
+            p.addLine(to: CGPoint(x: bodyRight - 8, y: bodyTop + 2))
+            p.addLine(to: CGPoint(x: bodyRight - 8, y: groundY - wheelR * 0.5))
+        } else if isSUV {
+            // Tall boxy SUV — upright pillars, flat roof
+            let roofH     = h * 0.20
+            let cabinLeft  = flipped ? bodyLeft + bodyW * 0.10 : bodyLeft + bodyW * 0.08
+            let cabinRight = flipped ? bodyLeft + bodyW * 0.92 : bodyLeft + bodyW * 0.90
+            let roofTop    = bodyTop - roofH
+
+            p.move(to: CGPoint(x: bodyLeft + 4, y: groundY - wheelR * 0.5))
+            p.addLine(to: CGPoint(x: bodyLeft + 4, y: bodyTop))
+            p.addLine(to: CGPoint(x: cabinLeft, y: roofTop + 4))
+            p.addQuadCurve(to: CGPoint(x: cabinLeft + 6, y: roofTop),
+                           control: CGPoint(x: cabinLeft, y: roofTop))
+            p.addLine(to: CGPoint(x: cabinRight - 6, y: roofTop))
+            p.addQuadCurve(to: CGPoint(x: cabinRight, y: roofTop + 4),
+                           control: CGPoint(x: cabinRight, y: roofTop))
+            p.addLine(to: CGPoint(x: bodyRight - 4, y: bodyTop))
+            p.addLine(to: CGPoint(x: bodyRight - 4, y: groundY - wheelR * 0.5))
+        } else {
+            // Sedan — sloped bonnet, curved roofline, short boot
+            let hoodLen   = bodyW * (flipped ? 0.22 : 0.26)
+            let bootLen   = bodyW * (flipped ? 0.26 : 0.22)
+            let roofStart = flipped ? bodyRight - hoodLen - bodyW * 0.46 : bodyLeft + hoodLen
+            let roofEnd   = flipped ? bodyRight - hoodLen                 : bodyLeft + hoodLen + bodyW * 0.46
+            let roofTop   = bodyTop - h * 0.19
+            let roofPeak  = (roofStart + roofEnd) / 2
+
+            // Boot/bonnet end heights
+            let hoodTopY = bodyTop + h * 0.04
+            let bootTopY = bodyTop + h * 0.06
+
+            p.move(to: CGPoint(x: flipped ? bodyRight - 4 : bodyLeft + 4,
+                               y: groundY - wheelR * 0.5))
+            if flipped {
+                // Right side — boot on left, bonnet on right
+                p.addLine(to: CGPoint(x: bodyRight - 4, y: bootTopY))
+                p.addQuadCurve(to: CGPoint(x: roofEnd - 6, y: bodyTop),
+                               control: CGPoint(x: bodyRight - 4, y: bodyTop - 2))
+                p.addQuadCurve(to: CGPoint(x: roofPeak, y: roofTop),
+                               control: CGPoint(x: roofEnd - 10, y: roofTop + 2))
+                p.addQuadCurve(to: CGPoint(x: roofStart + 6, y: bodyTop),
+                               control: CGPoint(x: roofStart + 10, y: roofTop + 2))
+                p.addLine(to: CGPoint(x: bodyLeft + 4, y: hoodTopY))
+                p.addLine(to: CGPoint(x: bodyLeft + 4, y: groundY - wheelR * 0.5))
+            } else {
+                // Left side — bonnet on left, boot on right
+                p.addLine(to: CGPoint(x: bodyLeft + 4, y: hoodTopY))
+                p.addQuadCurve(to: CGPoint(x: roofStart + 6, y: bodyTop),
+                               control: CGPoint(x: bodyLeft + 4, y: bodyTop - 2))
+                p.addQuadCurve(to: CGPoint(x: roofPeak, y: roofTop),
+                               control: CGPoint(x: roofStart + 10, y: roofTop + 2))
+                p.addQuadCurve(to: CGPoint(x: roofEnd - 6, y: bodyTop),
+                               control: CGPoint(x: roofEnd - 10, y: roofTop + 2))
+                p.addLine(to: CGPoint(x: bodyRight - 4, y: bootTopY))
+                p.addLine(to: CGPoint(x: bodyRight - 4, y: groundY - wheelR * 0.5))
+            }
         }
-        context.fill(bodyPath, with: .color(color))
 
-        let roofW = bodyW * 0.45
-        let roofH = h * 0.17 * heightScale
-        let roofLeft = frontLeft ? cx - bodyW/2 + skew + bodyW*0.10 : cx - bodyW/2 + skew + bodyW*0.45
-        fill(context, rect: CGRect(x: roofLeft, y: bodyTop - roofH + 5, width: roofW, height: roofH), color: color, radius: 6)
+        // Cut out wheel arches
+        p.addEllipse(in: CGRect(x: frontWX - wheelR * 1.1, y: groundY - wheelR * 1.1,
+                                 width: wheelR * 2.2, height: wheelR * 2.2))
+        p.addEllipse(in: CGRect(x: rearWX - wheelR * 1.1, y: groundY - wheelR * 1.1,
+                                 width: wheelR * 2.2, height: wheelR * 2.2))
 
-        let hX = frontLeft ? cx - bodyW/2 + skew + 6 : cx + bodyW/2 + skew - 28
-        fill(context, rect: CGRect(x: hX, y: bodyTop + bodyH*0.2, width: 20, height: 12), color: .white.opacity(0.7), radius: 3)
+        // Wheels (solid circles)
+        p.addEllipse(in: CGRect(x: frontWX - wheelR, y: groundY - wheelR,
+                                 width: wheelR * 2, height: wheelR * 2))
+        p.addEllipse(in: CGRect(x: rearWX - wheelR, y: groundY - wheelR,
+                                 width: wheelR * 2, height: wheelR * 2))
 
-        let wRadius = w * 0.082 * widthScale
-        fillCircle(context, cx: cx - bodyW/2 + wRadius, cy: groundY, r: wRadius, color: color)
-        fillCircle(context, cx: cx + bodyW/2 - wRadius, cy: groundY, r: wRadius, color: color)
-    }
-
-    private func drawCornerRearView(context: GraphicsContext, w: CGFloat, h: CGFloat, color: Color, rearLeft: Bool) {
-        let cx = w / 2
-        let groundY = h * 0.76
-        let bodyW = w * 0.64 * widthScale
-        let bodyH = h * 0.21 * heightScale
-        let bodyTop = groundY - bodyH
-        let skew: CGFloat = rearLeft ? 18 : -18
-
-        let bodyPath = Path { p in
-            p.move(to:    CGPoint(x: cx - bodyW/2 + skew, y: bodyTop))
-            p.addLine(to: CGPoint(x: cx + bodyW/2 + skew, y: bodyTop))
-            p.addLine(to: CGPoint(x: cx + bodyW/2,        y: groundY))
-            p.addLine(to: CGPoint(x: cx - bodyW/2,        y: groundY))
-            p.closeSubpath()
+        if flipped {
+            // Mirror horizontally
+            var transform = CGAffineTransform(translationX: w, y: 0).scaledBy(x: -1, y: 1)
+            return p.applying(transform)
         }
-        context.fill(bodyPath, with: .color(color))
-
-        let roofW = bodyW * 0.45
-        let roofH = h * 0.17 * heightScale
-        let roofLeft = rearLeft ? cx - bodyW/2 + skew + bodyW*0.45 : cx - bodyW/2 + skew + bodyW*0.10
-        fill(context, rect: CGRect(x: roofLeft, y: bodyTop - roofH + 5, width: roofW, height: roofH), color: color, radius: 6)
-
-        let tX = rearLeft ? cx - bodyW/2 + skew + 6 : cx + bodyW/2 + skew - 28
-        fill(context, rect: CGRect(x: tX, y: bodyTop + bodyH*0.2, width: 20, height: 12), color: Color.red.opacity(0.5), radius: 3)
-
-        let wRadius = w * 0.082 * widthScale
-        fillCircle(context, cx: cx - bodyW/2 + wRadius, cy: groundY, r: wRadius, color: color)
-        fillCircle(context, cx: cx + bodyW/2 - wRadius, cy: groundY, r: wRadius, color: color)
+        return p
     }
+}
 
-    private func fill(_ context: GraphicsContext, rect: CGRect, color: Color, radius: CGFloat) {
-        context.fill(Path(roundedRect: rect, cornerRadius: radius), with: .color(color))
+// MARK: - Front Detail Overlay (headlights, grille)
+
+struct FrontDetailOverlay: View {
+    let carType: CarType
+    let w: CGFloat, h: CGFloat
+
+    var body: some View {
+        let isLarge = carType.category == .scdf
+        let isTall  = carType == .suv || carType == .mpv || isLarge
+        let bodyW   = w * (isLarge ? 0.82 : 0.72)
+        let bodyH   = h * (isTall ? 0.32 : 0.26)
+        let groundY = h * 0.78
+        let bodyTop = groundY - bodyH
+        let cx      = w / 2
+
+        return ZStack {
+            // Headlights
+            let lightW = bodyW * 0.16
+            let lightH = bodyH * 0.18
+            let lightY = bodyTop + bodyH * 0.22
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.white.opacity(0.85))
+                .frame(width: lightW, height: lightH)
+                .position(x: cx - bodyW * 0.28, y: lightY)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.white.opacity(0.85))
+                .frame(width: lightW, height: lightH)
+                .position(x: cx + bodyW * 0.28, y: lightY)
+            // Grille
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(.systemGray5))
+                .frame(width: bodyW * 0.40, height: bodyH * 0.22)
+                .position(x: cx, y: bodyTop + bodyH * 0.65)
+            // Number plate
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(.systemGray4))
+                .frame(width: bodyW * 0.22, height: bodyH * 0.10)
+                .position(x: cx, y: bodyTop + bodyH * 0.88)
+        }
     }
+}
 
-    private func fillCircle(_ context: GraphicsContext, cx: CGFloat, cy: CGFloat, r: CGFloat, color: Color) {
-        context.fill(Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)), with: .color(color))
+// MARK: - Rear Detail Overlay (tail lights, boot line)
+
+struct RearDetailOverlay: View {
+    let carType: CarType
+    let w: CGFloat, h: CGFloat
+
+    var body: some View {
+        let isLarge = carType.category == .scdf
+        let isTall  = carType == .suv || carType == .mpv || isLarge
+        let bodyW   = w * (isLarge ? 0.82 : 0.72)
+        let bodyH   = h * (isTall ? 0.32 : 0.26)
+        let groundY = h * 0.78
+        let bodyTop = groundY - bodyH
+        let cx      = w / 2
+
+        return ZStack {
+            // Tail lights (red)
+            let lightW = bodyW * 0.16
+            let lightH = bodyH * 0.16
+            let lightY = bodyTop + bodyH * 0.22
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.red.opacity(0.7))
+                .frame(width: lightW, height: lightH)
+                .position(x: cx - bodyW * 0.28, y: lightY)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color.red.opacity(0.7))
+                .frame(width: lightW, height: lightH)
+                .position(x: cx + bodyW * 0.28, y: lightY)
+            // Boot line
+            Path { p in
+                p.move(to: CGPoint(x: cx - bodyW * 0.28, y: bodyTop + 5))
+                p.addLine(to: CGPoint(x: cx + bodyW * 0.28, y: bodyTop + 5))
+            }
+            .stroke(Color(.systemGray5), lineWidth: 2)
+            // Rear plate
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(.systemGray4))
+                .frame(width: bodyW * 0.22, height: bodyH * 0.10)
+                .position(x: cx, y: bodyTop + bodyH * 0.75)
+        }
+    }
+}
+
+// MARK: - Side Detail Overlay (windows, door lines)
+
+struct SideDetailOverlay: View {
+    let carType: CarType
+    let w: CGFloat, h: CGFloat
+    let flipped: Bool
+
+    var body: some View {
+        let isLarge = carType.category == .scdf
+        let isSUV   = carType == .suv
+        let isMPV   = carType == .mpv
+        let groundY = h * 0.80
+        let bodyH   = h * (isLarge ? 0.34 : isMPV ? 0.30 : isSUV ? 0.28 : 0.24)
+        let bodyW   = w * (isLarge ? 0.88 : 0.84)
+        let bodyLeft  = (w - bodyW) / 2
+        let bodyRight = bodyLeft + bodyW
+        let bodyTop   = groundY - bodyH
+        let roofH     = h * (isLarge ? 0.0 : isMPV ? 0.18 : isSUV ? 0.20 : 0.19)
+        let roofTop   = bodyTop - roofH
+
+        // Window region
+        let winStartX = flipped ? bodyRight - bodyW * 0.82 : bodyLeft + bodyW * 0.18
+        let winW      = bodyW * (isMPV ? 0.64 : isLarge ? 0.70 : 0.60)
+        let winTop    = roofTop + roofH * 0.1
+        let winH      = roofH * 0.75
+
+        return ZStack {
+            // Window glass
+            if !isLarge {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(Color(.systemGray5).opacity(0.8))
+                    .frame(width: winW, height: winH)
+                    .position(x: winStartX + winW / 2, y: winTop + winH / 2)
+
+                // Window divider (B-pillar)
+                let pillarX = winStartX + winW * (isMPV ? 0.50 : 0.46)
+                Path { p in
+                    p.move(to: CGPoint(x: pillarX, y: winTop))
+                    p.addLine(to: CGPoint(x: pillarX, y: winTop + winH))
+                }
+                .stroke(Color(.systemGray3), lineWidth: 3)
+
+                // Door line
+                Path { p in
+                    let doorX = flipped ? bodyRight - bodyW * 0.50 : bodyLeft + bodyW * 0.50
+                    p.move(to: CGPoint(x: doorX, y: bodyTop))
+                    p.addLine(to: CGPoint(x: doorX, y: groundY - h * 0.085 * 2))
+                }
+                .stroke(Color(.systemGray4), lineWidth: 1.5)
+            } else {
+                // Cab window for large vehicles
+                let cabW = bodyW * 0.28
+                let cabLeft = flipped ? bodyRight - cabW - bodyW * 0.05 : bodyLeft + bodyW * 0.05
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(.systemGray5).opacity(0.8))
+                    .frame(width: cabW, height: bodyH * 0.38)
+                    .position(x: cabLeft + cabW / 2, y: bodyTop + bodyH * 0.22)
+            }
+        }
     }
 }
