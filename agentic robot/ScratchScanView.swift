@@ -22,6 +22,8 @@ let scanAngles: [ScanAngle] = [
 
 struct ScratchScanView: View {
 
+    @Environment(\.dismiss) private var dismiss
+
     let plate: String
     let carType: CarType
     var onLogout: () -> Void
@@ -82,7 +84,6 @@ struct ScratchScanView: View {
 
             if showCompletionScreen { reviewView } else { scanGuideView }
         }
-        .navigationBarBackButtonHidden(true)
 
         // ── Main capture ───────────────────────────────────────────────────
         .sheet(isPresented: $showCamera) {
@@ -219,6 +220,7 @@ struct ScratchScanView: View {
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
                 }
+
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                     Label("Library", systemImage: "photo.on.rectangle")
                         .frame(maxWidth: .infinity).padding()
