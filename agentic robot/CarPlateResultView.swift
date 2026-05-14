@@ -78,9 +78,14 @@ struct CarPlateResultView: View {
                 return
             }
 
+            let observations = request.results as? [VNRecognizedTextObservation] ?? []
             let text = results.compactMap {
-                $0.topCandidates(1).first?.string
-            }.joined(separator: " ")
+                $0.topCandidates(1).first
+            }
+                .sorted { $0.confidence > $1.confidence }
+                .prefix(5)
+                .compactMap { $0.string }
+                .joined(separator: " ")
 
             DispatchQueue.main.async {
 
@@ -98,6 +103,9 @@ struct CarPlateResultView: View {
 
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = false
+        request.minimumTextHeight = 0.05
+        request.recognitionLanguages = ["en-US"]
+        request.automaticallyDetectsLanguage = false
 
         let handler = VNImageRequestHandler(cgImage: cgImage)
 

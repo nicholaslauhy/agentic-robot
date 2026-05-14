@@ -21,6 +21,7 @@ struct LoggedInView: View {
     
     @State private var hasRunTypewriter = false
     @State private var showButtons = false
+    @State private var hasAnimatedText = false
     
     @State private var localErrorMessage: String? = nil
     
@@ -37,6 +38,9 @@ struct LoggedInView: View {
                 Spacer()
 
                 Button("Logout") {
+                    hasAnimatedText = false
+                    displayedText = ""
+                    
                     auth.logout()
                 }
                 .foregroundColor(.red)
@@ -148,6 +152,14 @@ struct LoggedInView: View {
             displayedText = ""
             showButtons = false
 
+            guard auth.didShowIntroAnimation == false else {
+                showButtons = true
+                displayedText = fullText
+                return
+            }
+
+            auth.didShowIntroAnimation = true
+
             let words = fullText.split(separator: " ")
 
             Task {
@@ -155,8 +167,9 @@ struct LoggedInView: View {
                     try? await Task.sleep(for: .milliseconds(120))
                     displayedText += word + " "
                 }
+
                 await MainActor.run {
-                    withAnimation(.easeIn(duration: 0.6)) {
+                    withAnimation(.easeIn(duration: 0.4)) {
                         showButtons = true
                     }
                 }

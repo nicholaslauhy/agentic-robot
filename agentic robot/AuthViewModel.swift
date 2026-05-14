@@ -6,7 +6,8 @@ import UIKit
 class AuthViewModel: ObservableObject {
 
     @Published var user: FirebaseAuth.User?
-    @Published var errorMessage: String? // Published property for error messages
+    @Published var errorMessage: String?
+    @Published var didShowIntroAnimation = false
 
     private var authStateListener: AuthStateDidChangeListenerHandle?
 
@@ -113,5 +114,6 @@ class AuthViewModel: ObservableObject {
     func logout() {
         try? Auth.auth().signOut()
         user = nil
+        didShowIntroAnimation = false
     }
 }
