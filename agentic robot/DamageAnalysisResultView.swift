@@ -71,6 +71,8 @@ struct DamageAnalysisResultView: View {
     @State private var showAddCase     = false
     @State private var showReport      = false
     @State private var detectionToEdit: MutableDamageDetection? = nil
+    
+    @State private var pdfURL: URL?
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -182,7 +184,21 @@ struct DamageAnalysisResultView: View {
 
                 // ── Generate Report ───────────────────────────────────────────
                 Button {
-                    showReport = true
+
+                    if let url = DamageReportGenerator.generatePDF(
+                        plate: plate,
+                        carType: carType.rawValue,
+                        detections: mutableDetections,
+                        scanImages: scanImages
+                    ) {
+
+                        DispatchQueue.main.async {
+
+                            pdfURL = url
+                            showReport = true
+                        }
+                    }
+
                 } label: {
                     HStack {
                         Image(systemName: "doc.text.fill")
@@ -226,11 +242,14 @@ struct DamageAnalysisResultView: View {
         }
         // ── Report sheet ──────────────────────────────────────────────────────
         .sheet(isPresented: $showReport) {
+
             ReportWelcomeView(
                 plate: plate,
                 carType: carType,
                 detectionCount: mutableDetections.count,
+                pdfURL: pdfURL,
                 onLogout: {
+
                     showReport = false
                     onLogout()
                 }
@@ -904,73 +923,110 @@ struct ReportWelcomeView: View {
     let plate: String
     let carType: CarType
     let detectionCount: Int
+    let pdfURL: URL?
     var onLogout: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showShareSheet = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 32) {
-                Spacer()
-
-                Image(systemName: "doc.richtext.fill")
-                    .font(.system(size: 64))
-                    .foregroundColor(carType.accentColor)
-
-                VStack(spacing: 8) {
-                    Text("Damage Report")
-                        .font(.largeTitle).bold()
-
-                    Text("Vehicle: \(carType.rawValue)")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-
-                    Text("Plate: \(plate)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-
-                VStack(spacing: 4) {
-                    Text("\(detectionCount)")
-                        .font(.system(size: 56, weight: .black))
+            ScrollView{
+                VStack(spacing: 32) {
+                    Spacer()
+                    
+                    Image(systemName: "doc.richtext.fill")
+                        .font(.system(size: 64))
                         .foregroundColor(carType.accentColor)
-                    Text(detectionCount == 1 ? "damage case recorded" : "damage cases recorded")
+                    
+                    VStack(spacing: 8) {
+                        Text("Damage Report")
+                            .font(.largeTitle).bold()
+                        
+                        Text("Vehicle: \(carType.rawValue)")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Plate: \(plate)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    VStack(spacing: 4) {
+                        Text("\(detectionCount)")
+                            .font(.system(size: 56, weight: .black))
+                            .foregroundColor(carType.accentColor)
+                        Text(detectionCount == 1 ? "damage case recorded" : "damage cases recorded")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 20)
+                    .frame(maxWidth: .infinity)
+                    .background(carType.accentColor.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .padding(.horizontal, 40)
+                    
+                    Text("Report successfully generated. Thank you for your submission.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
-                }
-                .padding(.vertical, 20)
-                .frame(maxWidth: .infinity)
-                .background(carType.accentColor.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 18))
-                .padding(.horizontal, 40)
-
-                Text("Report successfully generated. Thank you for your submission.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
-
-                Spacer()
-
-                Button {
-                    dismiss()
-                    onLogout()
-                } label: {
-                    Text("Logout")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red)
-                        .foregroundColor(.white)
-                        .cornerRadius(14)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
+                    
+                    Spacer()
+                    
+                    VStack(spacing: 14) {
+                        
+                        Button {
+                            
+                            showShareSheet = true
+                            
+                        } label: {
+                            
+                            HStack {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Share PDF Report")
+                            }
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(carType.accentColor)
+                            .foregroundColor(.white)
+                            .cornerRadius(14)
+                        }
+                        
+                        Button {
+                            
+                            dismiss()
+                            onLogout()
+                            
+                        } label: {
+                            
+                            Text("Logout")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.red)
+                                .foregroundColor(.white)
+                                .cornerRadius(14)
+                        }
+                    }
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 40)
+                    .padding(.top, 20)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.bottom, 40)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
+                }
+            }
+            .sheet(isPresented: $showShareSheet) {
+
+                if let pdfURL {
+
+                    ShareSheet(items: [pdfURL])
                 }
             }
         }
