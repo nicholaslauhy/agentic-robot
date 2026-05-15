@@ -50,15 +50,27 @@ struct LoggedInView: View {
             guard let data = data,
                   let response = try? JSONDecoder().decode([String: String].self, from: data),
                   let rawPlate = response["plate"] else {
+                DispatchQueue.main.async {
+                    self.localErrorMessage = "Could not reach the server. Please try again."
+                }
                 return
             }
-            
+
+            // fast_alpr returns "[]" when no plate is detected
+            let trimmed = rawPlate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed != "[]" && !trimmed.isEmpty else {
+                DispatchQueue.main.async {
+                    self.localErrorMessage = "No licence plate detected. Please try a clearer photo."
+                }
+                return
+            }
+
             let plate: String
-            if rawPlate.contains("text='") {
-                let components = rawPlate.components(separatedBy: "text='")
-                plate = components[1].components(separatedBy: "'").first ?? rawPlate
+            if trimmed.contains("text='") {
+                let components = trimmed.components(separatedBy: "text='")
+                plate = components[1].components(separatedBy: "'").first ?? trimmed
             } else {
-                plate = rawPlate
+                plate = trimmed
             }
 
             DispatchQueue.main.async {
