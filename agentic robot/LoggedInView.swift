@@ -125,6 +125,7 @@ struct LoggedInView: View {
 
                     Button("Choose Another Photo") {
                         self.selectedImage = nil
+                        self.localErrorMessage = nil
                     }
                     .buttonStyle(.bordered)
 
@@ -135,6 +136,14 @@ struct LoggedInView: View {
                 }
                 .padding(.horizontal)
                 .frame(maxWidth: .infinity)
+
+                if let localErrorMessage = localErrorMessage {
+                    Text(localErrorMessage)
+                        .foregroundColor(.red)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
             } else {
 
                 VStack(spacing: 15) {
@@ -164,17 +173,7 @@ struct LoggedInView: View {
                     }
                     .buttonStyle(.bordered)
                     
-                    if let localErrorMessage = localErrorMessage {
-                        Text(localErrorMessage)
-                            .foregroundColor(.red)
-                            .font(.footnote)
-                            .padding(.top, 10)
-                            .onAppear {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                    self.localErrorMessage = nil
-                                }
-                            }
-                    }
+
                 }
                 .opacity(showButtons ? 1 : 0)
                 .animation(.easeIn(duration: 0.5), value: showButtons)
