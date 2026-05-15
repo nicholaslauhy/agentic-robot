@@ -27,13 +27,16 @@ struct ScratchScanView: View {
     let plate: String
     let carType: CarType
     var onLogout: () -> Void
+    var onBackToPlateResult: () -> Void
+    var initialImages: [UIImage] = []
+    var startOnReviewScreen: Bool = false
     var onScanComplete: ([UIImage], @escaping () -> Void) -> Void
 
-    @State private var currentAngleIndex = 0
-    @State private var capturedImages: [UIImage?] = Array(repeating: nil, count: 4)
+    @State private var currentAngleIndex: Int
+    @State private var capturedImages: [UIImage?]
     @State private var showCamera = false
     @State private var selectedPhotoItem: PhotosPickerItem?
-    @State private var showCompletionScreen = false
+    @State private var showCompletionScreen: Bool
     @State private var localErrorMessage: String? = nil
     @State private var isSubmittingAnalysis = false
 
@@ -47,6 +50,33 @@ struct ScratchScanView: View {
     private var capturedCount: Int { capturedImages.compactMap { $0 }.count }
     private var progress: Double { Double(capturedCount) / Double(scanAngles.count) }
 
+    init(
+        plate: String,
+        carType: CarType,
+        onLogout: @escaping () -> Void,
+        onBackToPlateResult: @escaping () -> Void,
+        initialImages: [UIImage] = [],
+        startOnReviewScreen: Bool = false,
+        onScanComplete: @escaping ([UIImage], @escaping () -> Void) -> Void
+    ) {
+        self.plate = plate
+        self.carType = carType
+        self.onLogout = onLogout
+        self.onBackToPlateResult = onBackToPlateResult
+        self.initialImages = initialImages
+        self.startOnReviewScreen = startOnReviewScreen
+        self.onScanComplete = onScanComplete
+
+        var imageSlots: [UIImage?] = Array(repeating: nil, count: 4)
+        for index in 0..<min(initialImages.count, 4) {
+            imageSlots[index] = initialImages[index]
+        }
+
+        _capturedImages = State(initialValue: imageSlots)
+        _showCompletionScreen = State(initialValue: startOnReviewScreen || initialImages.count == 4)
+        _currentAngleIndex = State(initialValue: min(initialImages.count, 3))
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
 
@@ -274,13 +304,41 @@ struct ScratchScanView: View {
     private var reviewView: some View {
         ScrollView {
             VStack(spacing: 20) {
+
+                // ── Header ────────────────────────────────────────────────────
                 HStack {
-                    Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
-                    Text("All Angles Captured").font(.title2.bold())
+                    // Back to scan guide
+                    Button {
+                        onBackToPlateResult() 
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .fontWeight(.semibold)
+                            Text("Back")
+                        }
+                        .foregroundColor(carType.accentColor)
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
+                        Text("All Angles Captured").font(.title3.bold())
+                    }
+
+                    Spacer()
+
+                    // Invisible balance element so the title stays centred
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
+                    }
+                    .hidden()
                 }
+                .padding(.horizontal)
                 .padding(.top, 8)
 
-                Text("Tap any photo to replace it before submitting.")
+                Text("Tap any photo to replace it, then submit.")
                     .font(.subheadline).foregroundColor(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal)
 

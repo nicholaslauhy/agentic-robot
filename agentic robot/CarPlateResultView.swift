@@ -8,40 +8,41 @@ struct CarPlateResultView: View {
     @State private var navigateToTypeSelection = false
     @State private var selectedCarType: CarType? = nil
     @State private var navigateToScratchScan = false
+
     @State private var scannedImages: [UIImage] = []
+    @State private var shouldOpenScratchOnReview = false
 
     @State private var isAnalyzing = false
     @State private var analysisErrorMessage: String? = nil
     @State private var damageDetections: [DamageDetection] = []
     @State private var navigateToDamageResults = false
 
-    // Use the shared singleton because DamageAnalysisService init is private
     private let damageAnalysisService = DamageAnalysisService.shared
 
     var body: some View {
         ZStack {
             VStack(spacing: 20) {
-
+                
                 HStack {
                     Text("Car Plate Result")
                         .font(.largeTitle)
                         .bold()
-
+                    
                     Spacer()
-
+                    
                     Button("Logout") {
                         onLogout()
                     }
                     .foregroundColor(.red)
                 }
                 .padding()
-
+                
                 Text("Detected Plate:")
                     .font(.headline)
-
+                
                 Text(plate.isEmpty ? "No result" : plate)
                     .font(.system(size: 40, weight: .bold))
-
+                
                 if let analysisErrorMessage {
                     Text(analysisErrorMessage)
                         .font(.footnote)
@@ -49,10 +50,11 @@ struct CarPlateResultView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
-
+                
                 Spacer()
-
+                
                 Button {
+                    shouldOpenScratchOnReview = false
                     navigateToTypeSelection = true
                 } label: {
                     Text("Proceed to Scratch Scan")
@@ -66,7 +68,6 @@ struct CarPlateResultView: View {
                 }
                 .padding(.bottom, 24)
             }
-
             if isAnalyzing {
                 analyzingOverlay
             }
@@ -77,6 +78,7 @@ struct CarPlateResultView: View {
                 onLogout: onLogout,
                 onCarTypeSelected: { carType in
                     selectedCarType = carType
+                    shouldOpenScratchOnReview = false
                     navigateToScratchScan = true
                 }
             )
@@ -87,6 +89,12 @@ struct CarPlateResultView: View {
                     plate: plate,
                     carType: carType,
                     onLogout: onLogout,
+                    onBackToPlateResult: {
+                        navigateToScratchScan = false
+                        navigateToTypeSelection = false
+                    },
+                    initialImages: shouldOpenScratchOnReview ? scannedImages : [],
+                    startOnReviewScreen: shouldOpenScratchOnReview,
                     onScanComplete: { images, finishLoading in
                         scannedImages = images
                         startDamageAnalysis(
@@ -104,6 +112,14 @@ struct CarPlateResultView: View {
                     plate: plate,
                     carType: carType,
                     detections: damageDetections,
+                    onBackToScratchScan: {
+                        navigateToDamageResults = false
+                        shouldOpenScratchOnReview = true
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            navigateToScratchScan = true
+                        }
+                    },
                     onLogout: onLogout
                 )
             }
@@ -118,7 +134,7 @@ struct CarPlateResultView: View {
             VStack(spacing: 14) {
                 ProgressView()
                     .scaleEffect(1.3)
-                
+
                 Text("Analyzing your pictures for any dents or scratches...")
                     .font(.headline)
                     .multilineTextAlignment(.center)
@@ -146,7 +162,6 @@ struct CarPlateResultView: View {
         carType: CarType,
         finishLoading: @escaping () -> Void
     ) {
-        // Prevent duplicate POST /analyze-damage requests
         if isAnalyzing {
             return
         }
@@ -157,25 +172,22 @@ struct CarPlateResultView: View {
         Task {
             do {
                 let results = try await damageAnalysisService.analyze(images: images)
-
+                
                 await MainActor.run {
                     print("Damage analysis succeeded")
                     print("Result count:", results.count)
-                    print("Selected car type:", selectedCarType?.rawValue ?? "nil")
-
+                    
+                    scannedImages = images
                     damageDetections = results
                     isAnalyzing = false
                     finishLoading()
-
-                    // Pop ScratchScanView first
+                    
+                    // Close ScratchScanView first
                     navigateToScratchScan = false
                 }
-
-                // Let SwiftUI update the navigation stack before pushing result page
+                
                 try? await Task.sleep(nanoseconds: 300_000_000)
-
                 await MainActor.run {
-                    print("Navigating to damage results")
                     navigateToDamageResults = true
                 }
 

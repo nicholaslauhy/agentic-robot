@@ -1,10 +1,3 @@
-//
-//  DamageAnalysisService.swift
-//  agentic robot
-//
-//  Created by q2 on 14/5/26.
-//
-
 import SwiftUI
 
 struct DamageAnalysisResponse: Codable {
@@ -19,6 +12,7 @@ struct DamageDetection: Codable, Identifiable {
     let damageType: String
     let confidence: Double
     let cropBase64: String
+    let contextBase64: String   // full-image view with bbox highlighted
 
     enum CodingKeys: String, CodingKey {
         case angleIndex
@@ -26,12 +20,17 @@ struct DamageDetection: Codable, Identifiable {
         case damageType
         case confidence
         case cropBase64
+        case contextBase64
     }
 
     var cropImage: UIImage? {
-        guard let data = Data(base64Encoded: cropBase64) else {
-            return nil
-        }
+        guard let data = Data(base64Encoded: cropBase64) else { return nil }
+        return UIImage(data: data)
+    }
+
+    var contextImage: UIImage? {
+        guard !contextBase64.isEmpty,
+              let data = Data(base64Encoded: contextBase64) else { return nil }
         return UIImage(data: data)
     }
 }
@@ -48,7 +47,7 @@ final class DamageAnalysisService {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 30
+        request.timeoutInterval = 60
 
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -56,9 +55,7 @@ final class DamageAnalysisService {
         var body = Data()
 
         for (index, image) in images.enumerated() {
-            guard let imageData = image.jpegData(compressionQuality: 0.75) else {
-                continue
-            }
+            guard let imageData = image.jpegData(compressionQuality: 0.75) else { continue }
 
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
             body.append("Content-Disposition: form-data; name=\"files\"; filename=\"damage_\(index).jpg\"\r\n".data(using: .utf8)!)
@@ -80,9 +77,7 @@ final class DamageAnalysisService {
         }
 
         let decoded = try JSONDecoder().decode(DamageAnalysisResponse.self, from: data)
-
         print("Decoded damage result count:", decoded.results.count)
-
         return decoded.results
     }
 }
