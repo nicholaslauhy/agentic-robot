@@ -112,6 +112,7 @@ struct CarPlateResultView: View {
                     plate: plate,
                     carType: carType,
                     detections: damageDetections,
+                    scanImages: scannedImages,
                     onBackToScratchScan: {
                         navigateToDamageResults = false
                         shouldOpenScratchOnReview = true

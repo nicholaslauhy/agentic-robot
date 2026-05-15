@@ -12,7 +12,8 @@ struct DamageDetection: Codable, Identifiable {
     let damageType: String
     let confidence: Double
     let cropBase64: String
-    let contextBase64: String   // full-image view with bbox highlighted
+    let contextBase64: String       // annotated: mask overlay + bbox rectangle burned in
+    let cleanContextBase64: String  // pristine: no annotations — used as base for user bbox editing
 
     enum CodingKeys: String, CodingKey {
         case angleIndex
@@ -21,6 +22,7 @@ struct DamageDetection: Codable, Identifiable {
         case confidence
         case cropBase64
         case contextBase64
+        case cleanContextBase64
     }
 
     var cropImage: UIImage? {
@@ -28,9 +30,17 @@ struct DamageDetection: Codable, Identifiable {
         return UIImage(data: data)
     }
 
+    /// Annotated image shown in the read-only detail view.
     var contextImage: UIImage? {
         guard !contextBase64.isEmpty,
               let data = Data(base64Encoded: contextBase64) else { return nil }
+        return UIImage(data: data)
+    }
+
+    /// Clean image used as the base when the user draws their own bounding box.
+    var cleanContextImage: UIImage? {
+        guard !cleanContextBase64.isEmpty,
+              let data = Data(base64Encoded: cleanContextBase64) else { return nil }
         return UIImage(data: data)
     }
 }
