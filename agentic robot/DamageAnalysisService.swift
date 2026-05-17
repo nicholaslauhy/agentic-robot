@@ -51,7 +51,8 @@ final class DamageAnalysisService {
     private init() {}
 
     func analyze(images: [UIImage]) async throws -> [DamageDetection] {
-        guard let url = URL(string: "http://127.0.0.1:8000/analyze-damage") else {
+        // REPLACE THIS IP ADDRESS
+        guard let url = URL(string: "http://192.168.86.176:8000/analyze-damage") else {
             throw URLError(.badURL)
         }
 

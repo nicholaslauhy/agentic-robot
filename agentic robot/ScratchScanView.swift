@@ -309,7 +309,7 @@ struct ScratchScanView: View {
                 HStack {
                     // Back to scan guide
                     Button {
-                        onBackToPlateResult() 
+                        onBackToPlateResult()
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
@@ -342,7 +342,7 @@ struct ScratchScanView: View {
                     .font(.subheadline).foregroundColor(.secondary)
                     .multilineTextAlignment(.center).padding(.horizontal)
 
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
+                LazyVStack(spacing: 16) {
                     ForEach(0..<scanAngles.count, id: \.self) { idx in
                         ReviewThumbnail(
                             label: scanAngles[idx].label,
@@ -460,27 +460,46 @@ struct ReviewThumbnail: View {
 
     var body: some View {
         Button(action: onTap) {
-            ZStack(alignment: .bottomLeading) {
-                if let img = image {
-                    Image(uiImage: img).resizable().scaledToFill()
-                        .frame(height: 140).clipShape(RoundedRectangle(cornerRadius: 12))
-                } else {
-                    RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray5)).frame(height: 140)
+            VStack(spacing: 0) {
+                ZStack(alignment: .bottomLeading) {
+                    if let img = image {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()          // never squishes or crops
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.systemGray6))
+                    } else {
+                        Color(.systemGray5)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 200)
+                        Text("No photo yet")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+
+                    // Label + edit hint gradient bar
+                    HStack {
+                        Text(label).font(.subheadline.bold()).foregroundColor(.white)
+                        Spacer()
+                        HStack(spacing: 4) {
+                            Image(systemName: "pencil.circle.fill")
+                            Text("Tap to replace")
+                                .font(.caption)
+                        }
+                        .foregroundColor(.white)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.65), Color.clear],
+                            startPoint: .bottom, endPoint: .top
+                        )
+                    )
                 }
-                HStack {
-                    Text(label).font(.caption.bold()).foregroundColor(.white)
-                    Spacer()
-                    Image(systemName: "pencil.circle.fill").foregroundColor(.white)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(
-                    LinearGradient(colors: [Color.black.opacity(0.6), Color.clear],
-                                   startPoint: .bottom, endPoint: .top)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                )
+                .clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            .frame(height: 140)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(accentColor.opacity(0.4), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(accentColor.opacity(0.4), lineWidth: 1.5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

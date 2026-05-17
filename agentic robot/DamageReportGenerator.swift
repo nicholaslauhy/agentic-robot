@@ -68,23 +68,25 @@ struct DamageReportGenerator {
 
                 func drawImage(
                     _ image: UIImage,
-                    height: CGFloat = 180
+                    maxHeight: CGFloat = 220
                 ) {
+                    let availableWidth: CGFloat = 515
+                    let aspectRatio = image.size.width > 0
+                        ? image.size.height / image.size.width
+                        : 1
+                    // Scale to fit available width, but cap at maxHeight
+                    let naturalHeight = availableWidth * aspectRatio
+                    let drawHeight = min(naturalHeight, maxHeight)
+                    let drawWidth  = drawHeight / aspectRatio  // may be narrower than available
 
-                    newPageIfNeeded(height + 20)
+                    newPageIfNeeded(drawHeight + 20)
 
-                    let width = 515.0
-
-                    let rect = CGRect(
-                        x: 40,
-                        y: y,
-                        width: width,
-                        height: height
-                    )
-
+                    // Centre horizontally on the page
+                    let xOffset: CGFloat = 40 + (availableWidth - drawWidth) / 2
+                    let rect = CGRect(x: xOffset, y: y, width: drawWidth, height: drawHeight)
                     image.draw(in: rect)
 
-                    y += height + 12
+                    y += drawHeight + 12
                 }
 
                 // FIRST PAGE
@@ -187,7 +189,7 @@ struct DamageReportGenerator {
                             bold: true
                         )
 
-                        drawImage(context, height: 180)
+                        drawImage(context)
                     }
 
                     // CROP IMAGE
@@ -199,7 +201,7 @@ struct DamageReportGenerator {
                             bold: true
                         )
 
-                        drawImage(crop, height: 160)
+                        drawImage(crop)
                     }
 
                     y += 20

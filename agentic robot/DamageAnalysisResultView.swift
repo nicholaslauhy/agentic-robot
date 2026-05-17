@@ -2,6 +2,11 @@ import SwiftUI
 import UIKit
 import Combine
 
+// Make URL usable as a sheet item
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
 // MARK: - Mutable Detection Model
 
 class MutableDamageDetection: ObservableObject, Identifiable {
@@ -69,10 +74,10 @@ struct DamageAnalysisResultView: View {
     // Sheet / navigation state
     @State private var selectedDetection: MutableDamageDetection? = nil
     @State private var showAddCase     = false
-    @State private var showReport      = false
     @State private var detectionToEdit: MutableDamageDetection? = nil
     
-    @State private var pdfURL: URL?
+    @State private var pdfURL: URL? = nil
+    @State private var isGeneratingReport = false
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -184,21 +189,24 @@ struct DamageAnalysisResultView: View {
 
                 // ── Generate Report ───────────────────────────────────────────
                 Button {
-
-                    if let url = DamageReportGenerator.generatePDF(
-                        plate: plate,
-                        carType: carType.rawValue,
-                        detections: mutableDetections,
-                        scanImages: scanImages
-                    ) {
-
-                        DispatchQueue.main.async {
-
-                            pdfURL = url
-                            showReport = true
-                        }
+                    guard !isGeneratingReport else { return }
+                    isGeneratingReport = true
+                    let plate = plate
+                    let carType = carType
+                    let detections = mutableDetections
+                    let scanImages = scanImages
+                    Task(priority: .userInitiated) {
+                        let url = await Task(priority: .userInitiated) {
+                            DamageReportGenerator.generatePDF(
+                                plate: plate,
+                                carType: carType.rawValue,
+                                detections: detections,
+                                scanImages: scanImages
+                            )
+                        }.value
+                        isGeneratingReport = false
+                        pdfURL = url
                     }
-
                 } label: {
                     HStack {
                         Image(systemName: "doc.text.fill")
@@ -207,13 +215,40 @@ struct DamageAnalysisResultView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(carType.accentColor)
+                    .background(isGeneratingReport ? Color.gray : carType.accentColor)
                     .foregroundColor(.white)
                     .cornerRadius(14)
                     .padding(.horizontal)
                 }
+                .disabled(isGeneratingReport)
                 .padding(.top, 12)
                 .padding(.bottom, 30)
+            }
+        }
+        .overlay {
+            if isGeneratingReport {
+                ZStack {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.4)
+                            .tint(.white)
+                        Text("Generating your report…")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("This may take a few seconds.")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.75))
+                    }
+                    .padding(32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color(.systemGray2).opacity(0.95))
+                    )
+                    .shadow(radius: 16)
+                    .padding(.horizontal, 40)
+                }
+                .transition(.opacity.animation(.easeInOut(duration: 0.2)))
             }
         }
         .navigationBarBackButtonHidden(true)
@@ -228,7 +263,8 @@ struct DamageAnalysisResultView: View {
         .sheet(item: $detectionToEdit) { detection in
             BoundingBoxEditorSheet(
                 detection: detection,
-                accentColor: carType.accentColor
+                accentColor: carType.accentColor,
+                scanImage: detection.angleIndex < scanImages.count ? scanImages[detection.angleIndex] : nil
             )
         }
         // ── Add Case sheet ────────────────────────────────────────────────────
@@ -241,16 +277,14 @@ struct DamageAnalysisResultView: View {
             }
         }
         // ── Report sheet ──────────────────────────────────────────────────────
-        .sheet(isPresented: $showReport) {
-
+        .sheet(item: $pdfURL) { url in
             ReportWelcomeView(
                 plate: plate,
                 carType: carType,
                 detectionCount: mutableDetections.count,
-                pdfURL: pdfURL,
+                pdfURL: url,
                 onLogout: {
-
-                    showReport = false
+                    pdfURL = nil
                     onLogout()
                 }
             )
@@ -363,7 +397,12 @@ struct DamageDetailSheet: View {
                         Label("Location on car", systemImage: "viewfinder")
                             .font(.headline).padding(.horizontal)
 
-                        if let ctxImage = detection.contextImage {
+                        // For manual cases, use the clean full-car image + the saved bbox so the
+                        // orange box is positioned from the same coordinates used for the crop.
+                        // For backend cases without a saved bbox, fall back to the annotated context image.
+                        if let ctxImage = detection.normalizedBBox == nil
+                            ? detection.contextImage
+                            : (detection.cleanContextImage ?? detection.contextImage) {
                             BoundingBoxOverlayView(
                                 image: ctxImage,
                                 normalizedBBox: .constant(detection.normalizedBBox),
@@ -477,8 +516,16 @@ struct BoundingBoxOverlayView: View {
                         let rect = clampedRect(from: val.startLocation,
                                               to: val.location,
                                               within: imageRect)
-                        currentDrag = rect
                         normalizedBBox = normalize(rect, imageRect: imageRect)
+
+                        // IMPORTANT:
+                        // Do not keep the screen-space drag rectangle after the drag ends.
+                        // When normalizedBBox becomes non-nil, the preview below appears and
+                        // the layout can change. If currentDrag stays set, SwiftUI keeps drawing
+                        // the old screen-space rectangle using the old image size/position, so
+                        // the first box appears shifted/wrong. Clearing it forces the overlay to
+                        // redraw from normalizedBBox in the new layout.
+                        currentDrag = nil
                     }
                 : nil
             )
@@ -553,12 +600,17 @@ struct BoundingBoxOverlayView: View {
 struct BoundingBoxEditorSheet: View {
     @ObservedObject var detection: MutableDamageDetection
     let accentColor: Color
+    /// The full original scan photo for this angle — used as both the drawing
+    /// canvas and the crop source. Falls back to cleanContextImage if nil.
+    let scanImage: UIImage?
     @Environment(\.dismiss) private var dismiss
 
     // Local working state — not committed to detection until Done is tapped
     @State private var pendingBBox: CGRect? = nil
     @State private var pendingDamageType: String = ""
-    @State private var hasInitialised = false
+
+    /// The image the user draws on — always the full car photo.
+    private var canvasImage: UIImage? { scanImage ?? detection.cleanContextImage ?? detection.contextImage }
 
     var body: some View {
         NavigationStack {
@@ -597,22 +649,35 @@ struct BoundingBoxEditorSheet: View {
                             .font(.headline)
                             .padding(.horizontal)
 
-                        Text("Drag on the image to draw the boundary. You must draw a box before saving.")
+                        Text("Drag on the image to draw the boundary around the damage area.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
 
-                        if let cleanImg = detection.cleanContextImage ?? detection.contextImage {
+                        if let img = canvasImage {
                             BoundingBoxOverlayView(
-                                image: cleanImg,
+                                image: img,
                                 normalizedBBox: $pendingBBox,
                                 accentColor: .orange,
                                 isInteractive: true
                             )
                             .padding(.horizontal)
 
-                            if pendingBBox != nil {
+                            if let bbox = pendingBBox {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Label("Close-up Preview", systemImage: "magnifyingglass")
+                                        .font(.subheadline.bold())
+                                        .padding(.horizontal)
+
+                                    Image(uiImage: renderCrop(image: img, bbox: bbox))
+                                        .resizable()
+                                        .scaledToFit()
+                                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                                        .padding(.horizontal)
+                                }
+                                .padding(.top, 6)
+
                                 Text("Boundary drawn. Draw again to replace it.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
@@ -624,7 +689,7 @@ struct BoundingBoxEditorSheet: View {
                                     .padding(.horizontal)
                             }
                         } else {
-                            Text("No context image is available for this detection.")
+                            Text("No image available for this detection.")
                                 .foregroundColor(.secondary)
                                 .padding()
                         }
@@ -635,31 +700,29 @@ struct BoundingBoxEditorSheet: View {
             .navigationTitle("Edit Case")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear {
-                // Seed local working state from the detection's current values
                 pendingDamageType = detection.damageType
-                // Don't pre-fill pendingBBox — user must draw a fresh box to confirm
+                pendingBBox = detection.normalizedBBox
             }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        guard let bbox = pendingBBox else { return }
-                        if let baseImg = detection.cleanContextImage ?? detection.contextImage {
-                            detection.normalizedBBox = bbox
-                            detection.contextImage   = renderContext(image: baseImg, bbox: bbox)
-                            detection.cropImage      = renderCrop(image: baseImg, bbox: bbox)
-                        }
-                        detection.damageType = pendingDamageType
-                        // Human verified — override confidence to 100%
-                        detection.confidence = 1.0
+                        guard let bbox = pendingBBox, let baseImg = canvasImage else { return }
+                        detection.normalizedBBox  = bbox
+                        // contextImage = full car photo with orange box burned in
+                        detection.contextImage    = renderContext(image: baseImg, bbox: bbox)
+                        // cleanContextImage = full car photo with no annotations (for future edits)
+                        detection.cleanContextImage = normalizedImage(baseImg)
+                        // cropImage = padded crop from the full photo
+                        detection.cropImage       = renderAnnotatedCrop(image: baseImg, bbox: bbox)
+                        detection.damageType      = pendingDamageType
+                        detection.confidence      = 1.0
                         dismiss()
                     }
                     .disabled(pendingBBox == nil || pendingDamageType.isEmpty)
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Clear Box") {
-                        pendingBBox = nil
-                    }
-                    .foregroundColor(.red)
+                    Button("Clear Box") { pendingBBox = nil }
+                        .foregroundColor(.red)
                 }
             }
         }
@@ -719,7 +782,7 @@ struct AddCaseSheet: View {
                                 confidence:        1.0,
                                 cropImage:         croppedImage(),
                                 contextImage:      selectedImage.map { renderContext(image: $0, bbox: normalizedBBox) },
-                                cleanContextImage: selectedImage,
+                                cleanContextImage: selectedImage.map { normalizedImage($0) },
                                 normalizedBBox:    normalizedBBox
                             )
                             onAdd(detection)
@@ -775,7 +838,10 @@ struct AddCaseSheet: View {
                                         .foregroundColor(selectedAngleIndex == idx ? accentColor : .primary)
                                 }
                                 .onTapGesture {
-                                    if hasImage { selectedAngleIndex = idx }
+                                    if hasImage {
+                                        selectedAngleIndex = idx
+                                        normalizedBBox = nil
+                                    }
                                 }
                                 .opacity(hasImage ? 1 : 0.4)
                             }
@@ -846,7 +912,20 @@ struct AddCaseSheet: View {
                 )
                 .padding(.horizontal)
 
-                if normalizedBBox != nil {
+                if let bbox = normalizedBBox {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Close-up Preview", systemImage: "magnifyingglass")
+                            .font(.subheadline.bold())
+                            .padding(.horizontal)
+
+                        Image(uiImage: renderCrop(image: img, bbox: bbox))
+                            .resizable()
+                            .scaledToFit()
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .padding(.horizontal)
+                    }
+                    .padding(.top, 8)
+
                     Text("Boundary set. Drag again to adjust.")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -865,56 +944,157 @@ struct AddCaseSheet: View {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// Crop the selected image to the drawn bbox to use as the cropImage.
+    /// Crop with surrounding context padding, matching renderCrop behaviour.
     private func croppedImage() -> UIImage? {
         guard let img = selectedImage, let bbox = normalizedBBox else { return selectedImage }
-        let imgW = img.size.width
-        let imgH = img.size.height
-        let cropRect = CGRect(
-            x: bbox.minX * imgW,
-            y: bbox.minY * imgH,
-            width: bbox.width * imgW,
-            height: bbox.height * imgH
-        )
-        guard let cgImg = img.cgImage?.cropping(to: cropRect) else { return selectedImage }
-        return UIImage(cgImage: cgImg, scale: img.scale, orientation: img.imageOrientation)
+        return renderAnnotatedCrop(image: img, bbox: bbox)
     }
 }
 
 /// Renders the full image with an orange bounding box drawn on it.
 /// Used as contextImage — both for user-added cases and after the user edits a bbox.
 private func renderContext(image: UIImage, bbox: CGRect?) -> UIImage {
-    let renderer = UIGraphicsImageRenderer(size: image.size)
+    // Normalize first so image.size and the drawn rect are in the same coordinate space
+    let img = normalizedImage(image)
+    let renderer = UIGraphicsImageRenderer(size: img.size)
     return renderer.image { _ in
-        image.draw(at: .zero)
+        img.draw(at: .zero)
         guard let bbox else { return }
         let rect = CGRect(
-            x: bbox.minX * image.size.width,
-            y: bbox.minY * image.size.height,
-            width: bbox.width * image.size.width,
-            height: bbox.height * image.size.height
+            x: bbox.minX * img.size.width,
+            y: bbox.minY * img.size.height,
+            width: bbox.width * img.size.width,
+            height: bbox.height * img.size.height
         )
         UIColor.orange.setStroke()
         let path = UIBezierPath(rect: rect)
-        path.lineWidth = max(image.size.width * 0.004, 3)
+        path.lineWidth = max(img.size.width * 0.004, 3)
         path.stroke()
     }
 }
 
-/// Crops the image to the normalised bbox.
-/// If bbox is nil the full image is returned unchanged (used for Clear).
-private func renderCrop(image: UIImage, bbox: CGRect?) -> UIImage {
-    guard let bbox else { return image }
-    let imgW = image.size.width
-    let imgH = image.size.height
-    let cropRect = CGRect(
-        x: bbox.minX * imgW,
-        y: bbox.minY * imgH,
-        width: bbox.width * imgW,
-        height: bbox.height * imgH
+/// Re-draws `image` into a new bitmap with `.up` orientation so that
+/// `cgImage` pixel coordinates always match `image.size` coordinates.
+/// We always re-render (ignoring the orientation flag) because some images
+/// report `.up` but still have a transposed cgImage pixel buffer.
+private func normalizedImage(_ image: UIImage) -> UIImage {
+    // Force scale = 1 so UIImage.size, UIGraphics coordinates, and cgImage pixel
+    // coordinates all describe the same bitmap dimensions. Without this, a 3x
+    // screen renderer creates a cgImage that is 3x larger than image.size, and
+    // cgImage.cropping(to:) receives the wrong coordinate system.
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+
+    let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+    return renderer.image { _ in
+        image.draw(in: CGRect(origin: .zero, size: image.size))
+    }
+}
+
+/// Calculates the pixel-space crop rect and bbox rect from a normalised bbox.
+/// The crop rect is padded so the close-up still has surrounding car context.
+private func cropGeometry(
+    for bbox: CGRect,
+    imageWidth imgW: CGFloat,
+    imageHeight imgH: CGFloat,
+    padding: CGFloat
+) -> (cropRect: CGRect, bboxRect: CGRect) {
+    let safeMinX = max(0, min(1, bbox.minX))
+    let safeMinY = max(0, min(1, bbox.minY))
+    let safeWidth = max(0, min(1 - safeMinX, bbox.width))
+    let safeHeight = max(0, min(1 - safeMinY, bbox.height))
+
+    let clampedBBox = CGRect(
+        x: safeMinX,
+        y: safeMinY,
+        width: safeWidth,
+        height: safeHeight
     )
-    guard let cgImg = image.cgImage?.cropping(to: cropRect) else { return image }
-    return UIImage(cgImage: cgImg, scale: image.scale, orientation: image.imageOrientation)
+
+    let bboxRect = CGRect(
+        x: clampedBBox.minX * imgW,
+        y: clampedBBox.minY * imgH,
+        width: max(1, clampedBBox.width * imgW),
+        height: max(1, clampedBBox.height * imgH)
+    )
+
+    let padX = bboxRect.width * padding
+    let padY = bboxRect.height * padding
+
+    let cropRect = CGRect(
+        x: max(0, bboxRect.minX - padX),
+        y: max(0, bboxRect.minY - padY),
+        width: min(imgW, bboxRect.maxX + padX) - max(0, bboxRect.minX - padX),
+        height: min(imgH, bboxRect.maxY + padY) - max(0, bboxRect.minY - padY)
+    )
+    .integral
+
+    return (cropRect, bboxRect)
+}
+
+/// Crops the image to the normalised bbox, expanded by `padding` so the result
+/// is a close-up of the damage spot with some surrounding context.
+/// If bbox is nil the full image is returned.
+private func renderCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.6) -> UIImage {
+    guard let bbox else { return normalizedImage(image) }
+
+    let img = normalizedImage(image)
+    guard let cgImage = img.cgImage else { return img }
+
+    let geometry = cropGeometry(
+        for: bbox,
+        imageWidth: CGFloat(cgImage.width),
+        imageHeight: CGFloat(cgImage.height),
+        padding: padding
+    )
+
+    guard let cropped = cgImage.cropping(to: geometry.cropRect) else { return img }
+    return UIImage(cgImage: cropped, scale: 1, orientation: .up)
+}
+
+/// Produces the manual-case close-up as a *zoomed-in version of the vehicle
+/// location image*. In other words: first draw the orange box on the full car
+/// image, then crop around that same box. This guarantees the close-up matches
+/// the vehicle-location image visually and keeps the orange outline visible
+/// without any shaded fill.
+private func renderAnnotatedCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.35) -> UIImage {
+    guard let bbox else { return normalizedImage(image) }
+
+    let contextImage = renderContext(image: image, bbox: bbox)
+    guard let cgImage = contextImage.cgImage else { return contextImage }
+
+    let geometry = cropGeometry(
+        for: bbox,
+        imageWidth: CGFloat(cgImage.width),
+        imageHeight: CGFloat(cgImage.height),
+        padding: padding
+    )
+
+    guard let cropped = cgImage.cropping(to: geometry.cropRect) else { return contextImage }
+    return UIImage(cgImage: cropped, scale: 1, orientation: .up)
+}
+
+// MARK: - PDFKit Wrapper
+
+import PDFKit
+
+/// A SwiftUI wrapper around PDFKit's PDFView, allowing the user to scroll
+/// through all pages of a PDF document inline.
+struct PDFKitView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> PDFView {
+        let pdfView = PDFView()
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.displayDirection = .vertical
+        pdfView.document = PDFDocument(url: url)
+        return pdfView
+    }
+
+    func updateUIView(_ uiView: PDFView, context: Context) {
+        uiView.document = PDFDocument(url: url)
+    }
 }
 
 // MARK: - Report Welcome View
@@ -923,97 +1103,131 @@ struct ReportWelcomeView: View {
     let plate: String
     let carType: CarType
     let detectionCount: Int
-    let pdfURL: URL?
+    let pdfURL: URL
     var onLogout: () -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var showShareSheet = false
+
+    /// Controls whether we show the summary tab or the PDF preview tab.
+    @State private var showingPreview = false
 
     var body: some View {
         NavigationStack {
-            ScrollView{
-                VStack(spacing: 32) {
-                    Spacer()
-                    
-                    Image(systemName: "doc.richtext.fill")
-                        .font(.system(size: 64))
-                        .foregroundColor(carType.accentColor)
-                    
-                    VStack(spacing: 8) {
-                        Text("Damage Report")
-                            .font(.largeTitle).bold()
-                        
-                        Text("Vehicle: \(carType.rawValue)")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        
-                        Text("Plate: \(plate)")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    VStack(spacing: 4) {
-                        Text("\(detectionCount)")
-                            .font(.system(size: 56, weight: .black))
-                            .foregroundColor(carType.accentColor)
-                        Text(detectionCount == 1 ? "damage case recorded" : "damage cases recorded")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.vertical, 20)
-                    .frame(maxWidth: .infinity)
-                    .background(carType.accentColor.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .padding(.horizontal, 40)
-                    
-                    Text("Report successfully generated. Thank you for your submission.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    
-                    Spacer()
-                    
-                    VStack(spacing: 14) {
-                        
-                        Button {
-                            
-                            showShareSheet = true
-                            
-                        } label: {
-                            
-                            HStack {
-                                Image(systemName: "square.and.arrow.up")
-                                Text("Share PDF Report")
+            VStack(spacing: 0) {
+
+                // ── Tab picker ───────────────────────────────────────────────
+                Picker("View", selection: $showingPreview) {
+                    Text("Summary").tag(false)
+                    Text("Preview PDF").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                if showingPreview {
+                    // ── PDF preview ──────────────────────────────────────────
+                    PDFKitView(url: pdfURL)
+                        .ignoresSafeArea(edges: .bottom)
+                } else {
+                    // ── Summary ──────────────────────────────────────────────
+                    ScrollView {
+                        VStack(spacing: 32) {
+                            Spacer(minLength: 20)
+
+                            Image(systemName: "doc.richtext.fill")
+                                .font(.system(size: 64))
+                                .foregroundColor(carType.accentColor)
+
+                            VStack(spacing: 8) {
+                                Text("Damage Report")
+                                    .font(.largeTitle).bold()
+
+                                Text("Vehicle: \(carType.rawValue)")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+
+                                Text("Plate: \(plate)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
                             }
-                            .font(.headline)
+
+                            VStack(spacing: 4) {
+                                Text("\(detectionCount)")
+                                    .font(.system(size: 56, weight: .black))
+                                    .foregroundColor(carType.accentColor)
+                                Text(detectionCount == 1 ? "damage case recorded" : "damage cases recorded")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 20)
                             .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(carType.accentColor)
-                            .foregroundColor(.white)
-                            .cornerRadius(14)
-                        }
-                        
-                        Button {
-                            
-                            dismiss()
-                            onLogout()
-                            
-                        } label: {
-                            
-                            Text("Logout")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.red)
-                                .foregroundColor(.white)
-                                .cornerRadius(14)
+                            .background(carType.accentColor.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                            .padding(.horizontal, 40)
+
+                            Text("Report successfully generated. Tap \"Preview PDF\" to review the full report before sharing.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 40)
+
+                            Spacer(minLength: 20)
+
+                            VStack(spacing: 14) {
+
+                                // Preview PDF shortcut
+                                Button {
+                                    showingPreview = true
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "doc.text.magnifyingglass")
+                                        Text("Preview PDF")
+                                    }
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(carType.accentColor.opacity(0.12))
+                                    .foregroundColor(carType.accentColor)
+                                    .cornerRadius(14)
+                                }
+
+                                // Share button
+                                Button {
+                                    sharePDF(url: pdfURL)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "square.and.arrow.up")
+                                        Text("Share PDF Report")
+                                    }
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(carType.accentColor)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(14)
+                                }
+
+                                Button {
+                                    dismiss()
+                                    onLogout()
+                                } label: {
+                                    Text("Logout")
+                                        .font(.headline)
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(Color.red)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(14)
+                                }
+                            }
+                            .padding(.horizontal, 40)
+                            .padding(.bottom, 40)
+                            .padding(.top, 10)
+                            .frame(maxWidth: .infinity)
                         }
                     }
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 40)
-                    .padding(.top, 20)
-                    .frame(maxWidth: .infinity)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -1021,14 +1235,56 @@ struct ReportWelcomeView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
-            }
-            .sheet(isPresented: $showShareSheet) {
-
-                if let pdfURL {
-
-                    ShareSheet(items: [pdfURL])
+                // Share button also pinned in toolbar when on preview tab for easy access
+                if showingPreview {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            sharePDF(url: pdfURL)
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// Presents the system share sheet by finding the root view controller and
+    /// calling present() directly — this bypasses the SwiftUI .sheet nesting
+    /// issue that causes a blank white screen on iPad.
+    private func sharePDF(url: URL) {
+        let activity = UIActivityViewController(
+            activityItems: [url],
+            applicationActivities: nil
+        )
+
+        // iPad requires a source rect for the popover anchor
+        if let popover = activity.popoverPresentationController {
+            let scene = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first
+            let window = scene?.windows.first
+            popover.sourceView = window
+            if let window {
+                popover.sourceRect = CGRect(
+                    x: window.bounds.midX,
+                    y: window.bounds.midY,
+                    width: 0,
+                    height: 0
+                )
+            }
+            popover.permittedArrowDirections = []
+        }
+
+        // Walk up to the topmost presented view controller and present from there
+        var topVC = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?.windows.first?.rootViewController
+
+        while let presented = topVC?.presentedViewController {
+            topVC = presented
+        }
+
+        topVC?.present(activity, animated: true)
     }
 }
