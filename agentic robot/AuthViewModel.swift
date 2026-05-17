@@ -12,6 +12,11 @@ class AuthViewModel: ObservableObject {
     private var authStateListener: AuthStateDidChangeListenerHandle?
 
     init() {
+        // FirebaseAuth remembers the previous logged-in user across app launches by default.
+        // Force sign-out on app start so every fresh run starts from the login screen.
+        try? Auth.auth().signOut()
+        self.user = nil
+
         self.authStateListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
             DispatchQueue.main.async {
                 self?.user = user // Update user when authentication state changes

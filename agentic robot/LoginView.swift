@@ -5,6 +5,7 @@ struct LoginView: View {
     @EnvironmentObject var authViewModel: AuthViewModel
     @State private var email = ""
     @State private var password = ""
+    @State private var isPasswordVisible = false
     @State private var shakeTrigger: CGFloat = 0
 
     var onCreateAccount: () -> Void
@@ -36,9 +37,31 @@ struct LoginView: View {
                 .autocapitalization(.none)
                 .padding()
 
-            SecureField("Password", text: $password)
-                .textFieldStyle(.roundedBorder)
-                .padding()
+            HStack {
+                Group {
+                    if isPasswordVisible {
+                        TextField("Password", text: $password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } else {
+                        SecureField("Password", text: $password)
+                    }
+                }
+
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color(.systemGray4), lineWidth: 1)
+            )
+            .padding()
 
             Button("Login") {
                 if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
