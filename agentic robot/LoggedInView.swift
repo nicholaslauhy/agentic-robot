@@ -20,17 +20,13 @@ struct LoggedInView: View {
     
     private let fullText = "Okay, first I will have to check the car plate number. Please upload a photo of the car plate."
     
-    @State private var hasRunTypewriter = false
     @State private var showButtons = false
-    @State private var hasAnimatedText = false
-    
     @State private var localErrorMessage: String? = nil
     
     func sendToANPRServer(image: UIImage) {
-
         // REPLACE THIS IP ADDRESS
-        //guard let url = URL(string: "http://192.168.86.176:8000/detect") else { return }
-        guard let url = URL(string: "http://127.0.0.1:8000/detect") else { return }
+//        guard let url = URL(string: "http://127.0.0.1:8000/detect") else { return }
+        guard let url = URL(string: "http://10.10.10.53:8000/detect") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -58,8 +54,8 @@ struct LoggedInView: View {
                 return
             }
 
-            // fast_alpr returns "[]" when no plate is detected
             let trimmed = rawPlate.trimmingCharacters(in: .whitespacesAndNewlines)
+
             guard trimmed != "[]" && !trimmed.isEmpty else {
                 DispatchQueue.main.async {
                     self.localErrorMessage = "No licence plate detected. Please try a clearer photo."
@@ -86,9 +82,7 @@ struct LoggedInView: View {
     var body: some View {
         VStack(spacing: 25) {
 
-            // HEADER
             HStack {
-
                 Text("Welcome")
                     .font(.largeTitle)
                     .bold()
@@ -96,7 +90,6 @@ struct LoggedInView: View {
                 Spacer()
 
                 Button("Logout") {
-                    hasAnimatedText = false
                     displayedText = ""
                     auth.didShowIntroAnimation = false
                     auth.logout()
@@ -113,7 +106,6 @@ struct LoggedInView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            // IMAGE PREVIEW
             if let selectedImage = selectedImage {
 
                 Image(uiImage: selectedImage)
@@ -136,49 +128,38 @@ struct LoggedInView: View {
                     }
                     .buttonStyle(.borderedProminent)
                 }
-                .padding(.horizontal)
-                .frame(maxWidth: .infinity)
-
-                if let localErrorMessage = localErrorMessage {
-                    Text(localErrorMessage)
-                        .foregroundColor(.red)
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
             } else {
 
                 VStack(spacing: 15) {
-                    
+
                     Button("Take Photo") {
-                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                            showCamera = true
-                            localErrorMessage = nil
-                        } else {
-                            localErrorMessage = "Camera is not available on this device."
+
+                        DispatchQueue.main.async {
+
+                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                showCamera = true
+                                localErrorMessage = nil
+                            } else {
+                                localErrorMessage = "Camera is not available on this device."
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    
-                    // PHOTO LIBRARY BUTTON
+
                     PhotosPicker(
                         selection: $selectedPhotoItem,
-                        matching: .images,
-                        photoLibrary: .shared()
+                        matching: .images
                     ) {
                         Text("Choose From Library")
                     }
                     .buttonStyle(.bordered)
-                    
+
                     Button("Upload JPG/PNG File") {
                         showFileImporter = true
                     }
                     .buttonStyle(.bordered)
-                    
-
                 }
                 .opacity(showButtons ? 1 : 0)
-                .animation(.easeIn(duration: 0.5), value: showButtons)
                 .fileImporter(
                     isPresented: $showFileImporter,
                     allowedContentTypes: [.image],
@@ -187,23 +168,27 @@ struct LoggedInView: View {
 
                     switch result {
 
-                    case .success(let files):
+                    case .success(let urls):
 
-                        guard let selectedFile = files.first else { return }
+                        guard let url = urls.first else { return }
 
-                        if let data = try? Data(contentsOf: selectedFile),
+                        if let data = try? Data(contentsOf: url),
                            let uiImage = UIImage(data: data) {
-
                             selectedImage = uiImage
                         }
 
                     case .failure(let error):
-                        auth.errorMessage = error.localizedDescription
+                        localErrorMessage = error.localizedDescription
                     }
                 }
-                .padding(.horizontal)
             }
-
+            if let localErrorMessage = localErrorMessage {
+                Text(localErrorMessage)
+                    .foregroundColor(.red)
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
             Spacer()
         }
         .padding(.top)
@@ -220,12 +205,12 @@ struct LoggedInView: View {
 
             auth.didShowIntroAnimation = true
 
-            let words = fullText.split(separator: " ")
-
             Task {
-                for word in words {
-                    try? await Task.sleep(for: .milliseconds(120))
-                    displayedText += word + " "
+                for char in fullText {
+                    try? await Task.sleep(for: .milliseconds(25)) // <-- speed control here
+                    await MainActor.run {
+                        displayedText.append(char)
+                    }
                 }
 
                 await MainActor.run {
@@ -241,23 +226,16 @@ struct LoggedInView: View {
             }
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
-
             guard let newItem = newItem else { return }
 
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
                    let uiImage = UIImage(data: data) {
-
                     await MainActor.run {
                         self.selectedImage = uiImage
                         self.selectedPhotoItem = nil
                     }
                 }
-            }
-        }
-        .onChange(of: showCamera) { _, value in
-            if value == true {
-                localErrorMessage = nil
             }
         }
         .navigationDestination(isPresented: $navigateToResultPage) {
