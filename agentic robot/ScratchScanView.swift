@@ -142,11 +142,15 @@ struct ScratchScanView: View {
         .navigationBarBackButtonHidden(true)
 
         // ── Main capture ───────────────────────────────────────────────────
-        .sheet(isPresented: $showCamera) {
-            ImagePicker(sourceType: .camera) { image in
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraOverlayImagePicker(
+                carType: carType,
+                angleId: currentAngleIndex
+            ) { image in
                 capturedImages[currentAngleIndex] = image
                 advanceOrComplete()
             }
+            .ignoresSafeArea()
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
@@ -183,11 +187,15 @@ struct ScratchScanView: View {
         }
 
         // ── Replace: camera ────────────────────────────────────────────────
-        .sheet(isPresented: $showReplaceCamera) {
-            ImagePicker(sourceType: .camera) { image in
+        .fullScreenCover(isPresented: $showReplaceCamera) {
+            CameraOverlayImagePicker(
+                carType: carType,
+                angleId: replacingIndex ?? currentAngleIndex
+            ) { image in
                 if let idx = replacingIndex { capturedImages[idx] = image }
                 replacingIndex = nil
             }
+            .ignoresSafeArea()
         }
 
         // ── Replace: photo library (PHPicker — writes directly to replaceImage) ──
@@ -376,6 +384,186 @@ struct ScratchScanView: View {
                 .opacity(isSubmittingAnalysis ? 0.6 : 1)
                 .padding(.bottom, 32)
             }
+        }
+    }
+}
+
+
+
+// MARK: - Camera with Vehicle Silhouette Overlay
+
+struct CameraOverlayImagePicker: UIViewControllerRepresentable {
+    let carType: CarType
+    let angleId: Int
+    var onPick: (UIImage) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = context.coordinator
+        picker.allowsEditing = false
+        picker.showsCameraControls = true
+        picker.modalPresentationStyle = .fullScreen
+        picker.cameraCaptureMode = .photo
+        picker.cameraDevice = .rear
+
+        let overlay = UIHostingController(
+            rootView: CameraSilhouetteOverlay(
+                carType: carType,
+                angleId: angleId
+            )
+        )
+        overlay.view.backgroundColor = .clear
+        overlay.view.frame = picker.view.bounds
+        overlay.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+
+        // The overlay is only a visual guide.
+        // Keep touches going to the native camera shutter / cancel controls.
+        overlay.view.isUserInteractionEnabled = false
+
+        picker.cameraOverlayView = overlay.view
+        context.coordinator.overlayController = overlay
+
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+        if let overlay = context.coordinator.overlayController {
+            overlay.rootView = CameraSilhouetteOverlay(
+                carType: carType,
+                angleId: angleId
+            )
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(
+            onPick: onPick,
+            dismiss: { dismiss() }
+        )
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let onPick: (UIImage) -> Void
+        let dismiss: () -> Void
+        var overlayController: UIHostingController<CameraSilhouetteOverlay>?
+
+        init(
+            onPick: @escaping (UIImage) -> Void,
+            dismiss: @escaping () -> Void
+        ) {
+            self.onPick = onPick
+            self.dismiss = dismiss
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let image = info[.originalImage] as? UIImage {
+                onPick(image)
+            }
+            dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            dismiss()
+        }
+    }
+}
+
+struct CameraSilhouetteOverlay: View {
+    let carType: CarType
+    let angleId: Int
+
+    private var safeAngleId: Int {
+        min(max(angleId, 0), scanAngles.count - 1)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            // Make the capture guide big enough to feel natural in full-screen camera.
+            // This is intentionally about 80% of the screen height, and almost the full
+            // usable width, so front/rear/side shots do not feel cramped.
+            let guideWidth = geo.size.width * 0.94
+            let guideHeight = geo.size.height * 0.80
+            let silhouetteHorizontalPadding: CGFloat = safeAngleId <= 1 ? 8 : 14
+            let silhouetteVerticalPadding: CGFloat = safeAngleId <= 1 ? 18 : 10
+
+            ZStack {
+                // Slight vignette so the guide stays visible on bright scenes,
+                // but keep the middle mostly clear for the actual camera preview.
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.30),
+                        Color.black.opacity(0.04),
+                        Color.black.opacity(0.34)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+
+                VStack {
+                    Spacer()
+
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 24)
+                            .stroke(
+                                style: StrokeStyle(
+                                    lineWidth: 3,
+                                    lineCap: .round,
+                                    dash: [14, 9]
+                                )
+                            )
+                            .foregroundColor(.white.opacity(0.96))
+
+                        CarSilhouetteView(
+                            carType: carType,
+                            angleId: safeAngleId
+                        )
+                        .opacity(0.52)
+                        .padding(.horizontal, silhouetteHorizontalPadding)
+                        .padding(.vertical, silhouetteVerticalPadding)
+
+                        VStack(spacing: 6) {
+                            Text(scanAngles[safeAngleId].label)
+                                .font(.headline.bold())
+                                .foregroundColor(.white)
+
+                            Text(scanAngles[safeAngleId].instruction)
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.92))
+                                .multilineTextAlignment(.center)
+                                .lineLimit(2)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.45))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .padding(.top, 12)
+
+                        Text("Align vehicle inside this guide")
+                            .font(.caption.bold())
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(Color.black.opacity(0.45))
+                            .clipShape(Capsule())
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                            .padding(.bottom, 12)
+                    }
+                    .frame(width: guideWidth, height: guideHeight)
+
+                    Spacer()
+                }
+                .frame(width: geo.size.width, height: geo.size.height)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
     }
 }
