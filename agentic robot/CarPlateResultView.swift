@@ -5,6 +5,11 @@ struct CarPlateResultView: View {
     let plate: String
     var onLogout: () -> Void
 
+    @State private var editablePlate: String
+    @State private var plateDraft: String = ""
+    @State private var showEditPlateSheet = false
+    @State private var plateEditError: String? = nil
+
     @State private var navigateToTypeSelection = false
     @State private var selectedCarType: CarType? = nil
     @State private var navigateToScratchScan = false
@@ -18,6 +23,15 @@ struct CarPlateResultView: View {
     @State private var navigateToDamageResults = false
 
     private let damageAnalysisService = DamageAnalysisService.shared
+
+    init(
+        plate: String,
+        onLogout: @escaping () -> Void
+    ) {
+        self.plate = plate
+        self.onLogout = onLogout
+        _editablePlate = State(initialValue: plate)
+    }
 
     var body: some View {
         ZStack {
@@ -40,8 +54,16 @@ struct CarPlateResultView: View {
                 Text("Detected Plate:")
                     .font(.headline)
                 
-                Text(plate.isEmpty ? "No result" : plate)
+                Text(editablePlate.isEmpty ? "No result" : editablePlate)
                     .font(.system(size: 40, weight: .bold))
+
+                if let plateEditError {
+                    Text(plateEditError)
+                        .font(.footnote)
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
                 
                 if let analysisErrorMessage {
                     Text(analysisErrorMessage)
@@ -52,8 +74,36 @@ struct CarPlateResultView: View {
                 }
                 
                 Spacer()
+
+                Button {
+                    plateDraft = editablePlate
+                    plateEditError = nil
+                    showEditPlateSheet = true
+                } label: {
+                    HStack {
+                        Image(systemName: "pencil")
+                        Text("Edit Licence Plate")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color(.secondarySystemBackground))
+                    .foregroundColor(.blue)
+                    .cornerRadius(14)
+                    .padding(.horizontal)
+                }
                 
                 Button {
+                    let cleanedPlate = editablePlate
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .uppercased()
+
+                    guard !cleanedPlate.isEmpty else {
+                        plateEditError = "Please enter a valid licence plate number."
+                        return
+                    }
+
+                    editablePlate = cleanedPlate
                     shouldOpenScratchOnReview = false
                     navigateToTypeSelection = true
                 } label: {
@@ -68,13 +118,17 @@ struct CarPlateResultView: View {
                 }
                 .padding(.bottom, 24)
             }
+
             if isAnalyzing {
                 analyzingOverlay
             }
         }
+        .sheet(isPresented: $showEditPlateSheet) {
+            editPlateSheet
+        }
         .navigationDestination(isPresented: $navigateToTypeSelection) {
             CarTypeSelectionView(
-                plate: plate,
+                plate: editablePlate,
                 onLogout: onLogout,
                 onCarTypeSelected: { carType in
                     selectedCarType = carType
@@ -86,7 +140,7 @@ struct CarPlateResultView: View {
         .navigationDestination(isPresented: $navigateToScratchScan) {
             if let carType = selectedCarType {
                 ScratchScanView(
-                    plate: plate,
+                    plate: editablePlate,
                     carType: carType,
                     onLogout: onLogout,
                     onBackToPlateResult: {
@@ -109,7 +163,7 @@ struct CarPlateResultView: View {
         .navigationDestination(isPresented: $navigateToDamageResults) {
             if let carType = selectedCarType {
                 DamageAnalysisResultView(
-                    plate: plate,
+                    plate: editablePlate,
                     carType: carType,
                     detections: damageDetections,
                     scanImages: scannedImages,
@@ -125,6 +179,63 @@ struct CarPlateResultView: View {
                 )
             }
         }
+    }
+
+    private var editPlateSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Edit Licence Plate")
+                    .font(.title2)
+                    .bold()
+
+                Text("Update the plate number if the AI detected it wrongly.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                TextField("Enter licence plate", text: $plateDraft)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .font(.system(size: 28, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .padding()
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(14)
+
+                Spacer()
+
+                Button {
+                    let cleanedPlate = plateDraft
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .uppercased()
+
+                    guard !cleanedPlate.isEmpty else {
+                        plateEditError = "Please enter a valid licence plate number."
+                        return
+                    }
+
+                    editablePlate = cleanedPlate
+                    plateEditError = nil
+                    showEditPlateSheet = false
+                } label: {
+                    Text("Save Plate Number")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(14)
+                }
+            }
+            .padding()
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") {
+                        showEditPlateSheet = false
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 
     private var analyzingOverlay: some View {
@@ -183,11 +294,11 @@ struct CarPlateResultView: View {
                     isAnalyzing = false
                     finishLoading()
                     
-                    // Close ScratchScanView first
                     navigateToScratchScan = false
                 }
                 
                 try? await Task.sleep(nanoseconds: 300_000_000)
+
                 await MainActor.run {
                     navigateToDamageResults = true
                 }
