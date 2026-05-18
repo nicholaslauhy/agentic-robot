@@ -26,10 +26,12 @@ struct DamageReportGenerator {
 
                 var y: CGFloat = 40
 
+                // ─────────────────────────────────────────────
+                // Helpers
+                // ─────────────────────────────────────────────
+
                 func newPageIfNeeded(_ requiredHeight: CGFloat) {
-
                     if y + requiredHeight > 780 {
-
                         context.beginPage()
                         y = 40
                     }
@@ -39,31 +41,59 @@ struct DamageReportGenerator {
                     _ text: String,
                     x: CGFloat = 40,
                     font: UIFont = .systemFont(ofSize: 14),
-                    bold: Bool = false
+                    bold: Bool = false,
+                    color: UIColor = .black
                 ) {
-
                     let actualFont = bold
-                    ? UIFont.boldSystemFont(ofSize: font.pointSize)
-                    : font
+                        ? UIFont.boldSystemFont(ofSize: font.pointSize)
+                        : font
 
                     let attrs: [NSAttributedString.Key: Any] = [
                         .font: actualFont,
-                        .foregroundColor: UIColor.black
+                        .foregroundColor: color
                     ]
 
                     let rect = CGRect(
                         x: x,
                         y: y,
-                        width: 520,
+                        width: 515,
                         height: 100
                     )
 
-                    text.draw(
-                        in: rect,
-                        withAttributes: attrs
-                    )
+                    text.draw(in: rect, withAttributes: attrs)
 
                     y += 24
+                }
+
+                /// Draws multi-line text that wraps properly and triggers page breaks.
+                func drawWrappedText(
+                    _ text: String,
+                    x: CGFloat = 40,
+                    font: UIFont = .systemFont(ofSize: 13),
+                    color: UIColor = .darkGray
+                ) {
+                    let attrs: [NSAttributedString.Key: Any] = [
+                        .font: font,
+                        .foregroundColor: color
+                    ]
+
+                    let maxWidth: CGFloat = 515
+
+                    let boundingRect = (text as NSString).boundingRect(
+                        with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        attributes: attrs,
+                        context: nil
+                    )
+
+                    let textHeight = ceil(boundingRect.height) + 8
+
+                    newPageIfNeeded(textHeight + 12)
+
+                    let rect = CGRect(x: x, y: y, width: maxWidth, height: textHeight)
+                    text.draw(in: rect, withAttributes: attrs)
+
+                    y += textHeight + 4
                 }
 
                 func drawImage(
@@ -74,14 +104,12 @@ struct DamageReportGenerator {
                     let aspectRatio = image.size.width > 0
                         ? image.size.height / image.size.width
                         : 1
-                    // Scale to fit available width, but cap at maxHeight
                     let naturalHeight = availableWidth * aspectRatio
                     let drawHeight = min(naturalHeight, maxHeight)
-                    let drawWidth  = drawHeight / aspectRatio  // may be narrower than available
+                    let drawWidth  = drawHeight / aspectRatio
 
                     newPageIfNeeded(drawHeight + 20)
 
-                    // Centre horizontally on the page
                     let xOffset: CGFloat = 40 + (availableWidth - drawWidth) / 2
                     let rect = CGRect(x: xOffset, y: y, width: drawWidth, height: drawHeight)
                     image.draw(in: rect)
@@ -89,7 +117,9 @@ struct DamageReportGenerator {
                     y += drawHeight + 12
                 }
 
-                // FIRST PAGE
+                // ─────────────────────────────────────────────
+                // FIRST PAGE — Header
+                // ─────────────────────────────────────────────
 
                 context.beginPage()
 
@@ -106,14 +136,13 @@ struct DamageReportGenerator {
 
                 let formatter = DateFormatter()
                 formatter.dateFormat = "dd MMM yyyy"
-
-                drawText(
-                    "Date: \(formatter.string(from: Date()))"
-                )
+                drawText("Date: \(formatter.string(from: Date()))")
 
                 y += 10
 
+                // ─────────────────────────────────────────────
                 // SUMMARY
+                // ─────────────────────────────────────────────
 
                 drawText(
                     "SUMMARY",
@@ -129,26 +158,24 @@ struct DamageReportGenerator {
                     $0.damageType.lowercased().contains("dent")
                 }.count
 
-                let severity: String
+                let overallSeverity: String
 
                 switch detections.count {
-                case 0:
-                    severity = "None"
-                case 1...2:
-                    severity = "Minor"
-                case 3...5:
-                    severity = "Moderate"
-                default:
-                    severity = "Severe"
+                case 0:        overallSeverity = "None"
+                case 1...2:    overallSeverity = "Minor"
+                case 3...5:    overallSeverity = "Moderate"
+                default:       overallSeverity = "Severe"
                 }
 
                 drawText("- \(scratches) scratches detected")
                 drawText("- \(dents) dents detected")
-                drawText("- Severity: \(severity)")
+                drawText("- Overall Severity: \(overallSeverity)")
 
                 y += 20
 
+                // ─────────────────────────────────────────────
                 // DAMAGE CASES
+                // ─────────────────────────────────────────────
 
                 drawText(
                     "DAMAGE CASES",
@@ -160,57 +187,61 @@ struct DamageReportGenerator {
 
                     newPageIfNeeded(420)
 
+                    // ── Case header ──
                     drawText(
                         "Case #\(index + 1)",
                         font: .systemFont(ofSize: 18),
                         bold: true
                     )
 
-                    drawText(
-                        "Damage Type: \(detection.damageType.capitalized)"
-                    )
+                    // ── Detection metadata ──
+                    drawText("Damage Type: \(detection.damageType.capitalized)")
+                    drawText("Vehicle Angle: \(detection.angleName)")
+                    drawText("Confidence: \(Int(detection.confidence * 100))%")
 
-                    drawText(
-                        "Vehicle Angle: \(detection.angleName)"
-                    )
+                    // ── VLM fields ──
+                    if !detection.severity.isEmpty {
+                        drawText("Severity: \(detection.severity.capitalized)")
+                    }
 
-                    drawText(
-                        "Confidence: \(Int(detection.confidence * 100))%"
-                    )
+                    if !detection.repairComplexity.isEmpty {
+                        drawText("Repair Complexity: \(detection.repairComplexity.capitalized)")
+                    }
+
+                    if !detection.repairRecommendation.isEmpty {
+                        newPageIfNeeded(60)
+                        drawText("Repair Recommendation:", bold: true)
+                        drawWrappedText(detection.repairRecommendation)
+                    }
+
+                    if !detection.explanation.isEmpty {
+                        newPageIfNeeded(60)
+                        drawText("AI Analysis:", bold: true)
+                        drawWrappedText(detection.explanation)
+                    }
 
                     y += 8
 
-                    // CONTEXT IMAGE
-
-                    if let context = detection.contextImage {
-
-                        drawText(
-                            "Vehicle Location",
-                            bold: true
-                        )
-
-                        drawImage(context)
+                    // ── Context image ──
+                    if let contextImage = detection.contextImage {
+                        drawText("Vehicle Location", bold: true)
+                        drawImage(contextImage)
                     }
 
-                    // CROP IMAGE
-
-                    if let crop = detection.cropImage {
-
-                        drawText(
-                            "Damage Close-Up",
-                            bold: true
-                        )
-
-                        drawImage(crop)
+                    // ── Crop image ──
+                    if let cropImage = detection.cropImage {
+                        drawText("Damage Close-Up", bold: true)
+                        drawImage(cropImage)
                     }
 
                     y += 20
                 }
 
-                // FINAL FOOTER
+                // ─────────────────────────────────────────────
+                // FOOTER
+                // ─────────────────────────────────────────────
 
                 newPageIfNeeded(80)
-
                 y += 20
 
                 drawText(
@@ -221,13 +252,10 @@ struct DamageReportGenerator {
             }
 
             print("PDF CREATED:", url)
-
             return url
 
         } catch {
-
             print("PDF ERROR:", error)
-
             return nil
         }
     }

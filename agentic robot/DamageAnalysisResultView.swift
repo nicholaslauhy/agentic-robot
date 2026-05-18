@@ -23,19 +23,35 @@ class MutableDamageDetection: ObservableObject, Identifiable {
     /// Normalized bounding box rect (0–1) drawn by the user, overlaid on cleanContextImage.
     @Published var normalizedBBox: CGRect?
 
+    // ── VLM fields ──
+    @Published var isVerifiedDamage: Bool
+    @Published var vlmDamageType: String
+    @Published var severity: String
+    @Published var repairRecommendation: String
+    @Published var repairComplexity: String
+    @Published var likelyFalsePositive: Bool
+    @Published var explanation: String
+
     init(from detection: DamageDetection) {
-        self.id                = detection.id
-        self.angleIndex        = detection.angleIndex
-        self.angleName         = detection.angleName
-        self.damageType        = detection.damageType
-        self.confidence        = detection.confidence
-        self.cropImage         = detection.cropImage
-        self.contextImage      = detection.contextImage
-        self.cleanContextImage = detection.cleanContextImage
-        self.normalizedBBox    = nil
+        self.id                    = detection.id
+        self.angleIndex            = detection.angleIndex
+        self.angleName             = detection.angleName
+        self.damageType            = detection.damageType
+        self.confidence            = detection.confidence
+        self.cropImage             = detection.cropImage
+        self.contextImage          = detection.contextImage
+        self.cleanContextImage     = detection.cleanContextImage
+        self.normalizedBBox        = nil
+        self.isVerifiedDamage      = detection.isVerifiedDamage
+        self.vlmDamageType         = detection.vlmDamageType
+        self.severity              = detection.severity
+        self.repairRecommendation  = detection.repairRecommendation
+        self.repairComplexity      = detection.repairComplexity
+        self.likelyFalsePositive   = detection.likelyFalsePositive
+        self.explanation           = detection.explanation
     }
 
-    /// Manual / user-created detection
+    /// Manual / user-created detection (no VLM data available)
     init(
         angleIndex: Int,
         angleName: String,
@@ -46,15 +62,22 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         cleanContextImage: UIImage?,
         normalizedBBox: CGRect?
     ) {
-        self.id                = UUID()
-        self.angleIndex        = angleIndex
-        self.angleName         = angleName
-        self.damageType        = damageType
-        self.confidence        = confidence
-        self.cropImage         = cropImage
-        self.contextImage      = contextImage
-        self.cleanContextImage = cleanContextImage
-        self.normalizedBBox    = normalizedBBox
+        self.id                    = UUID()
+        self.angleIndex            = angleIndex
+        self.angleName             = angleName
+        self.damageType            = damageType
+        self.confidence            = confidence
+        self.cropImage             = cropImage
+        self.contextImage          = contextImage
+        self.cleanContextImage     = cleanContextImage
+        self.normalizedBBox        = normalizedBBox
+        self.isVerifiedDamage      = true
+        self.vlmDamageType         = damageType
+        self.severity              = ""
+        self.repairRecommendation  = ""
+        self.repairComplexity      = ""
+        self.likelyFalsePositive   = false
+        self.explanation           = ""
     }
 }
 
@@ -438,10 +461,48 @@ struct DamageDetailSheet: View {
                         metaRow(label: "Angle",      value: detection.angleName)
                         Divider()
                         metaRow(label: "Confidence", value: "\(Int(detection.confidence * 100))%")
+                        if !detection.severity.isEmpty {
+                            Divider()
+                            metaRow(label: "Severity", value: detection.severity.capitalized)
+                        }
+                        if !detection.repairComplexity.isEmpty {
+                            Divider()
+                            metaRow(label: "Repair Complexity", value: detection.repairComplexity.capitalized)
+                        }
                     }
                     .background(Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .padding(.horizontal)
+
+                    if !detection.repairRecommendation.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Repair Recommendation", systemImage: "wrench.and.screwdriver")
+                                .font(.headline)
+                            Text(detection.repairRecommendation)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal)
+                    }
+
+                    if !detection.explanation.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("AI Analysis", systemImage: "sparkles")
+                                .font(.headline)
+                            Text(detection.explanation)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal)
+                    }
                 }
                 .padding(.bottom, 30)
             }

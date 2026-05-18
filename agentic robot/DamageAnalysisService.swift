@@ -15,6 +15,15 @@ struct DamageDetection: Codable, Identifiable {
     let contextBase64: String       // annotated: mask overlay + bbox rectangle burned in
     let cleanContextBase64: String  // pristine: no annotations — used as base for user bbox editing
 
+    // ── VLM fields ──
+    let isVerifiedDamage: Bool
+    let vlmDamageType: String
+    let severity: String
+    let repairRecommendation: String
+    let repairComplexity: String
+    let likelyFalsePositive: Bool
+    let explanation: String
+
     enum CodingKeys: String, CodingKey {
         case angleIndex
         case angleName
@@ -23,6 +32,13 @@ struct DamageDetection: Codable, Identifiable {
         case cropBase64
         case contextBase64
         case cleanContextBase64
+        case isVerifiedDamage
+        case vlmDamageType
+        case severity
+        case repairRecommendation
+        case repairComplexity
+        case likelyFalsePositive
+        case explanation
     }
 
     var cropImage: UIImage? {
@@ -30,14 +46,12 @@ struct DamageDetection: Codable, Identifiable {
         return UIImage(data: data)
     }
 
-    /// Annotated image shown in the read-only detail view.
     var contextImage: UIImage? {
         guard !contextBase64.isEmpty,
               let data = Data(base64Encoded: contextBase64) else { return nil }
         return UIImage(data: data)
     }
 
-    /// Clean image used as the base when the user draws their own bounding box.
     var cleanContextImage: UIImage? {
         guard !cleanContextBase64.isEmpty,
               let data = Data(base64Encoded: cleanContextBase64) else { return nil }
@@ -52,13 +66,17 @@ final class DamageAnalysisService {
 
     func analyze(images: [UIImage]) async throws -> [DamageDetection] {
         // REPLACE THIS IP ADDRESS
-        guard let url = URL(string: "http://192.168.86.176:8000/analyze-damage") else {
+        guard let url = URL(string: "http://127.0.0.1:8000/analyze-damage") else {
             throw URLError(.badURL)
         }
+//        guard let url = URL(string: "http://192.168.86.176:8000/analyze-damage") else {
+//            throw URLError(.badURL)
+//        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 60
+        // VLM runs ~30-60s per detection; 5 minutes safely covers 4 images
+        request.timeoutInterval = 300
 
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -87,8 +105,18 @@ final class DamageAnalysisService {
             print("Damage API raw response:", raw)
         }
 
-        let decoded = try JSONDecoder().decode(DamageAnalysisResponse.self, from: data)
-        print("Decoded damage result count:", decoded.results.count)
-        return decoded.results
+        do {
+            let decoder = JSONDecoder()
+            let decoded = try decoder.decode(DamageAnalysisResponse.self, from: data)
+            print("Decoded damage result count:", decoded.results.count)
+            return decoded.results
+        } catch {
+            // Print the exact decode failure so we can diagnose missing/mismatched fields
+            print("JSON decode error:", error)
+            if let raw = String(data: data, encoding: .utf8) {
+                print("Raw JSON that failed to decode:", raw.prefix(2000))
+            }
+            throw error
+        }
     }
 }
