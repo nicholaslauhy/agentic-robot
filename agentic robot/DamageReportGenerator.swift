@@ -17,11 +17,9 @@ struct DamageReportGenerator {
         let url = documents.appendingPathComponent("DamageReport.pdf")
 
         let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842)
-
         let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
 
         do {
-
             try renderer.writePDF(to: url) { context in
 
                 var y: CGFloat = 40
@@ -61,11 +59,9 @@ struct DamageReportGenerator {
                     )
 
                     text.draw(in: rect, withAttributes: attrs)
-
                     y += 24
                 }
 
-                /// Draws multi-line text that wraps properly and triggers page breaks.
                 func drawWrappedText(
                     _ text: String,
                     x: CGFloat = 40,
@@ -90,9 +86,14 @@ struct DamageReportGenerator {
 
                     newPageIfNeeded(textHeight + 12)
 
-                    let rect = CGRect(x: x, y: y, width: maxWidth, height: textHeight)
-                    text.draw(in: rect, withAttributes: attrs)
+                    let rect = CGRect(
+                        x: x,
+                        y: y,
+                        width: maxWidth,
+                        height: textHeight
+                    )
 
+                    text.draw(in: rect, withAttributes: attrs)
                     y += textHeight + 4
                 }
 
@@ -101,20 +102,195 @@ struct DamageReportGenerator {
                     maxHeight: CGFloat = 220
                 ) {
                     let availableWidth: CGFloat = 515
+
                     let aspectRatio = image.size.width > 0
                         ? image.size.height / image.size.width
                         : 1
+
                     let naturalHeight = availableWidth * aspectRatio
                     let drawHeight = min(naturalHeight, maxHeight)
-                    let drawWidth  = drawHeight / aspectRatio
+                    let drawWidth = drawHeight / aspectRatio
 
                     newPageIfNeeded(drawHeight + 20)
 
                     let xOffset: CGFloat = 40 + (availableWidth - drawWidth) / 2
-                    let rect = CGRect(x: xOffset, y: y, width: drawWidth, height: drawHeight)
-                    image.draw(in: rect)
 
+                    let rect = CGRect(
+                        x: xOffset,
+                        y: y,
+                        width: drawWidth,
+                        height: drawHeight
+                    )
+
+                    image.draw(in: rect)
                     y += drawHeight + 12
+                }
+
+                func cleanDamageType(_ damageType: String) -> String {
+                    let lower = damageType.lowercased()
+
+                    if lower.contains("scratch") {
+                        return "Scratch"
+                    }
+
+                    if lower.contains("dent") {
+                        return "Dent"
+                    }
+
+                    if lower.contains("crack") {
+                        return "Crack"
+                    }
+
+                    if lower.contains("paint") {
+                        return "Paint damage"
+                    }
+
+                    if lower.contains("scuff") {
+                        return "Scuff"
+                    }
+
+                    return damageType
+                        .replacingOccurrences(of: "_", with: " ")
+                        .capitalized
+                }
+
+                func cleanAngleName(_ angleName: String) -> String {
+                    let lower = angleName.lowercased()
+
+                    if lower.contains("front") {
+                        return "Front"
+                    }
+
+                    if lower.contains("rear") || lower.contains("back") {
+                        return "Rear"
+                    }
+
+                    if lower.contains("left") {
+                        return "Left Side"
+                    }
+
+                    if lower.contains("right") {
+                        return "Right Side"
+                    }
+
+                    return angleName
+                }
+
+                func pluralize(_ word: String, count: Int) -> String {
+                    if count == 1 {
+                        return word
+                    }
+
+                    switch word.lowercased() {
+                    case "scratch":
+                        return "scratches"
+                    case "dent":
+                        return "dents"
+                    case "crack":
+                        return "cracks"
+                    case "scuff":
+                        return "scuffs"
+                    case "paint damage":
+                        return "paint damage areas"
+                    default:
+                        return "\(word.lowercased())s"
+                    }
+                }
+
+                func buildOverallSummary(
+                    detections: [MutableDamageDetection]
+                ) -> String {
+                    if detections.isEmpty {
+                        return "No visible damage was detected in the submitted vehicle images."
+                    }
+
+                    let angleOrder = [
+                        "Front",
+                        "Rear",
+                        "Left Side",
+                        "Right Side"
+                    ]
+
+                    var angleDamageCounts: [String: [String: Int]] = [:]
+
+                    for angle in angleOrder {
+                        angleDamageCounts[angle] = [:]
+                    }
+
+                    for detection in detections {
+                        let angle = cleanAngleName(detection.angleName)
+                        let damage = cleanDamageType(detection.damageType)
+
+                        if angleDamageCounts[angle] == nil {
+                            angleDamageCounts[angle] = [:]
+                        }
+
+                        angleDamageCounts[angle]?[damage, default: 0] += 1
+                    }
+
+                    var affectedAngleParts: [String] = []
+
+                    for angle in angleOrder {
+                        guard let damageCounts = angleDamageCounts[angle],
+                              !damageCounts.isEmpty else {
+                            continue
+                        }
+
+                        let damageParts = damageCounts
+                            .sorted { $0.key < $1.key }
+                            .map { damageType, count in
+                                "\(count) \(pluralize(damageType, count: count))"
+                            }
+                            .joined(separator: " and ")
+
+                        affectedAngleParts.append("\(damageParts) on the \(angle)")
+                    }
+
+                    let affectedAngles = affectedAngleParts.joined(separator: ", ")
+
+                    let damagedAngles = Set(
+                        detections.map {
+                            cleanAngleName($0.angleName)
+                        }
+                    )
+
+                    let clearAngles = angleOrder.filter {
+                        !damagedAngles.contains($0)
+                    }
+
+                    let totalCases = detections.count
+
+                    var summary = "Across the submitted vehicle images, \(totalCases) possible damage area\(totalCases == 1 ? "" : "s") were recorded: \(affectedAngles)."
+
+                    if !clearAngles.isEmpty {
+                        summary += " No detected damage cases were recorded for the \(clearAngles.joined(separator: ", "))."
+                    }
+
+                    return summary
+                }
+
+                func countDamageType(
+                    _ target: String,
+                    in detections: [MutableDamageDetection]
+                ) -> Int {
+                    detections.filter {
+                        cleanDamageType($0.damageType).lowercased().contains(target.lowercased())
+                    }.count
+                }
+
+                func overallSeverity(
+                    detectionCount: Int
+                ) -> String {
+                    switch detectionCount {
+                    case 0:
+                        return "None"
+                    case 1...2:
+                        return "Minor"
+                    case 3...5:
+                        return "Moderate"
+                    default:
+                        return "Severe"
+                    }
                 }
 
                 // ─────────────────────────────────────────────
@@ -150,26 +326,38 @@ struct DamageReportGenerator {
                     bold: true
                 )
 
-                let scratches = detections.filter {
-                    $0.damageType.lowercased().contains("scratch")
-                }.count
+                let scratches = countDamageType("scratch", in: detections)
+                let dents = countDamageType("dent", in: detections)
+                let cracks = countDamageType("crack", in: detections)
+                let paintDamage = countDamageType("paint", in: detections)
 
-                let dents = detections.filter {
-                    $0.damageType.lowercased().contains("dent")
-                }.count
+                drawText("- \(detections.count) possible damage area\(detections.count == 1 ? "" : "s") recorded")
+                drawText("- \(scratches) \(pluralize("Scratch", count: scratches)) detected")
+                drawText("- \(dents) \(pluralize("Dent", count: dents)) detected")
 
-                let overallSeverity: String
-
-                switch detections.count {
-                case 0:        overallSeverity = "None"
-                case 1...2:    overallSeverity = "Minor"
-                case 3...5:    overallSeverity = "Moderate"
-                default:       overallSeverity = "Severe"
+                if cracks > 0 {
+                    drawText("- \(cracks) \(pluralize("Crack", count: cracks)) detected")
                 }
 
-                drawText("- \(scratches) scratches detected")
-                drawText("- \(dents) dents detected")
-                drawText("- Overall Severity: \(overallSeverity)")
+                if paintDamage > 0 {
+                    drawText("- \(paintDamage) \(pluralize("Paint damage", count: paintDamage)) detected")
+                }
+
+                drawText("- Overall Severity: \(overallSeverity(detectionCount: detections.count))")
+
+                y += 8
+
+                drawText(
+                    "Overall Image Summary",
+                    font: .systemFont(ofSize: 16),
+                    bold: true
+                )
+
+                drawWrappedText(
+                    buildOverallSummary(detections: detections),
+                    font: .systemFont(ofSize: 13),
+                    color: .darkGray
+                )
 
                 y += 20
 
@@ -183,9 +371,20 @@ struct DamageReportGenerator {
                     bold: true
                 )
 
+                if detections.isEmpty {
+                    drawWrappedText(
+                        "No damage cases were detected from the submitted vehicle images.",
+                        font: .systemFont(ofSize: 13),
+                        color: .darkGray
+                    )
+                }
+
                 for (index, detection) in detections.enumerated() {
 
                     newPageIfNeeded(420)
+
+                    let damageType = cleanDamageType(detection.damageType)
+                    let angleName = cleanAngleName(detection.angleName)
 
                     // ── Case header ──
                     drawText(
@@ -195,25 +394,11 @@ struct DamageReportGenerator {
                     )
 
                     // ── Detection metadata ──
-                    drawText("Damage Type: \(detection.damageType.capitalized)")
-                    drawText("Vehicle Angle: \(detection.angleName)")
+                    drawText("Damage Type: \(damageType)")
+                    drawText("Vehicle Angle: \(angleName)")
                     drawText("Confidence: \(Int(detection.confidence * 100))%")
 
-                    // ── VLM fields ──
-                    if !detection.severity.isEmpty {
-                        drawText("Severity: \(detection.severity.capitalized)")
-                    }
-
-                    if !detection.repairComplexity.isEmpty {
-                        drawText("Repair Complexity: \(detection.repairComplexity.capitalized)")
-                    }
-
-                    if !detection.repairRecommendation.isEmpty {
-                        newPageIfNeeded(60)
-                        drawText("Repair Recommendation:", bold: true)
-                        drawWrappedText(detection.repairRecommendation)
-                    }
-
+                    // ── Short AI analysis only, no repair advice ──
                     if !detection.explanation.isEmpty {
                         newPageIfNeeded(60)
                         drawText("AI Analysis:", bold: true)

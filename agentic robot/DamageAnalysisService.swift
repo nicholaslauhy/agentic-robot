@@ -66,12 +66,12 @@ final class DamageAnalysisService {
 
     func analyze(images: [UIImage]) async throws -> [DamageDetection] {
         // REPLACE THIS IP ADDRESS
-        guard let url = URL(string: "http://127.0.0.1:8000/analyze-damage") else {
-            throw URLError(.badURL)
-        }
-//        guard let url = URL(string: "http://192.168.86.176:8000/analyze-damage") else {
+//        guard let url = URL(string: "http://127.0.0.1:8000/analyze-damage") else {
 //            throw URLError(.badURL)
 //        }
+        guard let url = URL(string: "http://10.10.10.53:8000/analyze-damage") else {
+            throw URLError(.badURL)
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
