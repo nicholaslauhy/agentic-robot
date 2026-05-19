@@ -58,7 +58,7 @@ struct DamageReportGenerator {
                 let cleanedPlate = plate.replacingOccurrences(of: " ", with: "").uppercased()
                 let reportNo = "F/\(compactDate)/\(cleanedPlate)"
                 let dateReportMade = generatedDateTime
-                let videReportNo = ""
+                let videReportNo = stageOne.videReportNo
                 let stageOneDiaryNo = stageOne.stationDiaryNo.trimmingCharacters(in: .whitespacesAndNewlines)
                 let stationDiaryNo = stageOneDiaryNo.isEmpty
                     ? "D/\(compactDate)/\(String(format: "%04d", Int.random(in: 0...9999)))"
@@ -352,7 +352,7 @@ struct DamageReportGenerator {
 
                     drawSignaturePanel(
                         title: "Signature Of Informant",
-                        value: "",
+                        value: valueOrBlank(stageTwo.informantName, fallback: stageOne.nameOfInformant),
                         signature: stageTwo.informantSignature,
                         dateTime: stageTwo.informantSignatureDateTime,
                         rect: CGRect(x: rightCol, y: y, width: colWidth, height: 178)
@@ -360,11 +360,18 @@ struct DamageReportGenerator {
 
                     y += 198
 
-                    drawRect(CGRect(x: leftCol, y: y, width: colWidth, height: 88))
-                    drawField(label: "Signature Of Interpreter", value: valueOrBlank(stageTwo.interpreterAvailability, fallback: "Not available"), rect: CGRect(x: leftCol + 6, y: y + 6, width: colWidth - 12, height: 38))
-                    drawField(label: "Date/Time", value: stageTwo.interpreterSignatureDateTime, rect: CGRect(x: leftCol + 6, y: y + 46, width: colWidth - 12, height: 36))
+                    drawRect(CGRect(x: leftCol, y: y, width: colWidth, height: 130))
+                    drawString("Signature Of Interpreter", in: CGRect(x: leftCol + 6, y: y + 6, width: colWidth - 12, height: 14), font: .boldSystemFont(ofSize: 9.5))
+                    let interpreterBox = CGRect(x: leftCol + 6, y: y + 25, width: colWidth - 12, height: 62)
+                    drawRect(interpreterBox)
+                    if let interpreterSignature = stageTwo.interpreterSignature {
+                        interpreterSignature.draw(in: interpreterBox.insetBy(dx: 6, dy: 6))
+                    } else {
+                        drawString(valueOrBlank(stageTwo.interpreterAvailability, fallback: "Not available"), in: interpreterBox.insetBy(dx: 6, dy: 20), font: .systemFont(ofSize: 9))
+                    }
+                    drawField(label: "Date/Time", value: stageTwo.interpreterSignatureDateTime, rect: CGRect(x: leftCol + 6, y: y + 92, width: colWidth - 12, height: 32))
 
-                    drawRect(CGRect(x: rightCol, y: y, width: colWidth, height: 88))
+                    drawRect(CGRect(x: rightCol, y: y, width: colWidth, height: 130))
                     drawField(label: "Name Of Officer In-Charge Of Case", value: stageTwo.officerInCharge, rect: CGRect(x: rightCol + 6, y: y + 6, width: colWidth - 12, height: 38))
                     drawField(label: "Classification Of Case", value: stageTwo.classificationOfCase, rect: CGRect(x: rightCol + 6, y: y + 46, width: colWidth - 12, height: 36))
                 }

@@ -1362,7 +1362,8 @@ struct PoliceStationDetails: Identifiable, Hashable {
     var id: String { "\(division)-\(name)" }
     var displayName: String { "\(name) N.P.C" }
     var pdfHeaderText: String {
-        "Police Station Of Origin\n\(displayName)\n\(address) SINGAPORE\n\(postalCode)\nTel No: \(telephone)"
+        let telLine = telephone.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Tel No:" : "Tel No: \(telephone)"
+        return "Police Station Of Origin\n\(displayName)\n\(address) SINGAPORE\n\(postalCode)\n\(telLine)"
     }
 
     static let defaultStation = PoliceStationDetails(
@@ -1375,37 +1376,37 @@ struct PoliceStationDetails: Identifiable, Hashable {
 
     static let all: [PoliceStationDetails] = [
         PoliceStationDetails(division: "Central Division", name: "Bukit Merah East", address: "391 New Bridge Road", postalCode: "088762", telephone: "6236 9999"),
-        PoliceStationDetails(division: "Central Division", name: "Marina Bay", address: "6 Bayfront Link", postalCode: "018962", telephone: "6223 9999"),
-        PoliceStationDetails(division: "Central Division", name: "Rochor", address: "101 Kampong Java Road", postalCode: "228866", telephone: "6392 9999"),
-        PoliceStationDetails(division: "Tanglin Division", name: "Kampong Java", address: "21 Kampong Java Road", postalCode: "228892", telephone: "6256 9999"),
-        PoliceStationDetails(division: "Tanglin Division", name: "Bishan", address: "20 Bishan Street 23", postalCode: "579757", telephone: "6552 9999"),
-        PoliceStationDetails(division: "Tanglin Division", name: "Orchard", address: "51 Scotts Road", postalCode: "228201", telephone: "6733 9999"),
-        PoliceStationDetails(division: "Tanglin Division", name: "Toa Payoh", address: "50 Toa Payoh Lorong 4", postalCode: "319518", telephone: "6354 9999"),
-        PoliceStationDetails(division: "Clementi Division", name: "Bukit Merah West", address: "500 Bukit Merah View #01-01", postalCode: "159682", telephone: "6377 9999"),
-        PoliceStationDetails(division: "Clementi Division", name: "Clementi", address: "6 Lempeng Drive", postalCode: "128496", telephone: "1800 774 0000"),
-        PoliceStationDetails(division: "Clementi Division", name: "Jurong East", address: "80 Jurong East Custom Station, Jurong Gateway Road", postalCode: "608544", telephone: "6899 9999"),
+        PoliceStationDetails(division: "Central Division", name: "Marina Bay", address: "6 Bayfront Link", postalCode: "018962", telephone: "1800 222 9999"),
+        PoliceStationDetails(division: "Central Division", name: "Rochor", address: "101 Kampong Java Road", postalCode: "228866", telephone: "1800 294 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Kampong Java", address: "21 Kampong Java Road", postalCode: "228892", telephone: "6295 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Bishan", address: "20 Bishan Street 23", postalCode: "579757", telephone: "1800 552 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Orchard", address: "51 Killiney Road", postalCode: "228201", telephone: "1800 735 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Toa Payoh", address: "95 Toa Payoh Central, #01-02 Community Building", postalCode: "319194", telephone: "1800 251 9999"),
+        PoliceStationDetails(division: "Clementi Division", name: "Bukit Merah West", address: "500 Bukit Merah View #01-01", postalCode: "159682", telephone: "1800 377 9999"),
+        PoliceStationDetails(division: "Clementi Division", name: "Clementi", address: "6 Lempeng Drive", postalCode: "128496", telephone: "1800 872 9999"),
+        PoliceStationDetails(division: "Clementi Division", name: "Jurong East", address: "92 Boon Lay Way", postalCode: "609962", telephone: "1800 899 9999"),
         PoliceStationDetails(division: "Clementi Division", name: "Queenstown", address: "3 Queensway #01-03", postalCode: "149073", telephone: "1800 471 9999"),
-        PoliceStationDetails(division: "Bedok Division", name: "Bedok", address: "30 Bedok North Road", postalCode: "469676", telephone: "6244 9999"),
-        PoliceStationDetails(division: "Bedok Division", name: "Changi", address: "9 Simei Street 2", postalCode: "529914", telephone: "6587 2999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Bedok", address: "30 Bedok North Road", postalCode: "469676", telephone: "1800 244 9999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Changi", address: "9 Simei Street 2", postalCode: "529914", telephone: "1800 587 2999"),
         PoliceStationDetails(division: "Bedok Division", name: "Geylang", address: "1 Cassia Link", postalCode: "397618", telephone: "1800 848 6999"),
-        PoliceStationDetails(division: "Bedok Division", name: "Marine Parade", address: "300 Still Road", postalCode: "423951", telephone: "6244 6999"),
-        PoliceStationDetails(division: "Bedok Division", name: "Pasir Ris", address: "1 Pasir Ris Drive 4", postalCode: "519457", telephone: "1800 585 2999"),
-        PoliceStationDetails(division: "Bedok Division", name: "Tampines", address: "1 Tampines Avenue 3", postalCode: "529705", telephone: "6587 1999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Marine Parade", address: "300 Marine Parade Road", postalCode: "449296", telephone: "1800 442 8999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Pasir Ris", address: "1 Pasir Ris Drive 4", postalCode: "519457", telephone: "6585 2999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Tampines", address: "6 Tampines Avenue 4", postalCode: "529682", telephone: "1800 587 1999"),
         PoliceStationDetails(division: "Ang Mo Kio Division", name: "Ang Mo Kio North", address: "51 Ang Mo Kio Avenue 9", postalCode: "569784", telephone: "1800 484 9999"),
         PoliceStationDetails(division: "Ang Mo Kio Division", name: "Ang Mo Kio South", address: "81 Ang Mo Kio Avenue 3", postalCode: "569929", telephone: "1800 451 9999"),
-        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Hougang", address: "60 Hougang Avenue 9", postalCode: "538775", telephone: "6315 9999"),
-        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Punggol", address: "2 Punggol Place", postalCode: "828852", telephone: "6446 9999"),
-        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Sengkang", address: "11 Sengkang East Way", postalCode: "548545", telephone: "6343 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Hougang", address: "60 Hougang Avenue 9", postalCode: "538775", telephone: "6489 0999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Punggol", address: "151 Punggol Central", postalCode: "828727", telephone: "1800 604 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Sengkang", address: "2 Sengkang Square, #01-02", postalCode: "545025", telephone: ""),
         PoliceStationDetails(division: "Ang Mo Kio Division", name: "Serangoon", address: "50 Serangoon Avenue 2 #01-02", postalCode: "556129", telephone: "1800 488 0999"),
-        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Woodleigh", address: "1 Bidadari Park Drive", postalCode: "367803", telephone: "6241 9999"),
-        PoliceStationDetails(division: "Jurong Division", name: "Bukit Batok", address: "21 Bukit Batok East Avenue 4", postalCode: "659840", telephone: "6665 9999"),
-        PoliceStationDetails(division: "Jurong Division", name: "Choa Chu Kang", address: "6 Teck Whye Avenue", postalCode: "688846", telephone: "6767 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Woodleigh", address: "501 Upper Aljunied Road", postalCode: "367897", telephone: ""),
+        PoliceStationDetails(division: "Jurong Division", name: "Bukit Batok", address: "21 Bukit Batok East Avenue 4", postalCode: "659840", telephone: "1800 665 9999"),
+        PoliceStationDetails(division: "Jurong Division", name: "Choa Chu Kang", address: "20 Choa Chu Kang Street 52, #01-02", postalCode: "689286", telephone: "1800 755 9999"),
         PoliceStationDetails(division: "Jurong Division", name: "Jurong West", address: "2 Jurong West Avenue 5", postalCode: "649482", telephone: "1800 792 9999"),
-        PoliceStationDetails(division: "Jurong Division", name: "Nanyang", address: "2 Jurong West Street 91", postalCode: "649039", telephone: "6792 8999"),
-        PoliceStationDetails(division: "Woodlands Police Division", name: "Sembawang", address: "50 Sembawang Drive", postalCode: "757707", telephone: "6852 2999"),
-        PoliceStationDetails(division: "Woodlands Police Division", name: "Woodlands East", address: "1 Woodlands Street 12", postalCode: "738622", telephone: "6767 3999"),
-        PoliceStationDetails(division: "Woodlands Police Division", name: "Woodlands West", address: "2 Woodlands Drive 63", postalCode: "737830", telephone: "6736 0999"),
-        PoliceStationDetails(division: "Woodlands Police Division", name: "Yishun", address: "61 Yishun Avenue 11", postalCode: "768827", telephone: "6852 2200")
+        PoliceStationDetails(division: "Jurong Division", name: "Nanyang", address: "2 Jurong West Avenue 5", postalCode: "649482", telephone: "6792 9999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Sembawang", address: "4 Sembawang Crescent", postalCode: "757633", telephone: "1800 554 9999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Woodlands East", address: "3 Woodlands Drive 63", postalCode: "737890", telephone: "1800 767 9999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Woodlands West", address: "1 Woodlands Street 12", postalCode: "738619", telephone: ""),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Yishun", address: "31 Yishun Central", postalCode: "768827", telephone: "1800 852 9999")
     ]
 
     static var groupedByDivision: [(String, [PoliceStationDetails])] {
@@ -1428,8 +1429,26 @@ struct PoliceReportStageZeroView: View {
     @Binding var isPresented: Bool
 
     @State private var selectedStation = PoliceStationDetails.defaultStation
+    @State private var useOtherStation = false
+    @State private var customDivision = ""
+    @State private var customAddress = ""
+    @State private var customPostalCode = ""
+    @State private var customTelephone = ""
     @State private var showStageOne = false
     @Environment(\.dismiss) private var dismiss
+
+    private var stationForReport: PoliceStationDetails {
+        if useOtherStation {
+            return PoliceStationDetails(
+                division: customDivision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Other" : customDivision,
+                name: "Other",
+                address: customAddress,
+                postalCode: customPostalCode,
+                telephone: customTelephone
+            )
+        }
+        return selectedStation
+    }
 
     var body: some View {
         NavigationStack {
@@ -1440,6 +1459,7 @@ struct PoliceReportStageZeroView: View {
                             ForEach(stations) { station in
                                 Button {
                                     selectedStation = station
+                                    useOtherStation = false
                                 } label: {
                                     HStack(alignment: .top, spacing: 10) {
                                         Image(systemName: selectedStation == station ? "checkmark.circle.fill" : "circle")
@@ -1462,12 +1482,26 @@ struct PoliceReportStageZeroView: View {
                     }
                 }
 
+                Section("Other Station") {
+                    Toggle("Use other / manual NPC", isOn: $useOtherStation)
+                    if useOtherStation {
+                        reportTextField("Division", text: $customDivision, placeholder: "Enter division")
+                        reportTextField("Location", text: $customAddress, placeholder: "Enter station location", axis: .vertical)
+                        reportTextField("Postal Code", text: $customPostalCode, placeholder: "Enter postal code")
+                            .keyboardType(.numberPad)
+                        reportTextField("Telephone", text: $customTelephone, placeholder: "Enter telephone, if any")
+                            .keyboardType(.phonePad)
+                    }
+                }
+
                 Section("Selected Station") {
+                    let station = stationForReport
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(selectedStation.displayName).font(.headline)
-                        Text(selectedStation.address)
-                        Text("Singapore \(selectedStation.postalCode)")
-                        Text("Tel: \(selectedStation.telephone)")
+                        Text(station.displayName).font(.headline)
+                        Text(station.division).font(.subheadline).foregroundColor(.secondary)
+                        Text(station.address)
+                        Text("Singapore \(station.postalCode)")
+                        Text(station.telephone.isEmpty ? "Tel:" : "Tel: \(station.telephone)")
                     }
                 }
 
@@ -1497,7 +1531,7 @@ struct PoliceReportStageZeroView: View {
                     carType: carType,
                     detections: detections,
                     scanImages: scanImages,
-                    policeStation: selectedStation,
+                    policeStation: stationForReport,
                     isGeneratingReport: $isGeneratingReport,
                     pdfURL: $pdfURL,
                     isPresented: $isPresented
@@ -1505,10 +1539,25 @@ struct PoliceReportStageZeroView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func reportTextField(
+        _ title: String,
+        text: Binding<String>,
+        placeholder: String,
+        axis: Axis = .horizontal
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            TextField(placeholder, text: text, axis: axis)
+                .lineLimit(axis == .vertical ? 2...4 : 1...1)
+        }
+    }
 }
 
 struct PoliceReportStageOneDetails {
     var stationDiaryNo = ""
+    var videReportNo = ""
     var nameOfInformant = ""
     var address = ""
     var idTypeAndNo = ""
@@ -1536,7 +1585,9 @@ struct PoliceReportStageTwoDetails {
     var officerRecordingName = ""
     var officerSignature: UIImage? = nil
     var interpreterAvailability = "Not available"
+    var interpreterSignature: UIImage? = nil
     var interpreterSignatureDateTime = ""
+    var informantName = ""
     var informantSignature: UIImage? = nil
     var informantSignatureDateTime = ""
     var officerInCharge = ""
@@ -1583,14 +1634,14 @@ struct PoliceReportStageOneView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Incident Details") {
+        Form {
+            Section("Incident Details") {
                     reportTextField(
                         "Station Diary No.",
                         text: $details.stationDiaryNo,
                         placeholder: "Auto: D/yyyymmdd/1234"
                     )
+                    reportTextField("Vide Report No.", text: $details.videReportNo, placeholder: "Leave blank if not available")
                     reportTextField("Name of Informant", text: $details.nameOfInformant, placeholder: "Enter full name")
                     reportTextField("Address", text: $details.address, placeholder: "Enter address", axis: .vertical)
                     reportTextField("ID Type / ID No.", text: $details.idTypeAndNo, placeholder: "e.g. NRIC / S1234567A")
@@ -1629,15 +1680,14 @@ struct PoliceReportStageOneView: View {
                     )
 
                     dropdownField("Race", selection: $details.race, options: raceOptions, emptyTitle: "Select race")
+                    reportTextField("Institution/School Name", text: $details.institutionSchoolName, placeholder: "Enter institution/school, if any")
                     reportTextField("Language", text: $details.language, placeholder: "Enter language")
                     dateTimePickerField(
                         "Date/Time of Incident",
                         date: $incidentDateTimeValue,
                         output: $details.dateTimeOfIncident
                     )
-
                     reportTextField("Location of Incident", text: $details.locationOfIncident, placeholder: "Enter location", axis: .vertical)
-                    reportTextField("Institution/School Name", text: $details.institutionSchoolName, placeholder: "Enter institution/school, if any")
                 }
 
                 Section {
@@ -1645,6 +1695,8 @@ struct PoliceReportStageOneView: View {
                         if isBlank(details.stationDiaryNo) {
                             details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
                         }
+                        details.dateOfBirth = PoliceReportFormFormatter.dobDisplay(from: dateOfBirthValue)
+                        details.dateTimeOfIncident = PoliceReportFormFormatter.reportDateTimeDisplay(from: incidentDateTimeValue)
                         showStageTwo = true
                     } label: {
                         Text("Proceed to Stage 2")
@@ -1659,11 +1711,6 @@ struct PoliceReportStageOneView: View {
             }
             .navigationTitle("Report Stage 1")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
             .navigationDestination(isPresented: $showStageTwo) {
                 PoliceReportStageTwoView(
                     plate: plate,
@@ -1682,7 +1729,6 @@ struct PoliceReportStageOneView: View {
                     details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
                 }
             }
-        }
     }
 
     @ViewBuilder
@@ -1796,10 +1842,12 @@ struct PoliceReportStageTwoView: View {
 
     @State private var details = PoliceReportStageTwoDetails()
     @State private var officerSignatureTrigger = UUID()
+    @State private var interpreterSignatureTrigger = UUID()
     @State private var informantSignatureTrigger = UUID()
     @State private var interpreterDateTimeValue = Date()
     @State private var informantDateTimeValue = Date()
     @State private var officerSignatureImage: UIImage? = nil
+    @State private var interpreterSignatureImage: UIImage? = nil
     @State private var informantSignatureImage: UIImage? = nil
 
     var body: some View {
@@ -1817,13 +1865,20 @@ struct PoliceReportStageTwoView: View {
 
             Section("Interpreter") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Signature of Interpreter").font(.caption).foregroundColor(.secondary)
+                    Text("Interpreter status").font(.caption).foregroundColor(.secondary)
                     TextField("Not available", text: $details.interpreterAvailability)
                 }
+                signatureInput(
+                    title: "Signature of Interpreter",
+                    image: $interpreterSignatureImage,
+                    clearTrigger: $interpreterSignatureTrigger,
+                    clearTitle: "Clear Interpreter Signature"
+                )
                 dateTimePickerField("Date/Time", date: $interpreterDateTimeValue, output: $details.interpreterSignatureDateTime)
             }
 
             Section("Informant") {
+                reportTextField("Name of Informant", text: $details.informantName, placeholder: stageOne.nameOfInformant.isEmpty ? "Enter informant name" : stageOne.nameOfInformant)
                 signatureInput(
                     title: "Signature of Informant",
                     image: $informantSignatureImage,
@@ -1939,6 +1994,13 @@ struct PoliceReportStageTwoView: View {
 
         var finalStageTwo = details
         finalStageTwo.officerSignature = officerSignatureImage
+        finalStageTwo.interpreterSignature = interpreterSignatureImage
+        if finalStageTwo.interpreterAvailability.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && interpreterSignatureImage == nil {
+            finalStageTwo.interpreterAvailability = "Not available"
+        }
+        if finalStageTwo.informantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            finalStageTwo.informantName = stageOne.nameOfInformant
+        }
         finalStageTwo.informantSignature = informantSignatureImage
 
         let plate = plate
