@@ -285,7 +285,7 @@ struct DamageAnalysisResultView: View {
         }
         // ── Report details flow ───────────────────────────────────────────────
         .fullScreenCover(isPresented: $showIncidentStageOne) {
-            PoliceReportStageOneView(
+            PoliceReportStageZeroView(
                 plate: plate,
                 carType: carType,
                 detections: mutableDetections,
@@ -293,19 +293,6 @@ struct DamageAnalysisResultView: View {
                 isGeneratingReport: $isGeneratingReport,
                 pdfURL: $pdfURL,
                 isPresented: $showIncidentStageOne
-            )
-        }
-        // ── Report sheet ──────────────────────────────────────────────────────
-        .sheet(item: $pdfURL) { url in
-            ReportWelcomeView(
-                plate: plate,
-                carType: carType,
-                detectionCount: mutableDetections.count,
-                pdfURL: url,
-                onLogout: {
-                    pdfURL = nil
-                    onLogout()
-                }
             )
         }
         .onAppear {
@@ -1362,28 +1349,194 @@ struct ReportWelcomeView: View {
 
 // MARK: - Police Report Details Flow
 
+
+// MARK: - Police Station Selection
+
+struct PoliceStationDetails: Identifiable, Hashable {
+    let division: String
+    let name: String
+    let address: String
+    let postalCode: String
+    let telephone: String
+
+    var id: String { "\(division)-\(name)" }
+    var displayName: String { "\(name) N.P.C" }
+    var pdfHeaderText: String {
+        "Police Station Of Origin\n\(displayName)\n\(address) SINGAPORE\n\(postalCode)\nTel No: \(telephone)"
+    }
+
+    static let defaultStation = PoliceStationDetails(
+        division: "Ang Mo Kio Division",
+        name: "Ang Mo Kio North",
+        address: "51 Ang Mo Kio Avenue 9",
+        postalCode: "569784",
+        telephone: "1800 484 9999"
+    )
+
+    static let all: [PoliceStationDetails] = [
+        PoliceStationDetails(division: "Central Division", name: "Bukit Merah East", address: "391 New Bridge Road", postalCode: "088762", telephone: "6236 9999"),
+        PoliceStationDetails(division: "Central Division", name: "Marina Bay", address: "6 Bayfront Link", postalCode: "018962", telephone: "6223 9999"),
+        PoliceStationDetails(division: "Central Division", name: "Rochor", address: "101 Kampong Java Road", postalCode: "228866", telephone: "6392 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Kampong Java", address: "21 Kampong Java Road", postalCode: "228892", telephone: "6256 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Bishan", address: "20 Bishan Street 23", postalCode: "579757", telephone: "6552 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Orchard", address: "51 Scotts Road", postalCode: "228201", telephone: "6733 9999"),
+        PoliceStationDetails(division: "Tanglin Division", name: "Toa Payoh", address: "50 Toa Payoh Lorong 4", postalCode: "319518", telephone: "6354 9999"),
+        PoliceStationDetails(division: "Clementi Division", name: "Bukit Merah West", address: "500 Bukit Merah View #01-01", postalCode: "159682", telephone: "6377 9999"),
+        PoliceStationDetails(division: "Clementi Division", name: "Clementi", address: "6 Lempeng Drive", postalCode: "128496", telephone: "1800 774 0000"),
+        PoliceStationDetails(division: "Clementi Division", name: "Jurong East", address: "80 Jurong East Custom Station, Jurong Gateway Road", postalCode: "608544", telephone: "6899 9999"),
+        PoliceStationDetails(division: "Clementi Division", name: "Queenstown", address: "3 Queensway #01-03", postalCode: "149073", telephone: "1800 471 9999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Bedok", address: "30 Bedok North Road", postalCode: "469676", telephone: "6244 9999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Changi", address: "9 Simei Street 2", postalCode: "529914", telephone: "6587 2999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Geylang", address: "1 Cassia Link", postalCode: "397618", telephone: "1800 848 6999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Marine Parade", address: "300 Still Road", postalCode: "423951", telephone: "6244 6999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Pasir Ris", address: "1 Pasir Ris Drive 4", postalCode: "519457", telephone: "1800 585 2999"),
+        PoliceStationDetails(division: "Bedok Division", name: "Tampines", address: "1 Tampines Avenue 3", postalCode: "529705", telephone: "6587 1999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Ang Mo Kio North", address: "51 Ang Mo Kio Avenue 9", postalCode: "569784", telephone: "1800 484 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Ang Mo Kio South", address: "81 Ang Mo Kio Avenue 3", postalCode: "569929", telephone: "1800 451 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Hougang", address: "60 Hougang Avenue 9", postalCode: "538775", telephone: "6315 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Punggol", address: "2 Punggol Place", postalCode: "828852", telephone: "6446 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Sengkang", address: "11 Sengkang East Way", postalCode: "548545", telephone: "6343 9999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Serangoon", address: "50 Serangoon Avenue 2 #01-02", postalCode: "556129", telephone: "1800 488 0999"),
+        PoliceStationDetails(division: "Ang Mo Kio Division", name: "Woodleigh", address: "1 Bidadari Park Drive", postalCode: "367803", telephone: "6241 9999"),
+        PoliceStationDetails(division: "Jurong Division", name: "Bukit Batok", address: "21 Bukit Batok East Avenue 4", postalCode: "659840", telephone: "6665 9999"),
+        PoliceStationDetails(division: "Jurong Division", name: "Choa Chu Kang", address: "6 Teck Whye Avenue", postalCode: "688846", telephone: "6767 9999"),
+        PoliceStationDetails(division: "Jurong Division", name: "Jurong West", address: "2 Jurong West Avenue 5", postalCode: "649482", telephone: "1800 792 9999"),
+        PoliceStationDetails(division: "Jurong Division", name: "Nanyang", address: "2 Jurong West Street 91", postalCode: "649039", telephone: "6792 8999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Sembawang", address: "50 Sembawang Drive", postalCode: "757707", telephone: "6852 2999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Woodlands East", address: "1 Woodlands Street 12", postalCode: "738622", telephone: "6767 3999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Woodlands West", address: "2 Woodlands Drive 63", postalCode: "737830", telephone: "6736 0999"),
+        PoliceStationDetails(division: "Woodlands Police Division", name: "Yishun", address: "61 Yishun Avenue 11", postalCode: "768827", telephone: "6852 2200")
+    ]
+
+    static var groupedByDivision: [(String, [PoliceStationDetails])] {
+        let order = ["Central Division", "Tanglin Division", "Clementi Division", "Bedok Division", "Ang Mo Kio Division", "Jurong Division", "Woodlands Police Division"]
+        return order.compactMap { division in
+            let stations = all.filter { $0.division == division }
+            return stations.isEmpty ? nil : (division, stations)
+        }
+    }
+}
+
+struct PoliceReportStageZeroView: View {
+    let plate: String
+    let carType: CarType
+    let detections: [MutableDamageDetection]
+    let scanImages: [UIImage]
+
+    @Binding var isGeneratingReport: Bool
+    @Binding var pdfURL: URL?
+    @Binding var isPresented: Bool
+
+    @State private var selectedStation = PoliceStationDetails.defaultStation
+    @State private var showStageOne = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Police Station of Origin") {
+                    ForEach(PoliceStationDetails.groupedByDivision, id: \.0) { division, stations in
+                        DisclosureGroup(division) {
+                            ForEach(stations) { station in
+                                Button {
+                                    selectedStation = station
+                                } label: {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Image(systemName: selectedStation == station ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(selectedStation == station ? carType.accentColor : .secondary)
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(station.displayName).font(.subheadline.bold())
+                                            Text("\(station.address), Singapore \(station.postalCode)")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                            Text("Tel: \(station.telephone)")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+                }
+
+                Section("Selected Station") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(selectedStation.displayName).font(.headline)
+                        Text(selectedStation.address)
+                        Text("Singapore \(selectedStation.postalCode)")
+                        Text("Tel: \(selectedStation.telephone)")
+                    }
+                }
+
+                Section {
+                    Button {
+                        showStageOne = true
+                    } label: {
+                        Text("Proceed to Stage 1")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(carType.accentColor)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                }
+            }
+            .navigationTitle("Report Stage 0")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .navigationDestination(isPresented: $showStageOne) {
+                PoliceReportStageOneView(
+                    plate: plate,
+                    carType: carType,
+                    detections: detections,
+                    scanImages: scanImages,
+                    policeStation: selectedStation,
+                    isGeneratingReport: $isGeneratingReport,
+                    pdfURL: $pdfURL,
+                    isPresented: $isPresented
+                )
+            }
+        }
+    }
+}
+
 struct PoliceReportStageOneDetails {
     var stationDiaryNo = ""
     var nameOfInformant = ""
     var address = ""
     var idTypeAndNo = ""
     var finNo = ""
-    var homeOfficeNo = ""
-    var mobileNo = ""
+    var contactType = "Home"
+    var contactNumber = ""
+    var emailAddress = ""
     var nationality = ""
     var occupation = ""
     var sex = ""
     var age = ""
     var dateOfBirth = ""
     var race = ""
+    var language = ""
     var dateTimeOfIncident = ""
     var locationOfIncident = ""
     var institutionSchoolName = ""
+
+    // Backward-compatible values for older generator references.
+    var homeOfficeNo: String { contactType == "Home" || contactType == "Office" ? contactNumber : "" }
+    var mobileNo: String { "" }
 }
 
 struct PoliceReportStageTwoDetails {
     var officerRecordingName = ""
     var officerSignature: UIImage? = nil
+    var interpreterAvailability = "Not available"
+    var interpreterSignatureDateTime = ""
     var informantSignature: UIImage? = nil
     var informantSignatureDateTime = ""
     var officerInCharge = ""
@@ -1395,39 +1548,103 @@ struct PoliceReportStageOneView: View {
     let carType: CarType
     let detections: [MutableDamageDetection]
     let scanImages: [UIImage]
+    let policeStation: PoliceStationDetails
 
     @Binding var isGeneratingReport: Bool
     @Binding var pdfURL: URL?
     @Binding var isPresented: Bool
 
     @State private var details = PoliceReportStageOneDetails()
+    @State private var dateOfBirthValue = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
+    @State private var incidentDateTimeValue = Date()
     @State private var showStageTwo = false
     @Environment(\.dismiss) private var dismiss
+
+    private let sexOptions = ["", "Male", "Female", "Prefer not to say"]
+    private let raceOptions = ["", "Chinese", "Malay", "Indian", "Other"]
+    private let contactOptions = ["Home", "Office"]
+
+    private var isAgeValid: Bool {
+        let trimmed = details.age.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        return Int(trimmed) != nil && Int(trimmed)! >= 0 && Int(trimmed)! <= 130
+    }
+
+    private var isDOBValid: Bool {
+        isBlank(details.dateOfBirth) || isValidDate(details.dateOfBirth, formats: ["dd/MM/yyyy"])
+    }
+
+    private var isIncidentDateTimeValid: Bool {
+        isBlank(details.dateTimeOfIncident) || isValidDate(details.dateTimeOfIncident, formats: ["d MMMM yyyy, HH:mm", "dd MMMM yyyy, HH:mm"])
+    }
+
+    private var canProceed: Bool {
+        isAgeValid && isDOBValid && isIncidentDateTimeValid
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Incident Details") {
-                    reportTextField("Station Diary No.", text: $details.stationDiaryNo)
-                    reportTextField("Name of Informant", text: $details.nameOfInformant)
-                    reportTextField("Address", text: $details.address, axis: .vertical)
-                    reportTextField("ID Type / ID No.", text: $details.idTypeAndNo)
-                    reportTextField("FIN NO", text: $details.finNo)
-                    reportTextField("Home/Office Number", text: $details.homeOfficeNo)
-                    reportTextField("Mobile Number", text: $details.mobileNo)
-                    reportTextField("Nationality", text: $details.nationality)
-                    reportTextField("Occupation", text: $details.occupation)
-                    reportTextField("Sex", text: $details.sex)
-                    reportTextField("Age", text: $details.age)
-                    reportTextField("Date of Birth", text: $details.dateOfBirth)
-                    reportTextField("Race", text: $details.race)
-                    reportTextField("Date/Time of Incident", text: $details.dateTimeOfIncident)
-                    reportTextField("Location of Incident", text: $details.locationOfIncident, axis: .vertical)
-                    reportTextField("Institution/School Name", text: $details.institutionSchoolName)
+                    reportTextField(
+                        "Station Diary No.",
+                        text: $details.stationDiaryNo,
+                        placeholder: "Auto: D/yyyymmdd/1234"
+                    )
+                    reportTextField("Name of Informant", text: $details.nameOfInformant, placeholder: "Enter full name")
+                    reportTextField("Address", text: $details.address, placeholder: "Enter address", axis: .vertical)
+                    reportTextField("ID Type / ID No.", text: $details.idTypeAndNo, placeholder: "e.g. NRIC / S1234567A")
+                    reportTextField("FIN NO /", text: $details.finNo, placeholder: "Enter FIN, if any")
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Contact No.").font(.caption).foregroundColor(.secondary)
+                        Picker("Contact Type", selection: $details.contactType) {
+                            ForEach(contactOptions, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        TextField("Enter \(details.contactType.lowercased()) number", text: $details.contactNumber)
+                            .keyboardType(.phonePad)
+                    }
+
+                    reportTextField("Email Address", text: $details.emailAddress, placeholder: "name@example.com")
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    reportTextField("Nationality", text: $details.nationality, placeholder: "Enter nationality")
+                    reportTextField("Occupation", text: $details.occupation, placeholder: "Enter occupation")
+
+                    dropdownField("Sex", selection: $details.sex, options: sexOptions, emptyTitle: "Select sex")
+                    reportTextField("Age", text: $details.age, placeholder: "Enter age")
+                        .keyboardType(.numberPad)
+                    if !isAgeValid {
+                        validationText("Age must be a valid number between 0 and 130.")
+                    }
+
+                    dateOnlyPickerField(
+                        "Date of Birth",
+                        date: $dateOfBirthValue,
+                        output: $details.dateOfBirth
+                    )
+
+                    dropdownField("Race", selection: $details.race, options: raceOptions, emptyTitle: "Select race")
+                    reportTextField("Language", text: $details.language, placeholder: "Enter language")
+                    dateTimePickerField(
+                        "Date/Time of Incident",
+                        date: $incidentDateTimeValue,
+                        output: $details.dateTimeOfIncident
+                    )
+
+                    reportTextField("Location of Incident", text: $details.locationOfIncident, placeholder: "Enter location", axis: .vertical)
+                    reportTextField("Institution/School Name", text: $details.institutionSchoolName, placeholder: "Enter institution/school, if any")
                 }
 
                 Section {
                     Button {
+                        if isBlank(details.stationDiaryNo) {
+                            details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
+                        }
                         showStageTwo = true
                     } label: {
                         Text("Proceed to Stage 2")
@@ -1435,7 +1652,8 @@ struct PoliceReportStageOneView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(carType.accentColor)
+                    .tint(canProceed ? carType.accentColor : .gray)
+                    .disabled(!canProceed)
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 }
             }
@@ -1452,11 +1670,17 @@ struct PoliceReportStageOneView: View {
                     carType: carType,
                     detections: detections,
                     scanImages: scanImages,
+                    policeStation: policeStation,
                     stageOne: details,
                     isGeneratingReport: $isGeneratingReport,
                     pdfURL: $pdfURL,
                     isPresented: $isPresented
                 )
+            }
+            .onAppear {
+                if details.stationDiaryNo.isEmpty {
+                    details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
+                }
             }
         }
     }
@@ -1465,16 +1689,95 @@ struct PoliceReportStageOneView: View {
     private func reportTextField(
         _ title: String,
         text: Binding<String>,
+        placeholder: String,
         axis: Axis = .horizontal
     ) -> some View {
-        if axis == .vertical {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.caption).foregroundColor(.secondary)
-                TextField(title, text: text, axis: .vertical)
-                    .lineLimit(2...4)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            TextField(placeholder, text: text, axis: axis)
+                .lineLimit(axis == .vertical ? 2...4 : 1...1)
+        }
+    }
+
+    @ViewBuilder
+    private func dropdownField(
+        _ title: String,
+        selection: Binding<String>,
+        options: [String],
+        emptyTitle: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            Picker(emptyTitle, selection: selection) {
+                ForEach(options, id: \.self) { option in
+                    Text(option.isEmpty ? emptyTitle : option).tag(option)
+                }
             }
-        } else {
-            TextField(title, text: text)
+            .pickerStyle(.menu)
+        }
+    }
+
+    @ViewBuilder
+    private func dateOnlyPickerField(
+        _ title: String,
+        date: Binding<Date>,
+        output: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            DatePicker("", selection: date, displayedComponents: .date)
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .onAppear { output.wrappedValue = PoliceReportFormFormatter.dobDisplay(from: date.wrappedValue) }
+                .onChange(of: date.wrappedValue) { _, newDate in
+                    output.wrappedValue = PoliceReportFormFormatter.dobDisplay(from: newDate)
+                }
+            Text(output.wrappedValue.isEmpty ? "DD/MM/YYYY" : output.wrappedValue)
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func dateTimePickerField(
+        _ title: String,
+        date: Binding<Date>,
+        output: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .environment(\.locale, Locale(identifier: "en_GB"))
+                .onAppear { output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: date.wrappedValue) }
+                .onChange(of: date.wrappedValue) { _, newDate in
+                    output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: newDate)
+                }
+            Text(output.wrappedValue.isEmpty ? "Day Month Year, HH:mm" : output.wrappedValue)
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func validationText(_ message: String) -> some View {
+        Text(message)
+            .font(.caption)
+            .foregroundColor(.red)
+    }
+
+    private func isBlank(_ value: String) -> Bool {
+        value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func isValidDate(_ value: String, formats: [String]) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return formats.contains { format in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = format
+            formatter.isLenient = false
+            return formatter.date(from: trimmed) != nil
         }
     }
 }
@@ -1484,6 +1787,7 @@ struct PoliceReportStageTwoView: View {
     let carType: CarType
     let detections: [MutableDamageDetection]
     let scanImages: [UIImage]
+    let policeStation: PoliceStationDetails
     let stageOne: PoliceReportStageOneDetails
 
     @Binding var isGeneratingReport: Bool
@@ -1493,52 +1797,46 @@ struct PoliceReportStageTwoView: View {
     @State private var details = PoliceReportStageTwoDetails()
     @State private var officerSignatureTrigger = UUID()
     @State private var informantSignatureTrigger = UUID()
+    @State private var interpreterDateTimeValue = Date()
+    @State private var informantDateTimeValue = Date()
     @State private var officerSignatureImage: UIImage? = nil
     @State private var informantSignatureImage: UIImage? = nil
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Form {
-            Section("Officer Recording The Report") {
-                TextField("Name", text: $details.officerRecordingName)
+            Section("Enter your details") {
+                reportTextField("Name of officer recording the report", text: $details.officerRecordingName, placeholder: "Enter officer name")
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Signature of Officer Recording the Report")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    SignaturePadView(image: $officerSignatureImage, clearTrigger: officerSignatureTrigger)
-                        .frame(height: 130)
-                    Button("Clear Officer Signature") {
-                        officerSignatureImage = nil
-                        officerSignatureTrigger = UUID()
-                    }
-                    .font(.caption)
+                signatureInput(
+                    title: "Signature of Officer Recording the Report",
+                    image: $officerSignatureImage,
+                    clearTrigger: $officerSignatureTrigger,
+                    clearTitle: "Clear Officer Signature"
+                )
+            }
+
+            Section("Interpreter") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Signature of Interpreter").font(.caption).foregroundColor(.secondary)
+                    TextField("Not available", text: $details.interpreterAvailability)
                 }
-                .padding(.vertical, 6)
+                dateTimePickerField("Date/Time", date: $interpreterDateTimeValue, output: $details.interpreterSignatureDateTime)
             }
 
             Section("Informant") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Signature of Informant")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    SignaturePadView(image: $informantSignatureImage, clearTrigger: informantSignatureTrigger)
-                        .frame(height: 130)
-                    Button("Clear Informant Signature") {
-                        informantSignatureImage = nil
-                        informantSignatureTrigger = UUID()
-                    }
-                    .font(.caption)
-                }
-                .padding(.vertical, 6)
+                signatureInput(
+                    title: "Signature of Informant",
+                    image: $informantSignatureImage,
+                    clearTrigger: $informantSignatureTrigger,
+                    clearTitle: "Clear Informant Signature"
+                )
 
-                TextField("Date/Time", text: $details.informantSignatureDateTime)
+                dateTimePickerField("Date/Time", date: $informantDateTimeValue, output: $details.informantSignatureDateTime)
             }
 
             Section("Case") {
-                TextField("Name of Officer In-Charge of Case", text: $details.officerInCharge)
-                TextField("Classification of Case", text: $details.classificationOfCase, axis: .vertical)
-                    .lineLimit(2...4)
+                reportTextField("Name of Officer In-Charge of Case", text: $details.officerInCharge, placeholder: "Enter officer-in-charge")
+                reportTextField("Classification of Case", text: $details.classificationOfCase, placeholder: "Enter classification", axis: .vertical)
             }
 
             Section {
@@ -1562,11 +1860,82 @@ struct PoliceReportStageTwoView: View {
         }
         .navigationTitle("Report Stage 2")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $pdfURL) { url in
+            ReportWelcomeView(
+                plate: plate,
+                carType: carType,
+                detectionCount: detections.count,
+                pdfURL: url,
+                onLogout: {
+                    pdfURL = nil
+                    isPresented = false
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func reportTextField(
+        _ title: String,
+        text: Binding<String>,
+        placeholder: String,
+        axis: Axis = .horizontal
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            TextField(placeholder, text: text, axis: axis)
+                .lineLimit(axis == .vertical ? 2...4 : 1...1)
+        }
+    }
+
+    @ViewBuilder
+    private func dateTimePickerField(
+        _ title: String,
+        date: Binding<Date>,
+        output: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundColor(.secondary)
+            DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .environment(\.locale, Locale(identifier: "en_GB"))
+                .onAppear { output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: date.wrappedValue) }
+                .onChange(of: date.wrappedValue) { _, newDate in
+                    output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: newDate)
+                }
+            Text(output.wrappedValue.isEmpty ? "Day Month Year, HH:mm" : output.wrappedValue)
+                .font(.caption.monospacedDigit())
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func signatureInput(
+        title: String,
+        image: Binding<UIImage?>,
+        clearTrigger: Binding<UUID>,
+        clearTitle: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            SignaturePadView(image: image, clearTrigger: clearTrigger.wrappedValue)
+                .frame(height: 150)
+            Button(clearTitle) {
+                image.wrappedValue = nil
+                clearTrigger.wrappedValue = UUID()
+            }
+            .font(.caption)
+        }
+        .padding(.vertical, 6)
     }
 
     private func generateReport() {
         guard !isGeneratingReport else { return }
         isGeneratingReport = true
+        pdfURL = nil
 
         var finalStageTwo = details
         finalStageTwo.officerSignature = officerSignatureImage
@@ -1576,6 +1945,7 @@ struct PoliceReportStageTwoView: View {
         let carTypeValue = carType.rawValue
         let detections = detections
         let scanImages = scanImages
+        let policeStation = policeStation
         let stageOne = stageOne
 
         Task(priority: .userInitiated) {
@@ -1585,6 +1955,7 @@ struct PoliceReportStageTwoView: View {
                     carType: carTypeValue,
                     detections: detections,
                     scanImages: scanImages,
+                    policeStation: policeStation,
                     stageOne: stageOne,
                     stageTwo: finalStageTwo
                 )
@@ -1592,14 +1963,37 @@ struct PoliceReportStageTwoView: View {
 
             await MainActor.run {
                 isGeneratingReport = false
-                isPresented = false
-
-                // Present the PDF sheet after the full-screen form has finished dismissing.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    pdfURL = url
-                }
+                pdfURL = url
             }
         }
+    }
+}
+
+enum PoliceReportFormFormatter {
+    static func yyyymmdd(date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.string(from: date)
+    }
+
+    static func stationDiaryNumber(date: Date = Date()) -> String {
+        let reference = Int.random(in: 0...9999)
+        return "D/\(yyyymmdd(date: date))/\(String(format: "%04d", reference))"
+    }
+
+    static func dobDisplay(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "dd/MM/yyyy"
+        return formatter.string(from: date)
+    }
+
+    static func reportDateTimeDisplay(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "d MMMM yyyy, HH:mm"
+        return formatter.string(from: date)
     }
 }
 
@@ -1613,6 +2007,7 @@ struct SignaturePadView: UIViewRepresentable {
         view.layer.cornerRadius = 10
         view.layer.borderWidth = 1
         view.layer.borderColor = UIColor.systemGray3.cgColor
+        view.clipsToBounds = true
         view.onImageChanged = { image in
             self.image = image
         }
@@ -1638,30 +2033,60 @@ struct SignaturePadView: UIViewRepresentable {
     }
 }
 
-final class SignatureCanvasView: UIView {
+final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
     var onImageChanged: ((UIImage?) -> Void)?
     private var lines: [[CGPoint]] = []
     private var currentLine: [CGPoint] = []
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let point = touches.first?.location(in: self) else { return }
-        currentLine = [point]
-        setNeedsDisplay()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupDrawingGesture()
     }
 
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let point = touches.first?.location(in: self) else { return }
-        currentLine.append(point)
-        setNeedsDisplay()
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupDrawingGesture()
     }
 
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if !currentLine.isEmpty {
-            lines.append(currentLine)
-            currentLine = []
-            onImageChanged?(renderSignatureImage())
+    private func setupDrawingGesture() {
+        isMultipleTouchEnabled = false
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = true
+        pan.delaysTouchesBegan = false
+        pan.delaysTouchesEnded = false
+        pan.delegate = self
+        addGestureRecognizer(pan)
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let point = gesture.location(in: self)
+        let clampedPoint = CGPoint(
+            x: min(max(point.x, 0), bounds.width),
+            y: min(max(point.y, 0), bounds.height)
+        )
+
+        switch gesture.state {
+        case .began:
+            currentLine = [clampedPoint]
+            setNeedsDisplay()
+        case .changed:
+            currentLine.append(clampedPoint)
+            setNeedsDisplay()
+        case .ended, .cancelled, .failed:
+            if !currentLine.isEmpty {
+                lines.append(currentLine)
+                currentLine = []
+                onImageChanged?(renderSignatureImage())
+            }
+            setNeedsDisplay()
+        default:
+            break
         }
-        setNeedsDisplay()
     }
 
     override func draw(_ rect: CGRect) {
@@ -1696,10 +2121,10 @@ final class SignatureCanvasView: UIView {
     private func renderSignatureImage() -> UIImage? {
         guard !lines.isEmpty else { return nil }
         let renderer = UIGraphicsImageRenderer(bounds: bounds)
-        return renderer.image { _ in
+        return renderer.image { context in
             UIColor.white.setFill()
             UIRectFill(bounds)
-            drawHierarchy(in: bounds, afterScreenUpdates: true)
+            layer.render(in: context.cgContext)
         }
     }
 }
