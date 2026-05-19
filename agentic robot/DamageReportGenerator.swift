@@ -229,6 +229,17 @@ struct DamageReportGenerator {
                     return summary
                 }
 
+                let casesPerDamagePage = 3
+                let damagePageCount = max(1, Int(ceil(Double(max(detections.count, 1)) / Double(casesPerDamagePage))))
+                let totalPageCount = 2 + damagePageCount
+                var currentPageNumber = 0
+
+                func beginReportPage() {
+                    currentPageNumber += 1
+                    context.beginPage()
+                    drawHeader(pageText: "\(currentPageNumber) of \(totalPageCount)")
+                }
+
                 func drawHeader(pageText: String) {
                     drawCrest(at: CGPoint(x: left, y: top - 2))
                     drawString("SINGAPORE\nPOLICE FORCE", in: CGRect(x: left + 68, y: top + 4, width: 190, height: 42), font: .boldSystemFont(ofSize: 16), color: UIColor(red: 0.08, green: 0.13, blue: 0.35, alpha: 1))
@@ -243,8 +254,7 @@ struct DamageReportGenerator {
                 }
 
                 func drawPageOne() {
-                    context.beginPage()
-                    drawHeader(pageText: "1 of 3")
+                    beginReportPage()
 
                     let tableTop: CGFloat = 215
                     drawLine(x1: left, y1: tableTop, x2: right, y2: tableTop, width: 1)
@@ -253,7 +263,7 @@ struct DamageReportGenerator {
                     let col1: CGFloat = left
                     let col2: CGFloat = 270
                     let col3: CGFloat = 450
-                    drawLine(x1: col2, y1: tableTop, x2: col2, y2: 515)
+                    drawLine(x1: col2, y1: tableTop, x2: col2, y2: tableTop + 287)
                     drawLine(x1: col3, y1: tableTop, x2: col3, y2: tableTop + 34)
 
                     drawField(label: "Date/Time Report Made", value: dateReportMade, rect: CGRect(x: col1, y: tableTop, width: col2 - col1, height: 34))
@@ -267,21 +277,20 @@ struct DamageReportGenerator {
                     drawField(label: "Address", value: stageOne.address, rect: CGRect(x: col2, y: y, width: right - col2, height: rowH))
                     y += rowH
                     drawLine(x1: left, y1: y, x2: right, y2: y)
-                    drawField(label: "ID Type / ID No.", value: stageOne.idTypeAndNo, rect: CGRect(x: left, y: y, width: col2 - left, height: rowH))
-                    drawField(label: "Contact No.\nHome/Office: \(stageOne.contactType)", value: stageOne.contactNumber, rect: CGRect(x: col2, y: y, width: right - col2, height: rowH))
-                    y += rowH
-                    drawLine(x1: left, y1: y, x2: right, y2: y)
-                    drawField(label: "FIN NO /", value: stageOne.finNo, rect: CGRect(x: left, y: y, width: col2 - left, height: 34))
-                    drawField(label: "Email Address", value: stageOne.emailAddress, rect: CGRect(x: col2, y: y, width: right - col2, height: 34))
-                    y += 34
+                    let idRowH: CGFloat = 56
+                    drawField(label: "ID Type / ID No.", value: stageOne.idTypeAndNo, rect: CGRect(x: left, y: y, width: col2 - left, height: idRowH / 2), labelHeight: 13, valueFontSize: 9)
+                    drawField(label: "FIN NO /", value: stageOne.finNo, rect: CGRect(x: left, y: y + idRowH / 2, width: col2 - left, height: idRowH / 2), labelHeight: 13, valueFontSize: 9)
+                    drawField(label: "Contact No.\n\(stageOne.contactType)", value: stageOne.contactNumber, rect: CGRect(x: col2, y: y, width: right - col2, height: idRowH))
+                    y += idRowH
                     drawLine(x1: left, y1: y, x2: right, y2: y)
                     drawField(label: "Nationality", value: stageOne.nationality, rect: CGRect(x: left, y: y, width: col2 - left, height: 34))
-                    drawField(label: "Occupation", value: stageOne.occupation, rect: CGRect(x: col2, y: y, width: right - col2, height: 34))
+                    drawField(label: "Email Address", value: stageOne.emailAddress, rect: CGRect(x: col2, y: y, width: right - col2, height: 34))
                     y += 34
                     drawLine(x1: left, y1: y, x2: right, y2: y)
                     drawLine(x1: 325, y1: y, x2: 325, y2: y + 34)
                     drawLine(x1: 380, y1: y, x2: 380, y2: y + 34)
                     drawLine(x1: 450, y1: y, x2: 450, y2: y + 34)
+                    drawField(label: "Occupation", value: stageOne.occupation, rect: CGRect(x: left, y: y, width: col2 - left, height: 34))
                     drawField(label: "Sex", value: stageOne.sex, rect: CGRect(x: col2, y: y, width: 55, height: 34))
                     drawField(label: "Age", value: stageOne.age, rect: CGRect(x: 325, y: y, width: 55, height: 34))
                     drawField(label: "Date of Birth", value: stageOne.dateOfBirth, rect: CGRect(x: 380, y: y, width: 70, height: 34))
@@ -299,84 +308,197 @@ struct DamageReportGenerator {
 
                     y += 5
                     drawString("Brief details.", in: CGRect(x: left + 2, y: y, width: 120, height: 16), font: .boldSystemFont(ofSize: 10))
-                    y += 30
-                    drawString(buildOverallSummary(), in: CGRect(x: left, y: y, width: pageWidth, height: 58), font: .systemFont(ofSize: 8.8))
-                    y += 78
+                    drawLine(x1: left + 2, y1: y + 15, x2: left + 70, y2: y + 15, width: 0.7)
+                    y += 18
+                    drawString(buildOverallSummary(), in: CGRect(x: left, y: y, width: pageWidth, height: 38), font: .systemFont(ofSize: 8.3))
+                    y += 45
 
                     fillRect(CGRect(x: left, y: y, width: pageWidth, height: 16), color: UIColor(white: 0.78, alpha: 1))
                     drawRect(CGRect(x: left, y: y, width: pageWidth, height: 16))
                     drawString("Property Information", in: CGRect(x: left + 2, y: y + 2, width: pageWidth - 4, height: 12), font: .systemFont(ofSize: 10))
-                    y += 72
+                    y += 52
                     drawLine(x1: left, y1: y, x2: right, y2: y)
-                    y += 30
+                    y += 20
                     drawLine(x1: left, y1: y, x2: right, y2: y)
-
-                    // Signature and case officer details are drawn on their own page so the
-                    // first page fields stay readable and the damage section remains unchanged.
+                    // Signature/case boxes can overflow this page because the Stage 1 table is tall.
+                    // Keep the Property Information area on page 1, then continue the exact
+                    // NP299-style signature block on the next page.
                 }
 
-                func drawSignaturePage() {
-                    context.beginPage()
-                    drawHeader(pageText: "2 of 3")
+                func drawSignatureContinuationPage() {
+                    beginReportPage()
+                    drawBottomSignatureBlock(y: 215)
+                }
 
-                    var y: CGFloat = 210
-                    fillRect(CGRect(x: left, y: y, width: pageWidth, height: 18), color: UIColor(white: 0.78, alpha: 1))
-                    drawRect(CGRect(x: left, y: y, width: pageWidth, height: 18))
-                    drawString("Report Signatures", in: CGRect(x: left + 3, y: y + 3, width: pageWidth - 6, height: 13), font: .boldSystemFont(ofSize: 10))
-                    y += 28
-
-                    let colGap: CGFloat = 20
+                func drawBottomSignatureBlock(y: CGFloat) {
+                    let colGap: CGFloat = 25
                     let colWidth = (pageWidth - colGap) / 2
                     let leftCol = left
                     let rightCol = left + colWidth + colGap
+                    let row1H: CGFloat = 55
+                    let row2H: CGFloat = 55
+                    let row3H: CGFloat = 70
+                    let totalH = row1H + row2H + row3H
 
-                    func drawSignaturePanel(title: String, value: String, signature: UIImage?, dateTime: String, rect: CGRect) {
-                        drawRect(rect)
-                        drawString(title, in: CGRect(x: rect.minX + 8, y: rect.minY + 8, width: rect.width - 16, height: 14), font: .boldSystemFont(ofSize: 9.5))
-                        drawString(valueOrBlank(value), in: CGRect(x: rect.minX + 8, y: rect.minY + 28, width: rect.width - 16, height: 24), font: .systemFont(ofSize: 9))
-                        drawRect(CGRect(x: rect.minX + 8, y: rect.minY + 58, width: rect.width - 16, height: 70))
-                        if let signature {
-                            signature.draw(in: CGRect(x: rect.minX + 14, y: rect.minY + 64, width: rect.width - 28, height: 58))
-                        }
-                        drawString("Date/Time", in: CGRect(x: rect.minX + 8, y: rect.minY + 136, width: 80, height: 12), font: .boldSystemFont(ofSize: 8.5))
-                        drawString(valueOrBlank(dateTime), in: CGRect(x: rect.minX + 8, y: rect.minY + 150, width: rect.width - 16, height: 20), font: .systemFont(ofSize: 9))
+                    // Outer boxes for the two columns, matching the reference layout.
+                    drawRect(CGRect(x: leftCol, y: y, width: colWidth, height: totalH))
+                    drawRect(CGRect(x: rightCol, y: y, width: colWidth, height: totalH))
+
+                    // Row separators.
+                    drawLine(x1: leftCol, y1: y + row1H, x2: leftCol + colWidth, y2: y + row1H)
+                    drawLine(x1: leftCol, y1: y + row1H + row2H, x2: leftCol + colWidth, y2: y + row1H + row2H)
+                    drawLine(x1: rightCol, y1: y + row1H, x2: rightCol + colWidth, y2: y + row1H)
+                    drawLine(x1: rightCol, y1: y + row1H + row2H, x2: rightCol + colWidth, y2: y + row1H + row2H)
+
+                    // Left column: officer signature + name.
+                    drawString("Signature of Officer Recording the Report:", in: CGRect(x: leftCol + 5, y: y + 6, width: colWidth - 86, height: 13), font: .boldSystemFont(ofSize: 8.5))
+                    drawString(valueOrBlank(stageTwo.officerRecordingName), in: CGRect(x: leftCol + 5, y: y + 22, width: colWidth - 100, height: 34), font: .boldSystemFont(ofSize: 8.5))
+                    if let signature = stageTwo.officerSignature {
+                        signature.draw(in: CGRect(x: leftCol + colWidth - 72, y: y + 9, width: 50, height: 40))
                     }
 
-                    drawSignaturePanel(
-                        title: "Signature Of Officer Recording The Report",
-                        value: stageTwo.officerRecordingName,
-                        signature: stageTwo.officerSignature,
-                        dateTime: dateReportMade,
-                        rect: CGRect(x: leftCol, y: y, width: colWidth, height: 178)
-                    )
+                    // Right column: informant signature.
+                    drawString("Signature Of Informant:", in: CGRect(x: rightCol + 5, y: y + 6, width: colWidth - 86, height: 13), font: .boldSystemFont(ofSize: 8.5))
+                    if let signature = stageTwo.informantSignature {
+                        signature.draw(in: CGRect(x: rightCol + colWidth - 72, y: y + 9, width: 50, height: 40))
+                    }
 
-                    drawSignaturePanel(
-                        title: "Signature Of Informant",
-                        value: valueOrBlank(stageTwo.informantName, fallback: stageOne.nameOfInformant),
-                        signature: stageTwo.informantSignature,
-                        dateTime: stageTwo.informantSignatureDateTime,
-                        rect: CGRect(x: rightCol, y: y, width: colWidth, height: 178)
-                    )
-
-                    y += 198
-
-                    drawRect(CGRect(x: leftCol, y: y, width: colWidth, height: 130))
-                    drawString("Signature Of Interpreter", in: CGRect(x: leftCol + 6, y: y + 6, width: colWidth - 12, height: 14), font: .boldSystemFont(ofSize: 9.5))
-                    let interpreterBox = CGRect(x: leftCol + 6, y: y + 25, width: colWidth - 12, height: 62)
-                    drawRect(interpreterBox)
+                    // Left row 2: interpreter signature / default text.
+                    let interpreterY = y + row1H
+                    drawString("Signature Of Interpreter:", in: CGRect(x: leftCol + 5, y: interpreterY + 7, width: colWidth - 10, height: 13), font: .boldSystemFont(ofSize: 8.5))
                     if let interpreterSignature = stageTwo.interpreterSignature {
-                        interpreterSignature.draw(in: interpreterBox.insetBy(dx: 6, dy: 6))
+                        interpreterSignature.draw(in: CGRect(x: leftCol + 8, y: interpreterY + 23, width: colWidth - 16, height: 26))
                     } else {
-                        drawString(valueOrBlank(stageTwo.interpreterAvailability, fallback: "Not available"), in: interpreterBox.insetBy(dx: 6, dy: 20), font: .systemFont(ofSize: 9))
+                        drawString(valueOrBlank(stageTwo.interpreterAvailability, fallback: "Not applicable"), in: CGRect(x: leftCol + 5, y: interpreterY + 22, width: colWidth - 10, height: 14), font: .boldSystemFont(ofSize: 8.5))
                     }
-                    drawField(label: "Date/Time", value: stageTwo.interpreterSignatureDateTime, rect: CGRect(x: leftCol + 6, y: y + 92, width: colWidth - 12, height: 32))
 
-                    drawRect(CGRect(x: rightCol, y: y, width: colWidth, height: 130))
-                    drawField(label: "Name Of Officer In-Charge Of Case", value: stageTwo.officerInCharge, rect: CGRect(x: rightCol + 6, y: y + 6, width: colWidth - 12, height: 38))
-                    drawField(label: "Classification Of Case", value: stageTwo.classificationOfCase, rect: CGRect(x: rightCol + 6, y: y + 46, width: colWidth - 12, height: 36))
+                    // Right row 2: date/time.
+                    let dateY = y + row1H
+                    drawString("Date/Time:", in: CGRect(x: rightCol + 5, y: dateY + 8, width: 80, height: 13), font: .boldSystemFont(ofSize: 8.5))
+                    drawString(valueOrBlank(stageTwo.informantSignatureDateTime, fallback: dateReportMade), in: CGRect(x: rightCol + 5, y: dateY + 24, width: colWidth - 10, height: 18), font: .systemFont(ofSize: 8.5))
+
+                    // Bottom row.
+                    let bottomY = y + row1H + row2H
+                    drawString("Officer In-Charge Of Case:", in: CGRect(x: leftCol + 5, y: bottomY + 8, width: colWidth - 10, height: 13), font: .boldSystemFont(ofSize: 8.5))
+                    drawString(valueOrBlank(stageTwo.officerInCharge), in: CGRect(x: leftCol + 5, y: bottomY + 26, width: colWidth - 10, height: row3H - 34), font: .systemFont(ofSize: 8.5))
+                    drawString("Classification Of Case:", in: CGRect(x: rightCol + 5, y: bottomY + 8, width: colWidth - 10, height: 13), font: .boldSystemFont(ofSize: 8.5))
+                    drawString(valueOrBlank(stageTwo.classificationOfCase), in: CGRect(x: rightCol + 5, y: bottomY + 26, width: colWidth - 10, height: row3H - 34), font: .systemFont(ofSize: 8.5))
                 }
 
-                func drawImageFit(_ image: UIImage, in rect: CGRect) {
+                func drawSignaturePage() {
+                    beginReportPage()
+
+                    // Signature/case section — intentionally drawn without a grey/black
+                    // title row, matching the requested NP299-style bottom layout.
+                    let y: CGFloat = 215
+                    let gap: CGFloat = 24
+                    let colWidth = (pageWidth - gap) / 2
+                    let leftCol = left
+                    let rightCol = left + colWidth + gap
+                    let topRowH: CGFloat = 100
+                    let middleRowH: CGFloat = 90
+                    let bottomRowH: CGFloat = 130
+                    let totalH = topRowH + middleRowH + bottomRowH
+
+                    let leftBox = CGRect(x: leftCol, y: y, width: colWidth, height: totalH)
+                    let rightBox = CGRect(x: rightCol, y: y, width: colWidth, height: totalH)
+
+                    drawRect(leftBox)
+                    drawRect(rightBox)
+
+                    // Row separators inside both columns
+                    drawLine(x1: leftCol, y1: y + topRowH, x2: leftCol + colWidth, y2: y + topRowH)
+                    drawLine(x1: leftCol, y1: y + topRowH + middleRowH, x2: leftCol + colWidth, y2: y + topRowH + middleRowH)
+                    drawLine(x1: rightCol, y1: y + topRowH, x2: rightCol + colWidth, y2: y + topRowH)
+                    drawLine(x1: rightCol, y1: y + topRowH + middleRowH, x2: rightCol + colWidth, y2: y + topRowH + middleRowH)
+
+                    // Left column, first row: officer signature + name inside the same row.
+                    drawString(
+                        "Signature of Officer Recording the Report:",
+                        in: CGRect(x: leftCol + 6, y: y + 8, width: colWidth - 100, height: 14),
+                        font: .boldSystemFont(ofSize: 9.5)
+                    )
+                    drawString(
+                        valueOrBlank(stageTwo.officerRecordingName),
+                        in: CGRect(x: leftCol + 6, y: y + 26, width: colWidth - 105, height: 48),
+                        font: .boldSystemFont(ofSize: 9)
+                    )
+                    let officerSigBox = CGRect(x: leftCol + colWidth - 86, y: y + 24, width: 66, height: 58)
+                    if let officerSignature = stageTwo.officerSignature {
+                        officerSignature.draw(in: officerSigBox)
+                    }
+
+                    // Left column, second row: interpreter signature/default text.
+                    let interpreterY = y + topRowH
+                    drawString(
+                        "Signature Of Interpreter:",
+                        in: CGRect(x: leftCol + 6, y: interpreterY + 8, width: colWidth - 12, height: 14),
+                        font: .boldSystemFont(ofSize: 9.5)
+                    )
+                    let interpreterBox = CGRect(x: leftCol + 6, y: interpreterY + 28, width: colWidth - 12, height: 50)
+                    if let interpreterSignature = stageTwo.interpreterSignature {
+                        interpreterSignature.draw(in: interpreterBox.insetBy(dx: 6, dy: 4))
+                    } else {
+                        drawString(
+                            valueOrBlank(stageTwo.interpreterAvailability, fallback: "Not applicable"),
+                            in: CGRect(x: leftCol + 6, y: interpreterY + 25, width: colWidth - 12, height: 18),
+                            font: .systemFont(ofSize: 9)
+                        )
+                    }
+
+                    // Left column, third row: officer in-charge.
+                    let officerCaseY = y + topRowH + middleRowH
+                    drawString(
+                        "Officer In-Charge Of Case:",
+                        in: CGRect(x: leftCol + 6, y: officerCaseY + 8, width: colWidth - 12, height: 14),
+                        font: .boldSystemFont(ofSize: 9.5)
+                    )
+                    drawString(
+                        valueOrBlank(stageTwo.officerInCharge),
+                        in: CGRect(x: leftCol + 6, y: officerCaseY + 30, width: colWidth - 12, height: bottomRowH - 38),
+                        font: .systemFont(ofSize: 9)
+                    )
+
+                    // Right column, first row: informant signature.
+                    drawString(
+                        "Signature Of Informant:",
+                        in: CGRect(x: rightCol + 6, y: y + 8, width: colWidth - 12, height: 14),
+                        font: .boldSystemFont(ofSize: 9.5)
+                    )
+                    let informantSigBox = CGRect(x: rightCol + colWidth - 112, y: y + 24, width: 82, height: 58)
+                    if let informantSignature = stageTwo.informantSignature {
+                        informantSignature.draw(in: informantSigBox)
+                    }
+
+                    // Right column, second row: date/time.
+                    let dateY = y + topRowH
+                    drawString(
+                        "Date/Time:",
+                        in: CGRect(x: rightCol + 6, y: dateY + 8, width: colWidth - 12, height: 14),
+                        font: .boldSystemFont(ofSize: 9.5)
+                    )
+                    drawString(
+                        valueOrBlank(stageTwo.informantSignatureDateTime),
+                        in: CGRect(x: rightCol + 6, y: dateY + 30, width: colWidth - 12, height: 40),
+                        font: .systemFont(ofSize: 9)
+                    )
+
+                    // Right column, third row: classification.
+                    let classificationY = y + topRowH + middleRowH
+                    drawString(
+                        "Classification Of Case:",
+                        in: CGRect(x: rightCol + 6, y: classificationY + 8, width: colWidth - 12, height: 14),
+                        font: .boldSystemFont(ofSize: 9.5)
+                    )
+                    drawString(
+                        valueOrBlank(stageTwo.classificationOfCase),
+                        in: CGRect(x: rightCol + 6, y: classificationY + 30, width: colWidth - 12, height: bottomRowH - 38),
+                        font: .systemFont(ofSize: 9)
+                    )
+                }
+
+                @discardableResult
+                func drawImageFit(_ image: UIImage, in rect: CGRect) -> CGRect {
                     let imageRatio = image.size.width / max(image.size.height, 1)
                     let rectRatio = rect.width / rect.height
                     var drawRect = rect
@@ -388,11 +510,30 @@ struct DamageReportGenerator {
                         drawRect = CGRect(x: rect.midX - width / 2, y: rect.minY, width: width, height: rect.height)
                     }
                     image.draw(in: drawRect)
+                    return drawRect
+                }
+
+                func drawImageFit(_ image: UIImage, in rect: CGRect, normalizedBBox: CGRect?) {
+                    let fittedRect = drawImageFit(image, in: rect)
+                    guard let bbox = normalizedBBox else { return }
+
+                    let boxRect = CGRect(
+                        x: fittedRect.minX + bbox.minX * fittedRect.width,
+                        y: fittedRect.minY + bbox.minY * fittedRect.height,
+                        width: bbox.width * fittedRect.width,
+                        height: bbox.height * fittedRect.height
+                    )
+
+                    let cg = UIGraphicsGetCurrentContext()
+                    cg?.saveGState()
+                    cg?.setStrokeColor(UIColor.orange.cgColor)
+                    cg?.setLineWidth(2.2)
+                    cg?.stroke(boxRect)
+                    cg?.restoreGState()
                 }
 
                 func drawPageTwo() {
-                    context.beginPage()
-                    drawHeader(pageText: "3 of 3")
+                    beginReportPage()
 
                     var y: CGFloat = 210
                     fillRect(CGRect(x: left, y: y, width: pageWidth, height: 18), color: UIColor(white: 0.78, alpha: 1))
@@ -407,8 +548,7 @@ struct DamageReportGenerator {
 
                     for (index, detection) in detections.enumerated() {
                         if y > 700 {
-                            context.beginPage()
-                            drawHeader(pageText: "3 of 3")
+                            beginReportPage()
                             y = 210
                         }
 
@@ -425,7 +565,11 @@ struct DamageReportGenerator {
 
                         if let contextImage = detection.normalizedBBox == nil ? detection.contextImage : (detection.cleanContextImage ?? detection.contextImage) {
                             drawString("Vehicle Location", in: CGRect(x: 315, y: y + 24, width: 95, height: 12), font: .boldSystemFont(ofSize: 8))
-                            drawImageFit(contextImage, in: CGRect(x: 315, y: y + 38, width: 95, height: 90))
+                            if detection.normalizedBBox == nil {
+                                drawImageFit(contextImage, in: CGRect(x: 315, y: y + 38, width: 95, height: 90))
+                            } else {
+                                drawImageFit(contextImage, in: CGRect(x: 315, y: y + 38, width: 95, height: 90), normalizedBBox: detection.normalizedBBox)
+                            }
                         }
                         if let cropImage = detection.cropImage {
                             drawString("Damage Close-Up", in: CGRect(x: 430, y: y + 24, width: 95, height: 12), font: .boldSystemFont(ofSize: 8))
@@ -437,7 +581,7 @@ struct DamageReportGenerator {
                 }
 
                 drawPageOne()
-                drawSignaturePage()
+                drawSignatureContinuationPage()
                 drawPageTwo()
             }
 
