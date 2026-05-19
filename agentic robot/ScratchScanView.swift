@@ -148,6 +148,7 @@ struct ScratchScanView: View {
                 angleId: currentAngleIndex
             ) { image in
                 capturedImages[currentAngleIndex] = image
+                showCamera = false
                 advanceOrComplete()
             }
             .ignoresSafeArea()
@@ -194,6 +195,7 @@ struct ScratchScanView: View {
             ) { image in
                 if let idx = replacingIndex { capturedImages[idx] = image }
                 replacingIndex = nil
+                showReplaceCamera = false
             }
             .ignoresSafeArea()
         }
@@ -392,58 +394,96 @@ struct ScratchScanView: View {
 
 // MARK: - Camera with Vehicle Silhouette Overlay (Magnifier-style AVFoundation)
 //
-// Uses AVFoundation instead of UIImagePickerController so we can:
-//   • show a live pinch-to-zoom loupe (just like the Magnifier app)
-//   • keep the full CarSilhouetteOverlay guide
-//   • still return a plain UIImage through onPick
+// Presented via a dedicated UIWindow so the portrait lock is enforced at the
+// window level — immune to the SwiftUI fullScreenCover hosting hierarchy which
+// ignores shouldAutorotate on child view controllers.
 
 import AVFoundation
 
-struct CameraOverlayImagePicker: UIViewControllerRepresentable {
+// MARK: SwiftUI wrapper — manages its own UIWindow
+
+struct CameraOverlayImagePicker: View {
     let carType: CarType
     let angleId: Int
-    var onPick: (UIImage) -> Void
+    var onPick:  (UIImage) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
-    func makeUIViewController(context: Context) -> MagnifierCameraViewController {
-        let vc = MagnifierCameraViewController()
-        vc.onPick   = onPick
-        vc.onCancel = { [weak vc] in vc?.dismiss(animated: true) }
-        vc.carType  = carType
-        vc.angleId  = angleId
-        return vc
+    var body: some View {
+        // Invisible placeholder. The real camera lives in a UIWindow
+        // we open on appear and tear down on disappear / pick / cancel.
+        Color.black.ignoresSafeArea()
+            .onAppear  { MagnifierWindowManager.shared.open(carType: carType, angleId: angleId, onPick: { img in onPick(img); dismiss() }, onCancel: { dismiss() }) }
+            .onDisappear { MagnifierWindowManager.shared.close() }
+    }
+}
+
+// MARK: Window manager — singleton
+
+final class MagnifierWindowManager {
+    static let shared = MagnifierWindowManager()
+    private init() {}
+
+    private var cameraWindow: UIWindow?
+
+    func open(carType: CarType, angleId: Int, onPick: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
+        guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene }).first
+        else { return }
+
+        let vc        = MagnifierCameraViewController()
+        vc.onPick     = { [weak self] img in self?.close(); onPick(img) }
+        vc.onCancel   = { [weak self] in self?.close(); onCancel() }
+        vc.carType    = carType
+        vc.angleId    = angleId
+
+        let win = UIWindow(windowScene: scene)
+        win.windowLevel          = .alert + 1          // above everything
+        win.rootViewController   = vc
+        win.makeKeyAndVisible()
+        cameraWindow = win
     }
 
-    func updateUIViewController(_ uiViewController: MagnifierCameraViewController, context: Context) {}
-
-    func makeCoordinator() -> Void { () }
+    func close() {
+        cameraWindow?.isHidden = true
+        cameraWindow           = nil
+    }
 }
 
 // MARK: Magnifier Camera View Controller
 
 final class MagnifierCameraViewController: UIViewController {
 
-    // Set by the representable before presentation
     var onPick:   ((UIImage) -> Void)?
     var onCancel: (() -> Void)?
     var carType:  CarType = .sedan
     var angleId:  Int = 0
 
     // AVFoundation
-    private let session        = AVCaptureSession()
-    private var photoOutput    = AVCapturePhotoOutput()
-    private var previewLayer:    AVCaptureVideoPreviewLayer?
+    private let session     = AVCaptureSession()
+    private var photoOutput = AVCapturePhotoOutput()
+    private var previewLayer: AVCaptureVideoPreviewLayer?
 
     // Zoom
-    private var device:          AVCaptureDevice?
-    private var lastPinchScale:  CGFloat = 1.0
+    private var device:         AVCaptureDevice?
+    private var lastPinchScale: CGFloat = 1.0
 
-    // Capture pending flag — avoids double-taps
+    // Capture guard
     private var isCapturing = false
 
-    // Overlay host
+    // Overlay
     private var overlayHost: UIHostingController<CameraSilhouetteOverlay>?
+
+    // Rotation coordinator. This is the modern AVFoundation way to keep the preview
+    // and captured photo level as the physical device rotates.
+    @available(iOS 17.0, *)
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
+    private var captureRotationObservation: NSKeyValueObservation?
+
+    // Allow the camera screen itself to rotate so the guide can stretch in landscape.
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .allButUpsideDown }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -453,6 +493,11 @@ final class MagnifierCameraViewController: UIViewController {
         setupOverlay()
         setupControls()
         setupGestures()
+    }
+
+    deinit {
+        previewRotationObservation?.invalidate()
+        captureRotationObservation?.invalidate()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -473,6 +518,9 @@ final class MagnifierCameraViewController: UIViewController {
         super.viewDidLayoutSubviews()
         previewLayer?.frame = view.bounds
         overlayHost?.view.frame = view.bounds
+
+        // Re-apply after rotation/layout changes.
+        updateCameraRotationAngles()
     }
 
     // MARK: – Session
@@ -502,8 +550,84 @@ final class MagnifierCameraViewController: UIViewController {
         let layer = AVCaptureVideoPreviewLayer(session: session)
         layer.videoGravity = .resizeAspectFill
         layer.frame = view.bounds
+
         view.layer.insertSublayer(layer, at: 0)
         previewLayer = layer
+
+        setupRotationCoordinatorIfNeeded()
+        updateCameraRotationAngles()
+    }
+
+    // MARK: – Camera rotation
+
+    /// Uses the scene's effective geometry. This avoids the iOS 26 deprecation warning
+    /// from UIWindowScene.interfaceOrientation.
+    private var currentInterfaceOrientation: UIInterfaceOrientation {
+        if let orientation = view.window?.windowScene?.effectiveGeometry.interfaceOrientation,
+           orientation != .unknown {
+            return orientation
+        }
+
+        if let orientation = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive })?
+            .effectiveGeometry
+            .interfaceOrientation,
+           orientation != .unknown {
+            return orientation
+        }
+
+        return .portrait
+    }
+
+    /// Creates Apple's rotation coordinator. Do not use AVCaptureVideoOrientation here;
+    /// that API is deprecated. The coordinator gives separate angles for preview and capture.
+    private func setupRotationCoordinatorIfNeeded() {
+        guard #available(iOS 17.0, *),
+              rotationCoordinator == nil,
+              let device,
+              let previewLayer
+        else { return }
+
+        let coordinator = AVCaptureDevice.RotationCoordinator(
+            device: device,
+            previewLayer: previewLayer
+        )
+        rotationCoordinator = coordinator
+
+        previewRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            self?.updateCameraRotationAngles()
+        }
+
+        captureRotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelCapture,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            self?.updateCameraRotationAngles()
+        }
+    }
+
+    /// Applies modern AVCaptureConnection.videoRotationAngle values from
+    /// AVCaptureDevice.RotationCoordinator.
+    private func updateCameraRotationAngles() {
+        _ = currentInterfaceOrientation
+
+        guard #available(iOS 17.0, *), let rotationCoordinator else { return }
+
+        let previewAngle = rotationCoordinator.videoRotationAngleForHorizonLevelPreview
+        if let previewConnection = previewLayer?.connection,
+           previewConnection.isVideoRotationAngleSupported(previewAngle) {
+            previewConnection.videoRotationAngle = previewAngle
+        }
+
+        let captureAngle = rotationCoordinator.videoRotationAngleForHorizonLevelCapture
+        if let photoConnection = photoOutput.connection(with: .video),
+           photoConnection.isVideoRotationAngleSupported(captureAngle) {
+            photoConnection.videoRotationAngle = captureAngle
+        }
     }
 
     // MARK: – Silhouette overlay
@@ -694,6 +818,8 @@ final class MagnifierCameraViewController: UIViewController {
         UIView.animate(withDuration: 0.05, animations: { flash.alpha = 1 }) { _ in
             UIView.animate(withDuration: 0.15) { flash.alpha = 0 } completion: { _ in flash.removeFromSuperview() }
         }
+
+        updateCameraRotationAngles()
 
         let settings = AVCapturePhotoSettings()
         photoOutput.capturePhoto(with: settings, delegate: self)
