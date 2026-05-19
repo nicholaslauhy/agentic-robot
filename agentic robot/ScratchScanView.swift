@@ -390,7 +390,14 @@ struct ScratchScanView: View {
 
 
 
-// MARK: - Camera with Vehicle Silhouette Overlay
+// MARK: - Camera with Vehicle Silhouette Overlay (Magnifier-style AVFoundation)
+//
+// Uses AVFoundation instead of UIImagePickerController so we can:
+//   • show a live pinch-to-zoom loupe (just like the Magnifier app)
+//   • keep the full CarSilhouetteOverlay guide
+//   • still return a plain UIImage through onPick
+
+import AVFoundation
 
 struct CameraOverlayImagePicker: UIViewControllerRepresentable {
     let carType: CarType
@@ -399,78 +406,348 @@ struct CameraOverlayImagePicker: UIViewControllerRepresentable {
 
     @Environment(\.dismiss) private var dismiss
 
-    func makeUIViewController(context: Context) -> UIImagePickerController {
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.delegate = context.coordinator
-        picker.allowsEditing = false
-        picker.showsCameraControls = true
-        picker.modalPresentationStyle = .fullScreen
-        picker.cameraCaptureMode = .photo
-        picker.cameraDevice = .rear
+    func makeUIViewController(context: Context) -> MagnifierCameraViewController {
+        let vc = MagnifierCameraViewController()
+        vc.onPick   = onPick
+        vc.onCancel = { [weak vc] in vc?.dismiss(animated: true) }
+        vc.carType  = carType
+        vc.angleId  = angleId
+        return vc
+    }
 
-        let overlay = UIHostingController(
-            rootView: CameraSilhouetteOverlay(
-                carType: carType,
-                angleId: angleId
-            )
+    func updateUIViewController(_ uiViewController: MagnifierCameraViewController, context: Context) {}
+
+    func makeCoordinator() -> Void { () }
+}
+
+// MARK: Magnifier Camera View Controller
+
+final class MagnifierCameraViewController: UIViewController {
+
+    // Set by the representable before presentation
+    var onPick:   ((UIImage) -> Void)?
+    var onCancel: (() -> Void)?
+    var carType:  CarType = .sedan
+    var angleId:  Int = 0
+
+    // AVFoundation
+    private let session        = AVCaptureSession()
+    private var photoOutput    = AVCapturePhotoOutput()
+    private var previewLayer:    AVCaptureVideoPreviewLayer?
+
+    // Zoom
+    private var device:          AVCaptureDevice?
+    private var lastPinchScale:  CGFloat = 1.0
+
+    // Capture pending flag — avoids double-taps
+    private var isCapturing = false
+
+    // Overlay host
+    private var overlayHost: UIHostingController<CameraSilhouetteOverlay>?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .black
+        setupSession()
+        setupPreview()
+        setupOverlay()
+        setupControls()
+        setupGestures()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.session.startRunning()
+            self?.setTorch(on: true)
+        }
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        setTorch(on: false)
+        session.stopRunning()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+        overlayHost?.view.frame = view.bounds
+    }
+
+    // MARK: – Session
+
+    private func setupSession() {
+        session.beginConfiguration()
+        session.sessionPreset = .photo
+
+        guard
+            let cam = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+            let input = try? AVCaptureDeviceInput(device: cam),
+            session.canAddInput(input)
+        else { session.commitConfiguration(); return }
+
+        session.addInput(input)
+        device = cam
+
+        if session.canAddOutput(photoOutput) {
+            session.addOutput(photoOutput)
+        }
+        session.commitConfiguration()
+    }
+
+    // MARK: – Preview
+
+    private func setupPreview() {
+        let layer = AVCaptureVideoPreviewLayer(session: session)
+        layer.videoGravity = .resizeAspectFill
+        layer.frame = view.bounds
+        view.layer.insertSublayer(layer, at: 0)
+        previewLayer = layer
+    }
+
+    // MARK: – Silhouette overlay
+
+    private func setupOverlay() {
+        let host = UIHostingController(
+            rootView: CameraSilhouetteOverlay(carType: carType, angleId: angleId)
         )
-        overlay.view.backgroundColor = .clear
-        overlay.view.frame = picker.view.bounds
-        overlay.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-
-        // The overlay is only a visual guide.
-        // Keep touches going to the native camera shutter / cancel controls.
-        overlay.view.isUserInteractionEnabled = false
-
-        picker.cameraOverlayView = overlay.view
-        context.coordinator.overlayController = overlay
-
-        return picker
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        host.view.frame = view.bounds
+        addChild(host)
+        view.addSubview(host.view)
+        host.didMove(toParent: self)
+        overlayHost = host
     }
 
-    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
-        if let overlay = context.coordinator.overlayController {
-            overlay.rootView = CameraSilhouetteOverlay(
-                carType: carType,
-                angleId: angleId
-            )
+    // MARK: – Controls  (shutter + cancel + zoom label + torch button)
+
+    private let zoomLabel: UILabel = {
+        let l = UILabel()
+        l.textColor   = .white
+        l.font        = .monospacedSystemFont(ofSize: 15, weight: .semibold)
+        l.text        = "1.0×"
+        l.textAlignment = .center
+        l.layer.shadowColor   = UIColor.black.cgColor
+        l.layer.shadowOpacity = 0.7
+        l.layer.shadowRadius  = 3
+        l.layer.shadowOffset  = .zero
+        return l
+    }()
+
+    /// Tracks torch state so the button icon can reflect it
+    private var torchIsOn = true
+    private var torchButton: UIButton?
+
+    private func setupControls() {
+
+        // ── Bottom bar ──────────────────────────────────────────────────────
+        let bar = UIView()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bar)
+
+        // Shutter button
+        let shutter = UIButton(type: .custom)
+        shutter.translatesAutoresizingMaskIntoConstraints = false
+        shutter.addTarget(self, action: #selector(shutterTapped), for: .touchUpInside)
+
+        // Outer ring
+        let ring = UIView()
+        ring.translatesAutoresizingMaskIntoConstraints = false
+        ring.layer.cornerRadius  = 38
+        ring.layer.borderWidth   = 3
+        ring.layer.borderColor   = UIColor.white.cgColor
+        ring.isUserInteractionEnabled = false
+
+        // Inner fill
+        let fill = UIView()
+        fill.translatesAutoresizingMaskIntoConstraints = false
+        fill.backgroundColor      = .white
+        fill.layer.cornerRadius   = 30
+        fill.isUserInteractionEnabled = false
+
+        shutter.addSubview(ring)
+        shutter.addSubview(fill)
+        bar.addSubview(shutter)
+
+        // Cancel button
+        let cancel = UIButton(type: .system)
+        cancel.translatesAutoresizingMaskIntoConstraints = false
+        cancel.setTitle("Cancel", for: .normal)
+        cancel.setTitleColor(.white, for: .normal)
+        cancel.titleLabel?.font = .systemFont(ofSize: 17, weight: .medium)
+        cancel.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        bar.addSubview(cancel)
+
+        // ── Torch toggle button (right side, replaces static zoom label) ───
+        let torch = UIButton(type: .custom)
+        torch.translatesAutoresizingMaskIntoConstraints = false
+        torch.addTarget(self, action: #selector(torchToggled), for: .touchUpInside)
+
+        // Yellow filled circle background — matches Magnifier active-torch style
+        torch.backgroundColor    = UIColor(red: 1.0, green: 0.80, blue: 0.0, alpha: 1.0)
+        torch.layer.cornerRadius = 22
+        torch.clipsToBounds      = true
+
+        let torchImg = UIImage(systemName: "flashlight.on.fill",
+                               withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium))
+        torch.setImage(torchImg, for: .normal)
+        torch.tintColor = .black
+        bar.addSubview(torch)
+        torchButton = torch
+
+        // ── Zoom label — sits just above the bar ───────────────────────────
+        zoomLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(zoomLabel)   // added to view, not bar, so it floats above
+
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 120),
+
+            // Shutter — centred in bar
+            shutter.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
+            shutter.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            shutter.widthAnchor.constraint(equalToConstant: 76),
+            shutter.heightAnchor.constraint(equalToConstant: 76),
+
+            // Ring fills shutter
+            ring.topAnchor.constraint(equalTo: shutter.topAnchor),
+            ring.leadingAnchor.constraint(equalTo: shutter.leadingAnchor),
+            ring.trailingAnchor.constraint(equalTo: shutter.trailingAnchor),
+            ring.bottomAnchor.constraint(equalTo: shutter.bottomAnchor),
+
+            // Fill inside ring
+            fill.centerXAnchor.constraint(equalTo: ring.centerXAnchor),
+            fill.centerYAnchor.constraint(equalTo: ring.centerYAnchor),
+            fill.widthAnchor.constraint(equalToConstant: 60),
+            fill.heightAnchor.constraint(equalToConstant: 60),
+
+            // Cancel — left side
+            cancel.leadingAnchor.constraint(equalTo: bar.leadingAnchor, constant: 24),
+            cancel.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+
+            // Torch button — right side, 44×44 tap target inside 44pt circle
+            torch.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -20),
+            torch.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            torch.widthAnchor.constraint(equalToConstant: 44),
+            torch.heightAnchor.constraint(equalToConstant: 44),
+
+            // Zoom label — centred horizontally, just above the bar
+            zoomLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            zoomLabel.bottomAnchor.constraint(equalTo: bar.topAnchor, constant: -10),
+        ])
+    }
+
+    // MARK: – Gestures
+
+    private func setupGestures() {
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        view.addGestureRecognizer(pinch)
+    }
+
+    // MARK: – Torch
+
+    /// Turns the rear torch on or off. Safe to call from any thread.
+    private func setTorch(on: Bool) {
+        guard
+            let device,
+            device.hasTorch,
+            device.isTorchAvailable
+        else { return }
+        try? device.lockForConfiguration()
+        device.torchMode = on ? .on : .off
+        device.unlockForConfiguration()
+    }
+
+    @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
+        guard let device else { return }
+
+        switch g.state {
+        case .began:
+            lastPinchScale = device.videoZoomFactor
+        case .changed:
+            let desired = (lastPinchScale * g.scale)
+                .clamped(to: device.minAvailableVideoZoomFactor...min(device.maxAvailableVideoZoomFactor, 10))
+            try? device.lockForConfiguration()
+            device.videoZoomFactor = desired
+            device.unlockForConfiguration()
+            zoomLabel.text = String(format: "%.1f×", desired)
+        default:
+            break
         }
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(
-            onPick: onPick,
-            dismiss: { dismiss() }
-        )
+    // MARK: – Actions
+
+    @objc private func shutterTapped() {
+        guard !isCapturing else { return }
+        isCapturing = true
+
+        // Brief visual flash like the native camera
+        let flash = UIView(frame: view.bounds)
+        flash.backgroundColor = .white
+        flash.alpha = 0
+        view.addSubview(flash)
+        UIView.animate(withDuration: 0.05, animations: { flash.alpha = 1 }) { _ in
+            UIView.animate(withDuration: 0.15) { flash.alpha = 0 } completion: { _ in flash.removeFromSuperview() }
+        }
+
+        let settings = AVCapturePhotoSettings()
+        photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
-    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
-        let onPick: (UIImage) -> Void
-        let dismiss: () -> Void
-        var overlayController: UIHostingController<CameraSilhouetteOverlay>?
+    @objc private func cancelTapped() {
+        onCancel?()
+    }
 
-        init(
-            onPick: @escaping (UIImage) -> Void,
-            dismiss: @escaping () -> Void
-        ) {
-            self.onPick = onPick
-            self.dismiss = dismiss
-        }
+    @objc private func torchToggled() {
+        torchIsOn.toggle()
+        setTorch(on: torchIsOn)
 
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let image = info[.originalImage] as? UIImage {
-                onPick(image)
-            }
-            dismiss()
-        }
+        // Update button appearance: yellow = on, dark grey = off
+        let activeColor   = UIColor(red: 1.0, green: 0.80, blue: 0.0, alpha: 1.0)
+        let inactiveColor = UIColor(white: 0.25, alpha: 1.0)
+        let iconName      = torchIsOn ? "flashlight.on.fill" : "flashlight.off.fill"
 
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            dismiss()
+        UIView.animate(withDuration: 0.2) { [weak self] in
+            self?.torchButton?.backgroundColor = self?.torchIsOn == true ? activeColor : inactiveColor
+            self?.torchButton?.tintColor       = self?.torchIsOn == true ? .black : .white
         }
+        let img = UIImage(systemName: iconName,
+                          withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .medium))
+        torchButton?.setImage(img, for: .normal)
+    }
+}
+
+// MARK: – Photo capture delegate
+
+extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
+
+    func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+        isCapturing = false
+        guard
+            error == nil,
+            let data  = photo.fileDataRepresentation(),
+            let image = UIImage(data: data)
+        else { return }
+
+        onPick?(image)
+        dismiss(animated: true)
+    }
+}
+
+// MARK: – Comparable clamping helper (local to this file)
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 

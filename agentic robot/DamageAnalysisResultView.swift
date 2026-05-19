@@ -60,7 +60,8 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         cropImage: UIImage?,
         contextImage: UIImage?,
         cleanContextImage: UIImage?,
-        normalizedBBox: CGRect?
+        normalizedBBox: CGRect?,
+        explanation: String = ""
     ) {
         self.id                    = UUID()
         self.angleIndex            = angleIndex
@@ -77,7 +78,7 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         self.repairRecommendation  = ""
         self.repairComplexity      = ""
         self.likelyFalsePositive   = false
-        self.explanation           = ""
+        self.explanation           = explanation
     }
 }
 
@@ -775,8 +776,18 @@ struct BoundingBoxEditorSheet: View {
                         detection.cleanContextImage = normalizedImage(baseImg)
                         // cropImage = padded crop from the full photo
                         detection.cropImage       = renderAnnotatedCrop(image: baseImg, bbox: bbox)
-                        detection.damageType      = pendingDamageType
-                        detection.confidence      = 1.0
+
+                        // If the user changed the damage type, update explanation to match.
+                        if pendingDamageType != detection.damageType {
+                            let canonical = pendingDamageType.capitalized
+                            let angle     = detection.angleName
+                            // Rebuild the AI analysis sentence to reflect the corrected type.
+                            detection.explanation = "\(canonical) detected on the \(angle)."
+                            detection.vlmDamageType = pendingDamageType
+                        }
+
+                        detection.damageType = pendingDamageType
+                        detection.confidence = 1.0
                         dismiss()
                     }
                     .disabled(pendingBBox == nil || pendingDamageType.isEmpty)
@@ -836,15 +847,18 @@ struct AddCaseSheet: View {
                 if step == 1 {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Add Case") {
-                            let detection = MutableDamageDetection(
+                            let angleName  = angleNames[selectedAngleIndex]
+                            let explanation = "\(selectedDamageType.capitalized) detected on the \(angleName)."
+                            let detection  = MutableDamageDetection(
                                 angleIndex:        selectedAngleIndex,
-                                angleName:         angleNames[selectedAngleIndex],
+                                angleName:         angleName,
                                 damageType:        selectedDamageType,
                                 confidence:        1.0,
                                 cropImage:         croppedImage(),
                                 contextImage:      selectedImage.map { renderContext(image: $0, bbox: normalizedBBox) },
                                 cleanContextImage: selectedImage.map { normalizedImage($0) },
-                                normalizedBBox:    normalizedBBox
+                                normalizedBBox:    normalizedBBox,
+                                explanation:       explanation
                             )
                             onAdd(detection)
                             dismiss()
