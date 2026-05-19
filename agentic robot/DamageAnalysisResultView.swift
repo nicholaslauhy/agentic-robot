@@ -102,6 +102,7 @@ struct DamageAnalysisResultView: View {
     
     @State private var pdfURL: URL? = nil
     @State private var isGeneratingReport = false
+    @State private var showIncidentStageOne = false
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -211,40 +212,22 @@ struct DamageAnalysisResultView: View {
                     .padding(.horizontal)
                 }
 
-                // ── Generate Report ───────────────────────────────────────────
+                // ── Next: collect police-report details ─────────────────────────
                 Button {
-                    guard !isGeneratingReport else { return }
-                    isGeneratingReport = true
-                    let plate = plate
-                    let carType = carType
-                    let detections = mutableDetections
-                    let scanImages = scanImages
-                    Task(priority: .userInitiated) {
-                        let url = await Task(priority: .userInitiated) {
-                            DamageReportGenerator.generatePDF(
-                                plate: plate,
-                                carType: carType.rawValue,
-                                detections: detections,
-                                scanImages: scanImages
-                            )
-                        }.value
-                        isGeneratingReport = false
-                        pdfURL = url
-                    }
+                    showIncidentStageOne = true
                 } label: {
                     HStack {
-                        Image(systemName: "doc.text.fill")
-                        Text("Generate Report")
+                        Image(systemName: "arrow.right.circle.fill")
+                        Text("Next")
                     }
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(isGeneratingReport ? Color.gray : carType.accentColor)
+                    .background(carType.accentColor)
                     .foregroundColor(.white)
                     .cornerRadius(14)
                     .padding(.horizontal)
                 }
-                .disabled(isGeneratingReport)
                 .padding(.top, 12)
                 .padding(.bottom, 30)
             }
@@ -299,6 +282,18 @@ struct DamageAnalysisResultView: View {
             ) { newDetection in
                 mutableDetections.insert(newDetection, at: 0)
             }
+        }
+        // ── Report details flow ───────────────────────────────────────────────
+        .fullScreenCover(isPresented: $showIncidentStageOne) {
+            PoliceReportStageOneView(
+                plate: plate,
+                carType: carType,
+                detections: mutableDetections,
+                scanImages: scanImages,
+                isGeneratingReport: $isGeneratingReport,
+                pdfURL: $pdfURL,
+                isPresented: $showIncidentStageOne
+            )
         }
         // ── Report sheet ──────────────────────────────────────────────────────
         .sheet(item: $pdfURL) { url in
@@ -1361,5 +1356,350 @@ struct ReportWelcomeView: View {
         }
 
         topVC?.present(activity, animated: true)
+    }
+}
+
+
+// MARK: - Police Report Details Flow
+
+struct PoliceReportStageOneDetails {
+    var stationDiaryNo = ""
+    var nameOfInformant = ""
+    var address = ""
+    var idTypeAndNo = ""
+    var finNo = ""
+    var homeOfficeNo = ""
+    var mobileNo = ""
+    var nationality = ""
+    var occupation = ""
+    var sex = ""
+    var age = ""
+    var dateOfBirth = ""
+    var race = ""
+    var dateTimeOfIncident = ""
+    var locationOfIncident = ""
+    var institutionSchoolName = ""
+}
+
+struct PoliceReportStageTwoDetails {
+    var officerRecordingName = ""
+    var officerSignature: UIImage? = nil
+    var informantSignature: UIImage? = nil
+    var informantSignatureDateTime = ""
+    var officerInCharge = ""
+    var classificationOfCase = ""
+}
+
+struct PoliceReportStageOneView: View {
+    let plate: String
+    let carType: CarType
+    let detections: [MutableDamageDetection]
+    let scanImages: [UIImage]
+
+    @Binding var isGeneratingReport: Bool
+    @Binding var pdfURL: URL?
+    @Binding var isPresented: Bool
+
+    @State private var details = PoliceReportStageOneDetails()
+    @State private var showStageTwo = false
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Incident Details") {
+                    reportTextField("Station Diary No.", text: $details.stationDiaryNo)
+                    reportTextField("Name of Informant", text: $details.nameOfInformant)
+                    reportTextField("Address", text: $details.address, axis: .vertical)
+                    reportTextField("ID Type / ID No.", text: $details.idTypeAndNo)
+                    reportTextField("FIN NO", text: $details.finNo)
+                    reportTextField("Home/Office Number", text: $details.homeOfficeNo)
+                    reportTextField("Mobile Number", text: $details.mobileNo)
+                    reportTextField("Nationality", text: $details.nationality)
+                    reportTextField("Occupation", text: $details.occupation)
+                    reportTextField("Sex", text: $details.sex)
+                    reportTextField("Age", text: $details.age)
+                    reportTextField("Date of Birth", text: $details.dateOfBirth)
+                    reportTextField("Race", text: $details.race)
+                    reportTextField("Date/Time of Incident", text: $details.dateTimeOfIncident)
+                    reportTextField("Location of Incident", text: $details.locationOfIncident, axis: .vertical)
+                    reportTextField("Institution/School Name", text: $details.institutionSchoolName)
+                }
+
+                Section {
+                    Button {
+                        showStageTwo = true
+                    } label: {
+                        Text("Proceed to Stage 2")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(carType.accentColor)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+                }
+            }
+            .navigationTitle("Report Stage 1")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .navigationDestination(isPresented: $showStageTwo) {
+                PoliceReportStageTwoView(
+                    plate: plate,
+                    carType: carType,
+                    detections: detections,
+                    scanImages: scanImages,
+                    stageOne: details,
+                    isGeneratingReport: $isGeneratingReport,
+                    pdfURL: $pdfURL,
+                    isPresented: $isPresented
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reportTextField(
+        _ title: String,
+        text: Binding<String>,
+        axis: Axis = .horizontal
+    ) -> some View {
+        if axis == .vertical {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.caption).foregroundColor(.secondary)
+                TextField(title, text: text, axis: .vertical)
+                    .lineLimit(2...4)
+            }
+        } else {
+            TextField(title, text: text)
+        }
+    }
+}
+
+struct PoliceReportStageTwoView: View {
+    let plate: String
+    let carType: CarType
+    let detections: [MutableDamageDetection]
+    let scanImages: [UIImage]
+    let stageOne: PoliceReportStageOneDetails
+
+    @Binding var isGeneratingReport: Bool
+    @Binding var pdfURL: URL?
+    @Binding var isPresented: Bool
+
+    @State private var details = PoliceReportStageTwoDetails()
+    @State private var officerSignatureTrigger = UUID()
+    @State private var informantSignatureTrigger = UUID()
+    @State private var officerSignatureImage: UIImage? = nil
+    @State private var informantSignatureImage: UIImage? = nil
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        Form {
+            Section("Officer Recording The Report") {
+                TextField("Name", text: $details.officerRecordingName)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Signature of Officer Recording the Report")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    SignaturePadView(image: $officerSignatureImage, clearTrigger: officerSignatureTrigger)
+                        .frame(height: 130)
+                    Button("Clear Officer Signature") {
+                        officerSignatureImage = nil
+                        officerSignatureTrigger = UUID()
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 6)
+            }
+
+            Section("Informant") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Signature of Informant")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    SignaturePadView(image: $informantSignatureImage, clearTrigger: informantSignatureTrigger)
+                        .frame(height: 130)
+                    Button("Clear Informant Signature") {
+                        informantSignatureImage = nil
+                        informantSignatureTrigger = UUID()
+                    }
+                    .font(.caption)
+                }
+                .padding(.vertical, 6)
+
+                TextField("Date/Time", text: $details.informantSignatureDateTime)
+            }
+
+            Section("Case") {
+                TextField("Name of Officer In-Charge of Case", text: $details.officerInCharge)
+                TextField("Classification of Case", text: $details.classificationOfCase, axis: .vertical)
+                    .lineLimit(2...4)
+            }
+
+            Section {
+                Button {
+                    generateReport()
+                } label: {
+                    HStack {
+                        if isGeneratingReport {
+                            ProgressView().tint(.white)
+                        }
+                        Text(isGeneratingReport ? "Generating Report..." : "Generate Report")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(isGeneratingReport ? .gray : carType.accentColor)
+                .disabled(isGeneratingReport)
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+            }
+        }
+        .navigationTitle("Report Stage 2")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func generateReport() {
+        guard !isGeneratingReport else { return }
+        isGeneratingReport = true
+
+        var finalStageTwo = details
+        finalStageTwo.officerSignature = officerSignatureImage
+        finalStageTwo.informantSignature = informantSignatureImage
+
+        let plate = plate
+        let carTypeValue = carType.rawValue
+        let detections = detections
+        let scanImages = scanImages
+        let stageOne = stageOne
+
+        Task(priority: .userInitiated) {
+            let url = await Task(priority: .userInitiated) {
+                DamageReportGenerator.generatePDF(
+                    plate: plate,
+                    carType: carTypeValue,
+                    detections: detections,
+                    scanImages: scanImages,
+                    stageOne: stageOne,
+                    stageTwo: finalStageTwo
+                )
+            }.value
+
+            await MainActor.run {
+                isGeneratingReport = false
+                isPresented = false
+
+                // Present the PDF sheet after the full-screen form has finished dismissing.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    pdfURL = url
+                }
+            }
+        }
+    }
+}
+
+struct SignaturePadView: UIViewRepresentable {
+    @Binding var image: UIImage?
+    let clearTrigger: UUID
+
+    func makeUIView(context: Context) -> SignatureCanvasView {
+        let view = SignatureCanvasView()
+        view.backgroundColor = .white
+        view.layer.cornerRadius = 10
+        view.layer.borderWidth = 1
+        view.layer.borderColor = UIColor.systemGray3.cgColor
+        view.onImageChanged = { image in
+            self.image = image
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: SignatureCanvasView, context: Context) {
+        if context.coordinator.lastClearTrigger != clearTrigger {
+            uiView.clear()
+            context.coordinator.lastClearTrigger = clearTrigger
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(clearTrigger: clearTrigger)
+    }
+
+    final class Coordinator {
+        var lastClearTrigger: UUID
+        init(clearTrigger: UUID) {
+            self.lastClearTrigger = clearTrigger
+        }
+    }
+}
+
+final class SignatureCanvasView: UIView {
+    var onImageChanged: ((UIImage?) -> Void)?
+    private var lines: [[CGPoint]] = []
+    private var currentLine: [CGPoint] = []
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self) else { return }
+        currentLine = [point]
+        setNeedsDisplay()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self) else { return }
+        currentLine.append(point)
+        setNeedsDisplay()
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if !currentLine.isEmpty {
+            lines.append(currentLine)
+            currentLine = []
+            onImageChanged?(renderSignatureImage())
+        }
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        super.draw(rect)
+        UIColor.white.setFill()
+        UIRectFill(rect)
+
+        let path = UIBezierPath()
+        path.lineWidth = 2.2
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+
+        for line in lines + (currentLine.isEmpty ? [] : [currentLine]) {
+            guard let first = line.first else { continue }
+            path.move(to: first)
+            for point in line.dropFirst() {
+                path.addLine(to: point)
+            }
+        }
+
+        UIColor.black.setStroke()
+        path.stroke()
+    }
+
+    func clear() {
+        lines.removeAll()
+        currentLine.removeAll()
+        setNeedsDisplay()
+        onImageChanged?(nil)
+    }
+
+    private func renderSignatureImage() -> UIImage? {
+        guard !lines.isEmpty else { return nil }
+        let renderer = UIGraphicsImageRenderer(bounds: bounds)
+        return renderer.image { _ in
+            UIColor.white.setFill()
+            UIRectFill(bounds)
+            drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
     }
 }
