@@ -143,19 +143,24 @@ struct DamageReportGenerator {
                 }
 
                 func drawCrest(at origin: CGPoint) {
-                    let crestRect = CGRect(x: origin.x, y: origin.y, width: 52, height: 52)
-                    let cg = UIGraphicsGetCurrentContext()
-                    cg?.saveGState()
-                    cg?.setStrokeColor(UIColor(red: 0.15, green: 0.24, blue: 0.43, alpha: 1).cgColor)
-                    cg?.setFillColor(UIColor(red: 0.92, green: 0.95, blue: 1, alpha: 1).cgColor)
-                    cg?.setLineWidth(2)
-                    cg?.fillEllipse(in: crestRect)
-                    cg?.strokeEllipse(in: crestRect)
-                    let shield = CGRect(x: crestRect.midX - 12, y: crestRect.minY + 12, width: 24, height: 28)
-                    cg?.setFillColor(UIColor(red: 0.88, green: 0.12, blue: 0.14, alpha: 1).cgColor)
-                    cg?.fill(shield)
-                    cg?.restoreGState()
-                    drawString("POLIS", in: CGRect(x: crestRect.minX, y: crestRect.maxY - 12, width: 52, height: 10), font: .boldSystemFont(ofSize: 6), color: .white, alignment: .center)
+                    let logoRect = CGRect(
+                        x: origin.x - 12,
+                        y: origin.y - 4,
+                        width: 64,
+                        height: 64
+                    )
+
+                    if let logo = UIImage(named: "spf_logo") {
+                        logo.draw(in: logoRect)
+                    } else {
+                        drawString(
+                            "SPF",
+                            in: logoRect,
+                            font: .boldSystemFont(ofSize: 16),
+                            alignment: .center
+                        )
+                        drawRect(logoRect)
+                    }
                 }
 
                 func drawField(label: String, value: String, rect: CGRect, labelHeight: CGFloat = 17, valueFontSize: CGFloat = 9.5) {
@@ -231,7 +236,7 @@ struct DamageReportGenerator {
 
                 let casesPerDamagePage = 3
                 let damagePageCount = max(1, Int(ceil(Double(max(detections.count, 1)) / Double(casesPerDamagePage))))
-                let totalPageCount = 2 + damagePageCount
+                let totalPageCount = 1 + damagePageCount
                 var currentPageNumber = 0
 
                 func beginReportPage() {
@@ -241,10 +246,16 @@ struct DamageReportGenerator {
                 }
 
                 func drawHeader(pageText: String) {
-                    drawCrest(at: CGPoint(x: left, y: top - 2))
-                    drawString("SINGAPORE\nPOLICE FORCE", in: CGRect(x: left + 68, y: top + 4, width: 190, height: 42), font: .boldSystemFont(ofSize: 16), color: UIColor(red: 0.08, green: 0.13, blue: 0.35, alpha: 1))
-                    drawString("POLICE REPORT (NP299)", in: CGRect(x: left, y: 112, width: 190, height: 16), font: .boldSystemFont(ofSize: 10))
-                    drawString(policeStation.pdfHeaderText, in: CGRect(x: left, y: 135, width: 270, height: 70), font: .boldSystemFont(ofSize: 9))
+                    drawCrest(at: CGPoint(x: left, y: top - 4))
+
+                    drawString(
+                        "SINGAPORE\nPOLICE FORCE",
+                        in: CGRect(x: left + 58, y: top + 10, width: 220, height: 42),
+                        font: .boldSystemFont(ofSize: 16),
+                        color: UIColor(red: 0.08, green: 0.13, blue: 0.35, alpha: 1)
+                    )
+                    drawString("POLICE REPORT (NP299)", in: CGRect(x: left, y: 98, width: 190, height: 16), font: .boldSystemFont(ofSize: 10))
+                    drawString(policeStation.pdfHeaderText, in: CGRect(x: left, y: 118, width: 270, height: 70), font: .boldSystemFont(ofSize: 9))
 
                     let barcodeRect = CGRect(x: 315, y: 42, width: right - 315, height: 24)
                     drawBarcode(in: barcodeRect)
@@ -256,7 +267,7 @@ struct DamageReportGenerator {
                 func drawPageOne() {
                     beginReportPage()
 
-                    let tableTop: CGFloat = 215
+                    let tableTop: CGFloat = 190
                     drawLine(x1: left, y1: tableTop, x2: right, y2: tableTop, width: 1)
                     drawLine(x1: left, y1: tableTop + 34, x2: right, y2: tableTop + 34, width: 3)
 
@@ -318,16 +329,16 @@ struct DamageReportGenerator {
                     drawString("Property Information", in: CGRect(x: left + 2, y: y + 2, width: pageWidth - 4, height: 12), font: .systemFont(ofSize: 10))
                     y += 52
                     drawLine(x1: left, y1: y, x2: right, y2: y)
-                    y += 20
-                    drawLine(x1: left, y1: y, x2: right, y2: y)
-                    // Signature/case boxes can overflow this page because the Stage 1 table is tall.
-                    // Keep the Property Information area on page 1, then continue the exact
-                    // NP299-style signature block on the next page.
+
+                    // Fit the NP299-style signature/case block on page 1,
+                    // directly below Property Information.
+                    y += 14
+                    drawBottomSignatureBlock(y: y)
                 }
 
                 func drawSignatureContinuationPage() {
                     beginReportPage()
-                    drawBottomSignatureBlock(y: 215)
+                    drawBottomSignatureBlock(y: 185)
                 }
 
                 func drawBottomSignatureBlock(y: CGFloat) {
@@ -335,9 +346,9 @@ struct DamageReportGenerator {
                     let colWidth = (pageWidth - colGap) / 2
                     let leftCol = left
                     let rightCol = left + colWidth + colGap
-                    let row1H: CGFloat = 55
-                    let row2H: CGFloat = 55
-                    let row3H: CGFloat = 70
+                    let row1H: CGFloat = 48
+                    let row2H: CGFloat = 48
+                    let row3H: CGFloat = 58
                     let totalH = row1H + row2H + row3H
 
                     // Outer boxes for the two columns, matching the reference layout.
@@ -581,7 +592,6 @@ struct DamageReportGenerator {
                 }
 
                 drawPageOne()
-                drawSignatureContinuationPage()
                 drawPageTwo()
             }
 

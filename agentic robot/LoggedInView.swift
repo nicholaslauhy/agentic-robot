@@ -27,7 +27,7 @@ struct LoggedInView: View {
     func sendToANPRServer(image: UIImage) {
         // REPLACE THIS IP ADDRESS
 //        guard let url = URL(string: "http://127.0.0.1:8000/detect") else { return }
-        guard let url = URL(string: "http://10.10.10.140:8000/detect") else { return }
+        guard let url = URL(string: "http://192.168.86.190:8000/detect") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
