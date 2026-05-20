@@ -290,6 +290,7 @@ struct DamageAnalysisResultView: View {
                 carType: carType,
                 detections: mutableDetections,
                 scanImages: scanImages,
+                onLogout: onLogout,
                 isGeneratingReport: $isGeneratingReport,
                 pdfURL: $pdfURL,
                 isPresented: $showIncidentStageOne
@@ -1267,8 +1268,7 @@ struct ReportWelcomeView: View {
                                 }
 
                                 Button {
-                                    // Dismiss everything and logout
-                                    dismissAllAndLogout()
+                                    onLogout()
                                 } label: {
                                     Text("Logout")
                                         .font(.headline)
@@ -1292,35 +1292,22 @@ struct ReportWelcomeView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
-                // Share button also pinned in toolbar when on preview tab for easy access
-                if showingPreview {
-                    ToolbarItem(placement: .primaryAction) {
+
+                ToolbarItemGroup(placement: .primaryAction) {
+                    if showingPreview {
                         Button {
                             sharePDF(url: pdfURL)
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                     }
+
+                    Button(role: .destructive) {
+                        onLogout()
+                    } label: {
+                        Text("Logout")
+                    }
                 }
-            }
-        }
-    }
-    
-    // Helper to dismiss all sheets and full screen covers before logging out
-    private func dismissAllAndLogout() {
-        // Then find and dismiss the full screen cover that presented this whole flow
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            // Get the root view controller
-            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                  let rootVC = windowScene.windows.first?.rootViewController else {
-                onLogout()
-                return
-            }
-            
-            // Dismiss any presented view controllers (including full screen cover)
-            rootVC.dismiss(animated: true) {
-                // After dismissal, call the original logout handler
-                onLogout()
             }
         }
     }
@@ -1364,7 +1351,6 @@ struct ReportWelcomeView: View {
         topVC?.present(activity, animated: true)
     }
 }
-
 
 
 // MARK: - Police Report Details Flow
@@ -1443,6 +1429,7 @@ struct PoliceReportStageZeroView: View {
     let carType: CarType
     let detections: [MutableDamageDetection]
     let scanImages: [UIImage]
+    var onLogout: () -> Void
 
     @Binding var isGeneratingReport: Bool
     @Binding var pdfURL: URL?
@@ -1552,6 +1539,7 @@ struct PoliceReportStageZeroView: View {
                     detections: detections,
                     scanImages: scanImages,
                     policeStation: stationForReport,
+                    onLogout: onLogout,
                     isGeneratingReport: $isGeneratingReport,
                     pdfURL: $pdfURL,
                     isPresented: $isPresented
@@ -1620,6 +1608,7 @@ struct PoliceReportStageOneView: View {
     let detections: [MutableDamageDetection]
     let scanImages: [UIImage]
     let policeStation: PoliceStationDetails
+    var onLogout: () -> Void
 
     @Binding var isGeneratingReport: Bool
     @Binding var pdfURL: URL?
@@ -1739,6 +1728,7 @@ struct PoliceReportStageOneView: View {
                     scanImages: scanImages,
                     policeStation: policeStation,
                     stageOne: details,
+                    onLogout: onLogout,
                     isGeneratingReport: $isGeneratingReport,
                     pdfURL: $pdfURL,
                     isPresented: $isPresented
@@ -1855,6 +1845,7 @@ struct PoliceReportStageTwoView: View {
     let scanImages: [UIImage]
     let policeStation: PoliceStationDetails
     let stageOne: PoliceReportStageOneDetails
+    var onLogout: () -> Void
 
     @Binding var isGeneratingReport: Bool
     @Binding var pdfURL: URL?
@@ -1944,6 +1935,12 @@ struct PoliceReportStageTwoView: View {
                 onLogout: {
                     pdfURL = nil
                     isPresented = false
+
+                    // Wait for the PDF sheet/full-screen report flow to dismiss,
+                    // then trigger the app-level logout from DamageAnalysisResultView.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        onLogout()
+                    }
                 }
             )
         }
@@ -2210,3 +2207,4 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
 }
+
