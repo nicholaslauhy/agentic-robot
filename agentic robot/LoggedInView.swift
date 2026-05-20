@@ -16,24 +16,28 @@ struct LoggedInView: View {
 
     @State private var navigateToResultPage = false
     @State private var showFileImporter = false
-    
+
     @State private var displayedText = ""
-    
-    private let fullText = "Okay, now I will need the licence plate. Please upload a photo of the car plate."
-    
+    @State private var didRunTypewriter = false
+    @State private var isSubmitting = false
+
     @State private var showButtons = false
     @State private var localErrorMessage: String? = nil
-    
+
+    private let fullText =
+        "Okay, now I will need the licence plate. Please upload a photo of the car plate."
+
+    // MARK: - API Call
     func sendToANPRServer(image: UIImage) {
-        // REPLACE THIS IP ADDRESS
-//        guard let url = URL(string: "http://127.0.0.1:8000/detect") else { return }
+
         guard let url = URL(string: "http://192.168.86.190:8000/detect") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
 
         let boundary = UUID().uuidString
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("multipart/form-data; boundary=\(boundary)",
+                         forHTTPHeaderField: "Content-Type")
 
         var body = Data()
         let imageData = image.jpegData(compressionQuality: 0.8)!
@@ -49,7 +53,9 @@ struct LoggedInView: View {
             guard let data = data,
                   let response = try? JSONDecoder().decode([String: String].self, from: data),
                   let rawPlate = response["plate"] else {
+
                 DispatchQueue.main.async {
+                    self.isSubmitting = false
                     self.localErrorMessage = "Could not reach the server. Please try again."
                 }
                 return
@@ -58,7 +64,9 @@ struct LoggedInView: View {
             let trimmed = rawPlate.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard trimmed != "[]" && !trimmed.isEmpty else {
+
                 DispatchQueue.main.async {
+                    self.isSubmitting = false
                     self.localErrorMessage = "No licence plate detected. Please try a clearer photo."
                 }
                 return
@@ -73,51 +81,57 @@ struct LoggedInView: View {
             }
 
             DispatchQueue.main.async {
+                self.isSubmitting = false
                 self.plateResult = plate
                 self.navigateToResultPage = true
             }
 
         }.resume()
     }
-    
+
+    // MARK: - UI
     var body: some View {
-        VStack(spacing: 25) {
 
-            Text(displayedText)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+        ZStack {
 
-            if let selectedImage = selectedImage {
+            VStack(spacing: 25) {
 
-                Image(uiImage: selectedImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 300)
-                    .cornerRadius(12)
+                Text(displayedText)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
-                HStack(spacing: 20) {
+                if let selectedImage = selectedImage {
 
-                    Button("Choose Another Photo") {
-                        self.selectedImage = nil
-                        self.localErrorMessage = nil
+                    Image(uiImage: selectedImage)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 300)
+                        .cornerRadius(12)
+                        .padding(.horizontal)
+
+                    HStack(spacing: 20) {
+
+                        Button("Choose Another Photo") {
+                            self.selectedImage = nil
+                            self.localErrorMessage = nil
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Confirm") {
+                            guard !isSubmitting else { return }
+                            isSubmitting = true
+                            sendToANPRServer(image: selectedImage)
+                        }
+                        .disabled(isSubmitting)
+                        .buttonStyle(.borderedProminent)
                     }
-                    .buttonStyle(.bordered)
 
-                    Button("Confirm") {
-                        sendToANPRServer(image: selectedImage)
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            } else {
+                } else {
 
-                VStack(spacing: 15) {
+                    VStack(spacing: 15) {
 
-                    Button("Take Photo") {
-
-                        DispatchQueue.main.async {
-
+                        Button("Take Photo") {
                             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                                 showCamera = true
                                 localErrorMessage = nil
@@ -125,54 +139,51 @@ struct LoggedInView: View {
                                 localErrorMessage = "Camera is not available on this device."
                             }
                         }
-                    }
-                    .buttonStyle(.borderedProminent)
+                        .buttonStyle(.borderedProminent)
 
-                    PhotosPicker(
-                        selection: $selectedPhotoItem,
-                        matching: .images
-                    ) {
-                        Text("Choose From Library")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Upload JPG/PNG File") {
-                        showFileImporter = true
-                    }
-                    .buttonStyle(.bordered)
-                }
-                .opacity(showButtons ? 1 : 0)
-                .fileImporter(
-                    isPresented: $showFileImporter,
-                    allowedContentTypes: [.image],
-                    allowsMultipleSelection: false
-                ) { result in
-
-                    switch result {
-
-                    case .success(let urls):
-
-                        guard let url = urls.first else { return }
-
-                        if let data = try? Data(contentsOf: url),
-                           let uiImage = UIImage(data: data) {
-                            selectedImage = uiImage
+                        PhotosPicker(
+                            selection: $selectedPhotoItem,
+                            matching: .images
+                        ) {
+                            Text("Choose From Library")
                         }
+                        .buttonStyle(.bordered)
 
-                    case .failure(let error):
-                        localErrorMessage = error.localizedDescription
+                        Button("Upload JPG/PNG File") {
+                            showFileImporter = true
+                        }
+                        .buttonStyle(.bordered)
                     }
+                    .opacity(showButtons ? 1 : 0)
+                }
+
+                if let localErrorMessage = localErrorMessage {
+                    Text(localErrorMessage)
+                        .foregroundColor(.red)
+                        .font(.footnote)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                }
+
+                Spacer()
+            }
+
+            // MARK: - LOADING OVERLAY
+            if isSubmitting {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
+
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .scaleEffect(1.3)
+
+                    Text("Processing image...")
+                        .font(.headline)
+                        .foregroundColor(.white)
                 }
             }
-            if let localErrorMessage = localErrorMessage {
-                Text(localErrorMessage)
-                    .foregroundColor(.red)
-                    .font(.footnote)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            Spacer()
         }
+
         .navigationTitle("Report Generation")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -183,8 +194,13 @@ struct LoggedInView: View {
                 .foregroundColor(.red)
             }
         }
+
         .padding(.top)
+
+        // MARK: - TYPEWRITER (run once)
         .onAppear {
+            guard !didRunTypewriter else { return }
+            didRunTypewriter = true
 
             displayedText = ""
             showButtons = false
@@ -204,6 +220,8 @@ struct LoggedInView: View {
                 }
             }
         }
+
+        // MARK: - CAMERA
         .fullScreenCover(isPresented: $showCamera) {
             PlateCameraImagePicker { image in
                 self.selectedImage = image
@@ -211,12 +229,15 @@ struct LoggedInView: View {
             }
             .ignoresSafeArea()
         }
+
+        // MARK: - PHOTO PICKER
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem = newItem else { return }
 
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
                    let uiImage = UIImage(data: data) {
+
                     await MainActor.run {
                         self.selectedImage = uiImage
                         self.selectedPhotoItem = nil
@@ -224,9 +245,11 @@ struct LoggedInView: View {
                 }
             }
         }
+
+        // MARK: - NAVIGATION
         .navigationDestination(isPresented: $navigateToResultPage) {
             CarPlateResultView(plate: plateResult) {
-                navigateToResultPage = false
+                auth.logout()
             }
             .environmentObject(auth)
         }

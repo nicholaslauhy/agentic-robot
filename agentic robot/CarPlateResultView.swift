@@ -21,6 +21,8 @@ struct CarPlateResultView: View {
     @State private var analysisErrorMessage: String? = nil
     @State private var damageDetections: [DamageDetection] = []
     @State private var navigateToDamageResults = false
+    
+    @State private var didRunTypewriter = false
 
     private let damageAnalysisService = DamageAnalysisService.shared
 
@@ -178,6 +180,9 @@ struct CarPlateResultView: View {
                     onLogout: onLogout
                 )
             }
+        }
+        .onDisappear {
+            didRunTypewriter = false
         }
     }
 

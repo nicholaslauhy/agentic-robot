@@ -1267,8 +1267,8 @@ struct ReportWelcomeView: View {
                                 }
 
                                 Button {
-                                    dismiss()
-                                    onLogout()
+                                    // Dismiss everything and logout
+                                    dismissAllAndLogout()
                                 } label: {
                                     Text("Logout")
                                         .font(.headline)
@@ -1302,6 +1302,25 @@ struct ReportWelcomeView: View {
                         }
                     }
                 }
+            }
+        }
+    }
+    
+    // Helper to dismiss all sheets and full screen covers before logging out
+    private func dismissAllAndLogout() {
+        // Then find and dismiss the full screen cover that presented this whole flow
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Get the root view controller
+            guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                  let rootVC = windowScene.windows.first?.rootViewController else {
+                onLogout()
+                return
+            }
+            
+            // Dismiss any presented view controllers (including full screen cover)
+            rootVC.dismiss(animated: true) {
+                // After dismissal, call the original logout handler
+                onLogout()
             }
         }
     }
@@ -1345,6 +1364,7 @@ struct ReportWelcomeView: View {
         topVC?.present(activity, animated: true)
     }
 }
+
 
 
 // MARK: - Police Report Details Flow
