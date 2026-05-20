@@ -246,6 +246,45 @@ struct LoggedInView: View {
             }
         }
 
+
+        // MARK: - FILE IMPORTER
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.jpeg, .png],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else {
+                    localErrorMessage = "No file was selected."
+                    return
+                }
+
+                let didStartAccessing = url.startAccessingSecurityScopedResource()
+                defer {
+                    if didStartAccessing {
+                        url.stopAccessingSecurityScopedResource()
+                    }
+                }
+
+                do {
+                    let data = try Data(contentsOf: url)
+                    guard let uiImage = UIImage(data: data) else {
+                        localErrorMessage = "The selected file could not be opened as a JPG/PNG image."
+                        return
+                    }
+
+                    selectedImage = uiImage
+                    localErrorMessage = nil
+                } catch {
+                    localErrorMessage = "Could not read the selected file: \(error.localizedDescription)"
+                }
+
+            case .failure(let error):
+                localErrorMessage = "File selection failed: \(error.localizedDescription)"
+            }
+        }
+
         // MARK: - NAVIGATION
         .navigationDestination(isPresented: $navigateToResultPage) {
             CarPlateResultView(plate: plateResult) {
