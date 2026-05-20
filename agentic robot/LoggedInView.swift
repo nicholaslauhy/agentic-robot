@@ -19,7 +19,7 @@ struct LoggedInView: View {
     
     @State private var displayedText = ""
     
-    private let fullText = "Okay, first I will have to check the car plate number. Please upload a photo of the car plate."
+    private let fullText = "Okay, now I will need the licence plate. Please upload a photo of the car plate."
     
     @State private var showButtons = false
     @State private var localErrorMessage: String? = nil
@@ -82,25 +82,6 @@ struct LoggedInView: View {
     
     var body: some View {
         VStack(spacing: 25) {
-
-            HStack {
-                Text("Welcome")
-                    .font(.largeTitle)
-                    .bold()
-
-                Spacer()
-
-                Button("Logout") {
-                    displayedText = ""
-                    auth.didShowIntroAnimation = false
-                    auth.logout()
-                    localErrorMessage = nil
-                    selectedImage = nil
-                    plateResult = ""
-                }
-                .foregroundColor(.red)
-            }
-            .padding(.horizontal)
 
             Text(displayedText)
                 .font(.headline)
@@ -192,23 +173,25 @@ struct LoggedInView: View {
             }
             Spacer()
         }
+        .navigationTitle("Report Generation")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button("Logout") {
+                    auth.logout()
+                }
+                .foregroundColor(.red)
+            }
+        }
         .padding(.top)
         .onAppear {
 
             displayedText = ""
             showButtons = false
 
-            guard auth.didShowIntroAnimation == false else {
-                showButtons = true
-                displayedText = fullText
-                return
-            }
-
-            auth.didShowIntroAnimation = true
-
             Task {
                 for char in fullText {
-                    try? await Task.sleep(for: .milliseconds(25)) // <-- speed control here
+                    try? await Task.sleep(for: .milliseconds(25))
                     await MainActor.run {
                         displayedText.append(char)
                     }
@@ -244,7 +227,6 @@ struct LoggedInView: View {
         .navigationDestination(isPresented: $navigateToResultPage) {
             CarPlateResultView(plate: plateResult) {
                 navigateToResultPage = false
-                auth.logout()
             }
             .environmentObject(auth)
         }

@@ -8,23 +8,23 @@ struct LoginView: View {
     @State private var isPasswordVisible = false
     @State private var shakeTrigger: CGFloat = 0
 
-    var onCreateAccount: () -> Void
-     @Binding var successMessage: String?
+    // onCreateAccount removed — admins create accounts from HomeView
+    @Binding var successMessage: String?
 
     var body: some View {
         VStack(spacing: 20) {
-            
+
             Text("Login")
                 .font(.largeTitle)
                 .bold()
-            
+
             if let successMessage = successMessage {
                 Text(successMessage)
                     .foregroundColor(.green)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
             }
-            
+
             if let errorMessage = authViewModel.errorMessage {
                 Text(errorMessage)
                     .foregroundColor(.red)
@@ -66,9 +66,8 @@ struct LoginView: View {
             Button("Login") {
                 if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                     password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-
                     authViewModel.errorMessage = "Please fill in all fields."
-                    shakeTrigger += 1;
+                    shakeTrigger += 1
                     return
                 }
 
@@ -82,9 +81,8 @@ struct LoginView: View {
             }
             .buttonStyle(.borderedProminent)
 
-            Button("Create Account") {
-                onCreateAccount()
-            }
+            // "Create Account" button intentionally removed.
+            // Only admins can create accounts, from the home screen.
         }
         .padding()
         .modifier(ShakeEffect(animatableData: shakeTrigger))
