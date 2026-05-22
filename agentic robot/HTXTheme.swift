@@ -12,19 +12,22 @@ enum HTXTheme {
     static let gradientTop    = Color(red: 0.18, green: 0.00, blue: 0.38)   // #2D0060
     static let gradientMid    = Color(red: 0.55, green: 0.18, blue: 0.72)   // brighter HTX purple
     static let gradientBot    = Color(red: 0.29, green: 0.00, blue: 0.50)   // #4A0080
-    static let accent         = Color(red: 0.81, green: 0.58, blue: 0.85)   // #CE93D8
+    static let accent         = Color(red: 0.93, green: 0.82, blue: 0.98)   // #CE93D8
     static let accentBright   = Color(red: 0.88, green: 0.25, blue: 0.98)   // #E040FB
     static let cyan           = Color(red: 0.00, green: 0.78, blue: 1.00)
     static let deepPurple     = Color(red: 0.20, green: 0.00, blue: 0.35)
-    static let cardBg         = Color.white.opacity(0.12)
-    static let cardBorder     = Color.white.opacity(0.20)
-    static let inputBg        = Color.white.opacity(0.12)
-    static let inputBorder    = Color.white.opacity(0.25)
+    static let cardBg         = Color.white.opacity(0.16)
+    static let cardBorder     = Color.white.opacity(0.32)
+    static let inputBg        = Color.white.opacity(0.18)
+    static let inputBorder    = Color.white.opacity(0.38)
     static let errorRed       = Color(red: 1, green: 0.42, blue: 0.42)
     static let successGreen   = Color(red: 0.41, green: 0.94, blue: 0.68)
     static let destructiveRed = Color(red: 1, green: 0.27, blue: 0.27)
     static let civBlue        = Color(red: 0.08, green: 0.40, blue: 0.85)
     static let scdfRed        = Color(red: 0.72, green: 0.11, blue: 0.09)
+    static let primaryText    = Color.white
+    static let secondaryText  = Color.white.opacity(0.86)
+    static let mutedText      = Color.white.opacity(0.72)
 }
 
 // MARK: - Background Gradient
@@ -306,8 +309,8 @@ struct HTXLogoView: View {
 
     var body: some View {
         Group {
-            if let _ = UIImage(named: "HTXLogo") {
-                Image("HTXLogo")
+            if let _ = UIImage(named: "htx_logo") {
+                Image("htx_logo")
                     .resizable()
                     .scaledToFit()
                     .frame(width: size, height: size)
@@ -350,12 +353,12 @@ struct HTXScreenHeader: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 28, weight: .black, design: .rounded))
+                    .font(.system(size: 28, weight: .black, design: .default))
                     .foregroundColor(.white)
                 if let subtitle {
                     Text(subtitle)
                         .font(.subheadline)
-                        .foregroundColor(HTXTheme.accent.opacity(0.88))
+                        .foregroundColor(HTXTheme.secondaryText)
                 }
             }
             Spacer()
@@ -403,5 +406,83 @@ struct HTXLoadingOverlay: View {
             .shadow(radius: 18)
             .padding(.horizontal, 36)
         }
+    }
+}
+
+
+// MARK: - Form Styling Helpers
+struct HTXSectionTitle: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text.uppercased())
+            .font(.caption.bold())
+            .tracking(1.1)
+            .foregroundColor(HTXTheme.secondaryText)
+    }
+}
+
+struct HTXMiniButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                Text(title).fontWeight(.semibold)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(0.12))
+            .foregroundColor(.white)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.24), lineWidth: 1))
+        }
+    }
+}
+
+extension View {
+    func htxFormLook() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(HTXBackground())
+            .tint(.white)
+            .environment(\.colorScheme, .dark)
+    }
+
+    func htxReportInputStyle() -> some View {
+        self
+            .padding(12)
+            .background(HTXTheme.deepPurple.opacity(0.58))
+            .foregroundColor(.white)
+            .tint(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.78), lineWidth: 1.2)
+            )
+    }
+
+    func htxReportRowBackground() -> some View {
+        self
+            .listRowBackground(Color.white.opacity(0.10))
+    }
+}
+
+struct HTXFormSectionHeader: View {
+    let title: String
+
+    init(_ title: String) {
+        self.title = title
+    }
+
+    var body: some View {
+        Text(title.uppercased())
+            .font(.caption.bold())
+            .tracking(1.1)
+            .foregroundColor(.white)
+            .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
     }
 }

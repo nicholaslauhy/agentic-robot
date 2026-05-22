@@ -107,7 +107,7 @@ struct LoggedInView: View {
                     VStack(spacing: 14) {
                         HTXLogoView(size: 74)
                         Text(displayedText)
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .font(.system(size: 18, weight: .bold, design: .default))
                             .foregroundColor(.white)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 16)
@@ -144,12 +144,12 @@ struct LoggedInView: View {
                             } else {
                                 VStack(spacing: 14) {
                                     Text("Upload Plate Image")
-                                        .font(.system(size: 20, weight: .black, design: .rounded))
+                                        .font(.system(size: 20, weight: .semibold, design: .default))
                                         .foregroundColor(.white)
 
                                     Text("Take a photo, pick from your photo library, or upload a JPG/PNG file.")
                                         .font(.subheadline)
-                                        .foregroundColor(HTXTheme.accent.opacity(0.88))
+                                        .foregroundColor(HTXTheme.secondaryText)
                                         .multilineTextAlignment(.center)
 
                                     VStack(spacing: 12) {

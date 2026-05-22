@@ -126,7 +126,7 @@ struct MemberManagementView: View {
                             } else if members.isEmpty {
                                 Text("No members yet.")
                                     .font(.subheadline)
-                                    .foregroundColor(HTXTheme.accent.opacity(0.85))
+                                    .foregroundColor(HTXTheme.secondaryText)
                                     .frame(maxWidth: .infinity, alignment: .center)
                                     .padding(.vertical, 18)
                             } else {

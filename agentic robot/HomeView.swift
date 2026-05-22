@@ -6,6 +6,8 @@ struct HomeView: View {
 
     @State private var displayedText = ""
     @State private var showButtons = false
+    @State private var goToMembers = false
+    @State private var goToReportGeneration = false
 
     private let fullText = "What do you want to do today?"
 
@@ -16,7 +18,7 @@ struct HomeView: View {
             VStack(spacing: 0) {
                 HTXScreenHeader(
                     title: "Welcome",
-                    subtitle: auth.isAdmin ? "Administrator" : "Member",
+                    subtitle: auth.isAdmin ? "Administrator Console" : "Operations Member",
                     trailing: AnyView(HTXLogoutButton { auth.logout() })
                 )
                 .padding(.horizontal, 20)
@@ -29,7 +31,7 @@ struct HomeView: View {
                     HTXLogoView(size: 96)
 
                     Text("HTX")
-                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .font(.system(size: 30, weight: .black, design: .default))
                         .tracking(7)
                         .foregroundColor(.white)
                         .shadow(color: HTXTheme.accentBright.opacity(0.55), radius: 12)
@@ -38,7 +40,7 @@ struct HomeView: View {
                 Spacer().frame(height: 34)
 
                 Text(displayedText)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 22, weight: .bold, design: .default))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -49,9 +51,8 @@ struct HomeView: View {
                 if showButtons {
                     VStack(spacing: 14) {
                         if auth.isAdmin {
-                            NavigationLink {
-                                MemberManagementView()
-                                    .environmentObject(auth)
+                            Button {
+                                goToMembers = true
                             } label: {
                                 HTXHomeCard(
                                     icon: "person.badge.plus.fill",
@@ -63,9 +64,8 @@ struct HomeView: View {
                             .buttonStyle(.plain)
                         }
 
-                        NavigationLink {
-                            LoggedInView()
-                                .environmentObject(auth)
+                        Button {
+                            goToReportGeneration = true
                         } label: {
                             HTXHomeCard(
                                 icon: "doc.text.viewfinder",
@@ -84,6 +84,14 @@ struct HomeView: View {
             }
         }
         .navigationBarHidden(true)
+        .navigationDestination(isPresented: $goToMembers) {
+            MemberManagementView()
+                .environmentObject(auth)
+        }
+        .navigationDestination(isPresented: $goToReportGeneration) {
+            LoggedInView()
+                .environmentObject(auth)
+        }
         .onAppear { startTypewriter() }
     }
 
@@ -112,6 +120,8 @@ struct HTXHomeCard: View {
     let subtitle: String
     let color: Color
 
+    @State private var isPressed = false
+
     var body: some View {
         HStack(spacing: 16) {
             ZStack {
@@ -136,11 +146,11 @@ struct HTXHomeCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .font(.system(size: 17, weight: .bold, design: .default))
                     .foregroundColor(.white)
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundColor(HTXTheme.accent.opacity(0.86))
+                    .foregroundColor(HTXTheme.secondaryText)
                     .lineLimit(2)
             }
 
@@ -151,9 +161,8 @@ struct HTXHomeCard: View {
                 .foregroundColor(.white.opacity(0.72))
         }
         .padding(18)
-        .background(Color.white.opacity(0.10))
+        .background(Color.white.opacity(isPressed ? 0.17 : 0.10))
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(
@@ -166,5 +175,7 @@ struct HTXHomeCard: View {
                 )
         )
         .shadow(color: color.opacity(0.16), radius: 15, y: 8)
+        .scaleEffect(isPressed ? 0.98 : 1)
+        .animation(.spring(response: 0.24), value: isPressed)
     }
 }

@@ -78,75 +78,59 @@ struct ScratchScanView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            HTXBackground()
 
-            // HEADER
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Scratch Scan").font(.largeTitle).bold()
-                    Text("\(carType.rawValue)  ·  \(plate)")
-                        .font(.subheadline).foregroundColor(.secondary)
-                }
-                Spacer()
-                Button("Logout") { onLogout() }.foregroundColor(.red)
-            }
-            .padding()
+            VStack(spacing: 0) {
+                HTXScreenHeader(
+                    title: "Scratch Scan",
+                    subtitle: "\(carType.rawValue) · \(plate)",
+                    trailing: AnyView(HTXLogoutButton { onLogout() })
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 12)
 
-            // PROGRESS BAR
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("\(capturedCount) of \(scanAngles.count) angles captured")
-                        .font(.caption).foregroundColor(.secondary)
-                    Spacer()
-                    Text("\(Int(progress * 100))%")
-                        .font(.caption.bold()).foregroundColor(carType.accentColor)
-                }
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5)).frame(height: 8)
-                        RoundedRectangle(cornerRadius: 4).fill(carType.accentColor)
-                            .frame(width: geo.size.width * progress, height: 8)
-                            .animation(.spring(response: 0.5), value: progress)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("\(capturedCount) of \(scanAngles.count) angles captured")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(HTXTheme.secondaryText)
+                        Spacer()
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption.bold())
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
                     }
-                }
-                .frame(height: 8)
-            }
-            .padding(.horizontal).padding(.bottom, 12)
 
-            if showCompletionScreen { reviewView } else { scanGuideView }
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color.white.opacity(0.16))
+                                .frame(height: 9)
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(LinearGradient(colors: [HTXTheme.cyan, HTXTheme.accentBright], startPoint: .leading, endPoint: .trailing))
+                                .frame(width: geo.size.width * progress, height: 9)
+                                .animation(.spring(response: 0.5), value: progress)
+                        }
+                    }
+                    .frame(height: 9)
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 14)
+
+                if showCompletionScreen { reviewView } else { scanGuideView }
+            }
         }
         .overlay {
             if isSubmittingAnalysis {
-                ZStack {
-                    Color.black.opacity(0.25).ignoresSafeArea()
-
-                    VStack(spacing: 14) {
-                        ProgressView()
-                            .scaleEffect(1.3)
-
-                        Text("Analyzing your pictures for any dents or scratches...")
-                            .font(.headline)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-                    .padding(24)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .shadow(radius: 10)
-                    .padding(.horizontal, 28)
-                }
+                HTXLoadingOverlay(message: "Analyzing your pictures for any dents or scratches...")
             }
         }
-
-        // ── Main capture ───────────────────────────────────────────────────
         .navigationBarBackButtonHidden(true)
-
-        // ── Main capture ───────────────────────────────────────────────────
+        .toolbar(.hidden, for: .navigationBar)
         .fullScreenCover(isPresented: $showCamera) {
-            CameraOverlayImagePicker(
-                carType: carType,
-                angleId: currentAngleIndex
-            ) { image in
+            CameraOverlayImagePicker(carType: carType, angleId: currentAngleIndex) { image in
                 capturedImages[currentAngleIndex] = image
                 showCamera = false
                 advanceOrComplete()
@@ -156,8 +140,7 @@ struct ScratchScanView: View {
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem else { return }
             Task {
-                if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let img = UIImage(data: data) {
+                if let data = try? await newItem.loadTransferable(type: Data.self), let img = UIImage(data: data) {
                     await MainActor.run {
                         capturedImages[currentAngleIndex] = img
                         selectedPhotoItem = nil
@@ -166,41 +149,21 @@ struct ScratchScanView: View {
                 }
             }
         }
-
-        // ── Replace: confirmation sheet ────────────────────────────────────
-        .confirmationDialog(
-            replacingIndex.map { "Replace \(scanAngles[$0].label) Photo" } ?? "Replace Photo",
-            isPresented: $showReplaceSheet,
-            titleVisibility: .visible
-        ) {
+        .confirmationDialog(replacingIndex.map { "Replace \(scanAngles[$0].label) Photo" } ?? "Replace Photo", isPresented: $showReplaceSheet, titleVisibility: .visible) {
             Button("Take New Photo") {
-                if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                    showReplaceCamera = true
-                } else {
-                    localErrorMessage = "Camera is not available on this device."
-                    replacingIndex = nil
-                }
+                if UIImagePickerController.isSourceTypeAvailable(.camera) { showReplaceCamera = true } else { localErrorMessage = "Camera is not available on this device."; replacingIndex = nil }
             }
-            Button("Choose from Library") {
-                showReplaceLibrary = true
-            }
+            Button("Choose from Library") { showReplaceLibrary = true }
             Button("Cancel", role: .cancel) { replacingIndex = nil }
         }
-
-        // ── Replace: camera ────────────────────────────────────────────────
         .fullScreenCover(isPresented: $showReplaceCamera) {
-            CameraOverlayImagePicker(
-                carType: carType,
-                angleId: replacingIndex ?? currentAngleIndex
-            ) { image in
+            CameraOverlayImagePicker(carType: carType, angleId: replacingIndex ?? currentAngleIndex) { image in
                 if let idx = replacingIndex { capturedImages[idx] = image }
                 replacingIndex = nil
                 showReplaceCamera = false
             }
             .ignoresSafeArea()
         }
-
-        // ── Replace: photo library (PHPicker — writes directly to replaceImage) ──
         .sheet(isPresented: $showReplaceLibrary) {
             PHPickerRepresentable { image in
                 if let idx = replacingIndex { capturedImages[idx] = image }
@@ -226,23 +189,26 @@ struct ScratchScanView: View {
         VStack(spacing: 16) {
 
             ZStack {
-                RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground))
+                RoundedRectangle(cornerRadius: 20).fill(Color.white.opacity(0.11))
                 CarSilhouetteView(carType: carType, angleId: currentAngleIndex).padding(.horizontal, 18).padding(.vertical, 10)
             }
             .frame(height: 310).padding(.horizontal)
 
             HStack(spacing: 16) {
                 Image(systemName: scanAngles[currentAngleIndex].iconName)
-                    .font(.system(size: 26, weight: .bold)).foregroundColor(carType.accentColor).frame(width: 40)
+                    .font(.system(size: 26, weight: .bold)).foregroundColor(HTXTheme.cyan).frame(width: 40)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(scanAngles[currentAngleIndex].label).font(.headline)
+                    Text(scanAngles[currentAngleIndex].label)
+                        .font(.system(size: 20, weight: .bold, design: .default))
+                        .foregroundColor(.white)
                     Text(scanAngles[currentAngleIndex].instruction)
-                        .font(.subheadline).foregroundColor(.secondary)
+                        .font(.system(size: 15, weight: .semibold, design: .default))
+                        .foregroundColor(.white.opacity(0.92))
                 }
                 Spacer()
             }
             .padding()
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.11)))
             .padding(.horizontal)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -281,16 +247,16 @@ struct ScratchScanView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(carType.accentColor)
+                        .foregroundColor(HTXTheme.cyan)
                         .frame(width: 52, height: 52)
-                        .background(Color(.secondarySystemBackground))
+                        .background(Color.white.opacity(0.11))
                         .cornerRadius(12)
                 }
 
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                     Label("Library", systemImage: "photo.on.rectangle")
                         .frame(maxWidth: .infinity).padding()
-                        .background(Color(.secondarySystemBackground)).cornerRadius(12)
+                        .background(Color.white.opacity(0.11)).cornerRadius(12)
                 }
                 Button {
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -301,7 +267,7 @@ struct ScratchScanView: View {
                 } label: {
                     Label("Take Photo", systemImage: "camera.fill")
                         .frame(maxWidth: .infinity).padding()
-                        .background(carType.accentColor).foregroundColor(.white).cornerRadius(12)
+                        .background(LinearGradient(colors: [HTXTheme.cyan, HTXTheme.accentBright], startPoint: .leading, endPoint: .trailing)).foregroundColor(.white).cornerRadius(12)
                 }
             }
             .padding(.horizontal).padding(.bottom, 24)
@@ -326,14 +292,14 @@ struct ScratchScanView: View {
                                 .fontWeight(.semibold)
                             Text("Back")
                         }
-                        .foregroundColor(carType.accentColor)
+                        .foregroundColor(HTXTheme.cyan)
                     }
 
                     Spacer()
 
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
-                        Text("All Angles Captured").font(.title3.bold())
+                        Text("All Angles Captured").font(.title3.weight(.semibold)).foregroundColor(.white)
                     }
 
                     Spacer()
@@ -349,7 +315,7 @@ struct ScratchScanView: View {
                 .padding(.top, 8)
 
                 Text("Tap any photo to replace it, then submit.")
-                    .font(.subheadline).foregroundColor(.secondary)
+                    .font(.subheadline).foregroundColor(HTXTheme.secondaryText)
                     .multilineTextAlignment(.center).padding(.horizontal)
 
                 LazyVStack(spacing: 16) {
@@ -379,7 +345,7 @@ struct ScratchScanView: View {
                 } label: {
                     Text("Submit for Analysis")
                         .font(.headline).frame(maxWidth: .infinity).padding()
-                        .background(carType.accentColor).foregroundColor(.white)
+                        .background(LinearGradient(colors: [HTXTheme.cyan, HTXTheme.accentBright], startPoint: .leading, endPoint: .trailing)).foregroundColor(.white)
                         .cornerRadius(14).padding(.horizontal)
                 }
                 .disabled(isSubmittingAnalysis)
@@ -1060,12 +1026,12 @@ struct ReviewThumbnail: View {
                             .frame(maxWidth: .infinity)
                             .background(Color(.systemGray6))
                     } else {
-                        Color(.systemGray5)
+                        Color.white.opacity(0.16)
                             .frame(maxWidth: .infinity)
                             .frame(height: 200)
                         Text("No photo yet")
                             .font(.footnote)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(HTXTheme.secondaryText)
                     }
 
                     // Label + edit hint gradient bar
@@ -1119,9 +1085,14 @@ struct CarSilhouetteView: View {
                 )
 
                 Text(scanAngles[angleId].label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary.opacity(0.72))
-                    .position(x: w / 2, y: h - 12)
+                    .font(.system(size: 17, weight: .bold, design: .default))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Color.black.opacity(0.28))
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
+                    .position(x: w / 2, y: h - 18)
             }
         }
     }
@@ -1436,7 +1407,7 @@ struct VehicleFaceDrawing: View {
 
             // Boxy MPV front/rear grille panel.
             RoundedRectangle(cornerRadius: 0)
-                .fill(Color(.systemGray5).opacity(0.90))
+                .fill(Color.white.opacity(0.16).opacity(0.90))
                 .frame(width: bodyW * 0.58, height: bodyH * 0.145)
                 .position(x: cx, y: topY + bodyH * 0.625)
 
@@ -1666,7 +1637,7 @@ struct VehicleFaceDrawing: View {
         return ZStack {
             if isFront {
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(Color(.systemGray5).opacity(0.88))
+                    .fill(Color.white.opacity(0.16).opacity(0.88))
                     .frame(width: bodyW * 0.45, height: bodyH * 0.105)
                     .position(x: cx, y: y)
 
@@ -1695,7 +1666,7 @@ struct VehicleFaceDrawing: View {
 
     private func numberPlate(bodyW: CGFloat, bodyH: CGFloat, topY: CGFloat, yRatio: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: 3)
-            .fill(Color(.systemGray5).opacity(0.96))
+            .fill(Color.white.opacity(0.16).opacity(0.96))
             .frame(width: bodyW * 0.23, height: bodyH * 0.075)
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.55), lineWidth: 0.8))
             .position(x: cx, y: topY + bodyH * yRatio)
@@ -1760,7 +1731,7 @@ struct VehicleFaceDrawing: View {
             Path { p in
                 p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.05, width: bodyW, height: bodyH * 0.90), radius: 16)
             }
-            .fill(LinearGradient(colors: [palette.body, Color(.systemGray5).opacity(0.93)], startPoint: .top, endPoint: .bottom))
+            .fill(LinearGradient(colors: [palette.body, Color.white.opacity(0.16).opacity(0.93)], startPoint: .top, endPoint: .bottom))
             .overlay(
                 Path { p in
                     p.roundedRect(CGRect(x: leftX, y: topY + bodyH * 0.05, width: bodyW, height: bodyH * 0.90), radius: 16)
@@ -1817,7 +1788,7 @@ struct VehicleFaceDrawing: View {
             // Folded ladder visible even from front.
             ZStack {
                 Capsule()
-                    .fill(Color(.systemGray5).opacity(0.95))
+                    .fill(Color.white.opacity(0.16).opacity(0.95))
                     .frame(width: bodyW * 0.72, height: bodyH * 0.060)
                 Capsule()
                     .stroke(Color(.systemGray2).opacity(0.75), lineWidth: 2)
@@ -2275,7 +2246,7 @@ struct VehicleSideDrawing: View {
         let mainColor = isMSV ? Color.blue.opacity(0.66) : Color.red.opacity(0.72)
 
         return ZStack {
-            body.fill(LinearGradient(colors: [Color.white.opacity(0.98), Color(.systemGray5).opacity(0.95)],
+            body.fill(LinearGradient(colors: [Color.white.opacity(0.98), Color.white.opacity(0.16).opacity(0.95)],
                                      startPoint: .top,
                                      endPoint: .bottom))
                 .overlay(body.stroke(Color(.systemGray3).opacity(0.65), lineWidth: 1.2))
@@ -2594,7 +2565,7 @@ struct VehicleSideDrawing: View {
                 let pt = CGPoint(x: x, y: y).applying(transform)
 
                 Circle()
-                    .fill(Color(.secondarySystemBackground))
+                    .fill(Color.white.opacity(0.11))
                     .frame(width: r * 2.58, height: r * 2.58)
                     .position(pt)
 
@@ -2604,7 +2575,7 @@ struct VehicleSideDrawing: View {
                     .position(pt)
 
                 Circle()
-                    .fill(Color(.systemGray5))
+                    .fill(Color.white.opacity(0.16))
                     .frame(width: r * 1.05, height: r * 1.05)
                     .overlay(Circle().stroke(Color.white.opacity(0.8), lineWidth: 1))
                     .position(pt)
@@ -2711,7 +2682,7 @@ struct LadderAssembly: View {
             }
 
             RoundedRectangle(cornerRadius: 4)
-                .fill(Color(.systemGray5).opacity(0.95))
+                .fill(Color.white.opacity(0.16).opacity(0.95))
                 .frame(width: m.width * 0.09, height: h * 0.062)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color(.systemGray2), lineWidth: 1))
                 .position(CGPoint(x: m.left + m.width * 0.84, y: m.sillY - h * 0.388).applying(transform))
@@ -2730,7 +2701,7 @@ struct LadderAssembly: View {
             p.addLine(to: CGPoint(x: m.left + m.width * 0.83, y: m.sillY - h * 0.390 + yOffset))
         }
         .applying(transform)
-        .stroke(Color(.systemGray5).opacity(0.98), lineWidth: 3)
+        .stroke(Color.white.opacity(0.16).opacity(0.98), lineWidth: 3)
     }
 }
 

@@ -41,7 +41,7 @@ struct CarPlateResultView: View {
 
             VStack(spacing: 20) {
                 HTXScreenHeader(
-                    title: "Car Plate Result",
+                    title: "Licence Plate Result",
                     subtitle: "Confirm vehicle identity",
                     trailing: AnyView(HTXLogoutButton { onLogout() })
                 )
@@ -62,12 +62,12 @@ struct CarPlateResultView: View {
                                 )
                             )
 
-                        Text("Detected Plate")
+                        Text("Detected Licence Plate")
                             .font(.headline)
-                            .foregroundColor(HTXTheme.accent.opacity(0.9))
+                            .foregroundColor(HTXTheme.secondaryText)
 
                         Text(editablePlate.isEmpty ? "No result" : editablePlate)
-                            .font(.system(size: 42, weight: .black, design: .rounded))
+                            .font(.system(size: 40, weight: .semibold, design: .default))
                             .tracking(2)
                             .foregroundColor(.white)
                             .minimumScaleFactor(0.7)
@@ -194,12 +194,12 @@ struct CarPlateResultView: View {
 
                     Text("Update the plate number if the AI detected it wrongly.")
                         .font(.subheadline)
-                        .foregroundColor(HTXTheme.accent.opacity(0.9))
+                        .foregroundColor(HTXTheme.secondaryText)
 
                     TextField("Enter licence plate", text: $plateDraft)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .font(.system(size: 28, weight: .semibold, design: .default))
                         .multilineTextAlignment(.center)
                         .foregroundColor(.white)
                         .tint(HTXTheme.accentBright)
