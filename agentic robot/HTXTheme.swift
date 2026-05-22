@@ -10,58 +10,30 @@ import SwiftUI
 // MARK: - HTX Brand Colors & Theme
 enum HTXTheme {
     static let gradientTop    = Color(red: 0.18, green: 0.00, blue: 0.38)   // #2D0060
-    static let gradientMid    = Color(red: 0.55, green: 0.18, blue: 0.72)   // brighter HTX purple
+    static let gradientMid    = Color(red: 0.48, green: 0.12, blue: 0.64)   // #7B1FA2
     static let gradientBot    = Color(red: 0.29, green: 0.00, blue: 0.50)   // #4A0080
-    static let accent         = Color(red: 0.93, green: 0.82, blue: 0.98)   // #CE93D8
+    static let accent         = Color(red: 0.81, green: 0.58, blue: 0.85)   // #CE93D8
     static let accentBright   = Color(red: 0.88, green: 0.25, blue: 0.98)   // #E040FB
-    static let cyan           = Color(red: 0.00, green: 0.78, blue: 1.00)
-    static let deepPurple     = Color(red: 0.20, green: 0.00, blue: 0.35)
-    static let cardBg         = Color.white.opacity(0.16)
-    static let cardBorder     = Color.white.opacity(0.32)
-    static let inputBg        = Color.white.opacity(0.18)
-    static let inputBorder    = Color.white.opacity(0.38)
+    static let cardBg         = Color.white.opacity(0.10)
+    static let cardBorder     = Color.white.opacity(0.18)
+    static let inputBg        = Color.white.opacity(0.12)
+    static let inputBorder    = Color.white.opacity(0.25)
     static let errorRed       = Color(red: 1, green: 0.42, blue: 0.42)
     static let successGreen   = Color(red: 0.41, green: 0.94, blue: 0.68)
     static let destructiveRed = Color(red: 1, green: 0.27, blue: 0.27)
     static let civBlue        = Color(red: 0.08, green: 0.40, blue: 0.85)
     static let scdfRed        = Color(red: 0.72, green: 0.11, blue: 0.09)
-    static let primaryText    = Color.white
-    static let secondaryText  = Color.white.opacity(0.86)
-    static let mutedText      = Color.white.opacity(0.72)
 }
 
 // MARK: - Background Gradient
 struct HTXBackground: View {
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color(red: 0.91, green: 0.82, blue: 0.95),
-                    HTXTheme.gradientMid,
-                    HTXTheme.gradientBot,
-                    HTXTheme.deepPurple
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            RadialGradient(
-                colors: [HTXTheme.accentBright.opacity(0.28), .clear],
-                center: UnitPoint(x: 0.76, y: 0.12),
-                startRadius: 0,
-                endRadius: 360
-            )
-            .ignoresSafeArea()
-
-            RadialGradient(
-                colors: [HTXTheme.cyan.opacity(0.15), .clear],
-                center: UnitPoint(x: 0.18, y: 0.35),
-                startRadius: 0,
-                endRadius: 300
-            )
-            .ignoresSafeArea()
-        }
+        LinearGradient(
+            colors: [HTXTheme.gradientTop, HTXTheme.gradientMid, HTXTheme.gradientBot],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
     }
 }
 
@@ -69,25 +41,12 @@ struct HTXBackground: View {
 struct HTXCard<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
-
     var body: some View {
         content
-            .padding(22)
-            .background(.ultraThinMaterial.opacity(0.22))
+            .padding(24)
             .background(HTXTheme.cardBg)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [Color.white.opacity(0.38), HTXTheme.accentBright.opacity(0.28)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1.1
-                    )
-            )
-            .shadow(color: .black.opacity(0.18), radius: 18, y: 10)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(HTXTheme.cardBorder, lineWidth: 1))
     }
 }
 
@@ -113,8 +72,8 @@ struct HTXTextField: View {
                 .autocorrectionDisabled()
                 .padding(14)
                 .background(HTXTheme.inputBg)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(HTXTheme.inputBorder, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(HTXTheme.inputBorder, lineWidth: 1))
                 .foregroundColor(.white)
                 .tint(HTXTheme.accentBright)
         }
@@ -157,8 +116,8 @@ struct HTXSecureField: View {
             }
             .padding(14)
             .background(HTXTheme.inputBg)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(HTXTheme.inputBorder, lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(HTXTheme.inputBorder, lineWidth: 1))
             .tint(HTXTheme.accentBright)
         }
     }
@@ -171,9 +130,7 @@ struct HTXPrimaryButton: View {
     let action: () -> Void
 
     init(_ title: String, isLoading: Bool = false, action: @escaping () -> Void) {
-        self.title = title
-        self.isLoading = isLoading
-        self.action = action
+        self.title = title; self.isLoading = isLoading; self.action = action
     }
 
     var body: some View {
@@ -184,54 +141,20 @@ struct HTXPrimaryButton: View {
                 } else {
                     Text(title)
                         .fontWeight(.bold)
-                        .tracking(1.3)
+                        .tracking(1.5)
                 }
             }
             .frame(maxWidth: .infinity)
             .frame(height: 52)
         }
         .background(
-            LinearGradient(
-                colors: [Color(red: 0.61, green: 0.15, blue: 0.69), HTXTheme.accentBright],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
+            LinearGradient(colors: [Color(red: 0.61, green: 0.15, blue: 0.69), HTXTheme.accentBright],
+                           startPoint: .leading, endPoint: .trailing)
         )
         .clipShape(Capsule())
         .foregroundColor(.white)
-        .shadow(color: HTXTheme.accentBright.opacity(0.38), radius: 14, y: 5)
+        .shadow(color: HTXTheme.accentBright.opacity(0.4), radius: 12, y: 4)
         .disabled(isLoading)
-    }
-}
-
-// MARK: - Secondary Button
-struct HTXSecondaryButton: View {
-    let title: String
-    let systemImage: String?
-    let action: () -> Void
-
-    init(_ title: String, systemImage: String? = nil, action: @escaping () -> Void) {
-        self.title = title
-        self.systemImage = systemImage
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                }
-                Text(title)
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-        }
-        .background(Color.white.opacity(0.10))
-        .clipShape(Capsule())
-        .foregroundColor(.white)
-        .overlay(Capsule().stroke(Color.white.opacity(0.20), lineWidth: 1))
     }
 }
 
@@ -239,7 +162,6 @@ struct HTXSecondaryButton: View {
 struct HTXGhostButton: View {
     let title: String
     let action: () -> Void
-
     var body: some View {
         Button(action: action) {
             Text(title)
@@ -258,7 +180,6 @@ struct HTXGhostButton: View {
 struct HTXAlert: View {
     let message: String
     let isError: Bool
-
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: isError ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
@@ -271,32 +192,26 @@ struct HTXAlert: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background((isError ? HTXTheme.errorRed : HTXTheme.successGreen).opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke((isError ? HTXTheme.errorRed : HTXTheme.successGreen).opacity(0.35), lineWidth: 1)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(
+            (isError ? HTXTheme.errorRed : HTXTheme.successGreen).opacity(0.35), lineWidth: 1))
     }
 }
 
 // MARK: - Logout Button
 struct HTXLogoutButton: View {
     let action: () -> Void
-
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                Text("Logout")
-            }
-            .font(.subheadline)
-            .fontWeight(.bold)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(HTXTheme.destructiveRed.opacity(0.15))
-            .foregroundColor(HTXTheme.destructiveRed)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(HTXTheme.destructiveRed.opacity(0.4), lineWidth: 1))
+            Text("Logout")
+                .font(.subheadline)
+                .fontWeight(.bold)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(HTXTheme.destructiveRed.opacity(0.15))
+                .foregroundColor(HTXTheme.destructiveRed)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(HTXTheme.destructiveRed.opacity(0.4), lineWidth: 1))
         }
     }
 }
@@ -306,7 +221,6 @@ struct HTXLogoutButton: View {
 /// Falls back to an SF Symbol placeholder if the image is missing.
 struct HTXLogoView: View {
     var size: CGFloat = 120
-
     var body: some View {
         Group {
             if let _ = UIImage(named: "htx_logo") {
@@ -315,174 +229,22 @@ struct HTXLogoView: View {
                     .scaledToFit()
                     .frame(width: size, height: size)
             } else {
+                // Placeholder until the real asset is added
                 ZStack {
                     Circle()
-                        .fill(Color.white.opacity(0.12))
+                        .fill(Color.white.opacity(0.1))
                         .frame(width: size, height: size)
-                    Image(systemName: "sparkles")
+                    Image(systemName: "hexagon.fill")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: size * 0.55)
+                        .frame(width: size * 0.6)
                         .foregroundStyle(
-                            LinearGradient(
-                                colors: [HTXTheme.cyan, HTXTheme.accentBright],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+                            LinearGradient(colors: [Color(red: 0.39, green: 0.71, blue: 0.96), HTXTheme.accentBright],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
                         )
                 }
             }
         }
-        .shadow(color: HTXTheme.accentBright.opacity(0.45), radius: 20)
-    }
-}
-
-// MARK: - Small reusable UI bits
-struct HTXScreenHeader: View {
-    let title: String
-    let subtitle: String?
-    let trailing: AnyView?
-
-    init(title: String, subtitle: String? = nil, trailing: AnyView? = nil) {
-        self.title = title
-        self.subtitle = subtitle
-        self.trailing = trailing
-    }
-
-    var body: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 28, weight: .black, design: .default))
-                    .foregroundColor(.white)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundColor(HTXTheme.secondaryText)
-                }
-            }
-            Spacer()
-            if let trailing { trailing }
-        }
-    }
-}
-
-struct HTXStatusPill: View {
-    let text: String
-    let color: Color
-
-    var body: some View {
-        Text(text.uppercased())
-            .font(.caption2.bold())
-            .tracking(0.7)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(color.opacity(0.18))
-            .foregroundColor(color)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(color.opacity(0.28), lineWidth: 1))
-    }
-}
-
-struct HTXLoadingOverlay: View {
-    let message: String
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.45).ignoresSafeArea()
-            VStack(spacing: 14) {
-                ProgressView()
-                    .scaleEffect(1.25)
-                    .tint(.white)
-                Text(message)
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(26)
-            .background(Color.white.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Color.white.opacity(0.18), lineWidth: 1))
-            .shadow(radius: 18)
-            .padding(.horizontal, 36)
-        }
-    }
-}
-
-
-// MARK: - Form Styling Helpers
-struct HTXSectionTitle: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-    var body: some View {
-        Text(text.uppercased())
-            .font(.caption.bold())
-            .tracking(1.1)
-            .foregroundColor(HTXTheme.secondaryText)
-    }
-}
-
-struct HTXMiniButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: systemImage)
-                Text(title).fontWeight(.semibold)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.white.opacity(0.12))
-            .foregroundColor(.white)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.24), lineWidth: 1))
-        }
-    }
-}
-
-extension View {
-    func htxFormLook() -> some View {
-        self
-            .scrollContentBackground(.hidden)
-            .background(HTXBackground())
-            .tint(.white)
-            .environment(\.colorScheme, .dark)
-    }
-
-    func htxReportInputStyle() -> some View {
-        self
-            .padding(12)
-            .background(HTXTheme.deepPurple.opacity(0.58))
-            .foregroundColor(.white)
-            .tint(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.78), lineWidth: 1.2)
-            )
-    }
-
-    func htxReportRowBackground() -> some View {
-        self
-            .listRowBackground(Color.white.opacity(0.10))
-    }
-}
-
-struct HTXFormSectionHeader: View {
-    let title: String
-
-    init(_ title: String) {
-        self.title = title
-    }
-
-    var body: some View {
-        Text(title.uppercased())
-            .font(.caption.bold())
-            .tracking(1.1)
-            .foregroundColor(.white)
-            .shadow(color: .black.opacity(0.35), radius: 2, y: 1)
+        .shadow(color: HTXTheme.accentBright.opacity(0.4), radius: 20)
     }
 }

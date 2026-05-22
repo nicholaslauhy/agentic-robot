@@ -34,118 +34,183 @@ struct MemberManagementView: View {
     }
 
     var body: some View {
-        ZStack {
-            HTXBackground()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HTXScreenHeader(
-                        title: "Add Member",
-                        subtitle: "Admin account management",
-                        trailing: nil
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.top, 18)
+                // ── Add Member ──────────────────────────────────────────
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 14) {
 
-                    HTXCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Label("Create New Account", systemImage: "person.badge.plus.fill")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                        Text("Add New Member")
+                            .font(.headline)
 
-                            HTXTextField(
-                                label: "Email",
-                                placeholder: "member@email.com",
-                                text: $newEmail,
-                                keyboardType: .emailAddress
-                            )
+                        TextField("Email", text: $newEmail)
+                            .textFieldStyle(.roundedBorder)
+                            .autocapitalization(.none)
+                            .keyboardType(.emailAddress)
 
-                            HTXSecureField(
-                                label: "Temporary Password",
-                                placeholder: "Minimum 6 characters",
-                                text: $newPassword,
-                                isVisible: $isPasswordVisible
-                            )
-
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text("ROLE")
-                                    .font(.caption)
-                                    .fontWeight(.bold)
-                                    .tracking(1.2)
-                                    .foregroundColor(HTXTheme.accent)
-
-                                Picker("Role", selection: $selectedRole) {
-                                    Text("Member").tag("member")
-                                    Text("Admin").tag("admin")
+                        HStack {
+                            Group {
+                                if isPasswordVisible {
+                                    TextField("Temporary Password", text: $newPassword)
+                                        .textInputAutocapitalization(.never)
+                                        .autocorrectionDisabled()
+                                } else {
+                                    SecureField("Temporary Password", text: $newPassword)
                                 }
-                                .pickerStyle(.segmented)
-                                .tint(HTXTheme.accentBright)
                             }
-
-                            if let addError {
-                                HTXAlert(message: addError, isError: true)
+                            Button {
+                                isPasswordVisible.toggle()
+                            } label: {
+                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
+                                    .foregroundColor(.secondary)
                             }
-                            if let addSuccess {
-                                HTXAlert(message: addSuccess, isError: false)
-                            }
-
-                            HTXPrimaryButton("CREATE ACCOUNT", isLoading: isAdding) {
-                                addMemberViaREST()
-                            }
-                            .disabled(isAdding)
+                            .buttonStyle(.plain)
                         }
-                    }
-                    .padding(.horizontal, 20)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(.systemGray4), lineWidth: 1)
+                        )
 
-                    HTXCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Label("All Members", systemImage: "person.3.fill")
-                                    .font(.headline)
-                                    .foregroundColor(.white)
-                                Spacer()
-                                Button { fetchMembers() } label: {
-                                    Image(systemName: "arrow.clockwise")
-                                        .foregroundColor(.white)
-                                        .padding(9)
-                                        .background(Color.white.opacity(0.10))
-                                        .clipShape(Circle())
-                                }
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Role")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+
+                            Picker("Role", selection: $selectedRole) {
+                                Text("Member").tag("member")
+                                Text("Admin").tag("admin")
                             }
+                            .pickerStyle(.segmented)
+                        }
 
-                            if isLoadingMembers {
-                                HStack {
-                                    Spacer()
-                                    ProgressView()
-                                        .tint(.white)
-                                    Spacer()
-                                }
-                                .padding(.vertical, 18)
-                            } else if let listError {
-                                HTXAlert(message: listError, isError: true)
-                            } else if members.isEmpty {
-                                Text("No members yet.")
-                                    .font(.subheadline)
-                                    .foregroundColor(HTXTheme.secondaryText)
-                                    .frame(maxWidth: .infinity, alignment: .center)
-                                    .padding(.vertical, 18)
+                        if let addError {
+                            Text(addError).foregroundColor(.red).font(.footnote)
+                        }
+                        if let addSuccess {
+                            Text(addSuccess).foregroundColor(.green).font(.footnote)
+                        }
+
+                        Button {
+                            addMemberViaREST()
+                        } label: {
+                            if isAdding {
+                                ProgressView().frame(maxWidth: .infinity)
                             } else {
-                                VStack(spacing: 12) {
-                                    ForEach(members) { member in
-                                        memberRow(member)
+                                Text("Create Account").frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isAdding)
+                    }
+                }
+                .padding(.horizontal)
+
+                // ── Member List ─────────────────────────────────────────
+                GroupBox {
+                    VStack(alignment: .leading, spacing: 12) {
+
+                        HStack {
+                            Text("All Members")
+                                .font(.headline)
+                            Spacer()
+                            Button { fetchMembers() } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                        }
+
+                        if isLoadingMembers {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else if let listError {
+                            Text(listError).foregroundColor(.red).font(.footnote)
+                        } else if members.isEmpty {
+                            Text("No members yet.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(members) { member in
+                                VStack(spacing: 0) {
+                                    HStack(spacing: 12) {
+
+                                        // Email + role badge
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(member.email)
+                                                .font(.subheadline)
+                                                .foregroundColor(member.active ? .primary : .gray)
+                                            HStack(spacing: 6) {
+                                                Text(member.role.capitalized)
+                                                    .font(.caption)
+                                                    .foregroundColor(member.role == "admin" ? .blue : .secondary)
+
+                                                Text(member.active ? "ACTIVE" : "INACTIVE")
+                                                    .font(.caption2)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(member.active ? Color.green.opacity(0.2)
+                                                                              : Color.red.opacity(0.2))
+                                                    .cornerRadius(6)
+                                            }
+                                        }
+
+                                        Spacer()
+
+                                        // ── Action buttons (only for others, not yourself) ──
+                                        if member.id != auth.user?.uid {
+
+                                            // Promote / Demote button
+                                            Menu {
+                                                Button {
+                                                    updateRole(member, newRole: "member")
+                                                } label: {
+                                                    Label("Member", systemImage: member.role == "member" ? "checkmark" : "")
+                                                }
+
+                                                Button {
+                                                    updateRole(member, newRole: "admin")
+                                                } label: {
+                                                    Label("Admin", systemImage: member.role == "admin" ? "checkmark" : "")
+                                                }
+                                            } label: {
+                                                HStack(spacing: 4) {
+                                                    Text(member.role.capitalized)
+                                                        .font(.caption)
+                                                    Image(systemName: "chevron.down")
+                                                        .font(.caption2)
+                                                }
+                                                .padding(.horizontal, 10)
+                                                .padding(.vertical, 6)
+                                                .background(Color(.systemGray6))
+                                                .cornerRadius(8)
+                                            }
+
+                                            // Deactivate / Reactivate button
+                                            Button {
+                                                memberToDelete = member
+                                                showDeleteConfirm = true
+                                            } label: {
+                                                Image(systemName: member.active ? "person.fill.xmark" : "person.fill.checkmark")
+                                                    .foregroundColor(member.active ? .red : .green)
+                                                    .imageScale(.large)
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
                                     }
+                                    .padding(.vertical, 8)
+                                    Divider()
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 28)
                 }
+                .padding(.horizontal)
             }
+            .padding(.vertical)
         }
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .navigationTitle("Add Member")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fetchMembers() }
+        // Deactivation / Reactivation confirmation alert
         .alert(
             memberToDelete?.active == true
             ? "Deactivate \(memberToDelete?.email ?? "this user")?"
@@ -165,80 +230,6 @@ struct MemberManagementView: View {
                 : "This user will regain access to the application."
             )
         }
-    }
-
-    @ViewBuilder
-    private func memberRow(_ member: MemberEntry) -> some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(member.role == "admin" ? HTXTheme.accentBright.opacity(0.28) : HTXTheme.cyan.opacity(0.22))
-                .frame(width: 42, height: 42)
-                .overlay(
-                    Image(systemName: member.role == "admin" ? "shield.lefthalf.filled" : "person.fill")
-                        .foregroundColor(.white)
-                )
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(member.email)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(member.active ? .white : .white.opacity(0.45))
-                    .lineLimit(1)
-
-                HStack(spacing: 6) {
-                    HTXStatusPill(
-                        text: member.role.capitalized,
-                        color: member.role == "admin" ? HTXTheme.accentBright : HTXTheme.cyan
-                    )
-                    HTXStatusPill(
-                        text: member.active ? "Active" : "Inactive",
-                        color: member.active ? HTXTheme.successGreen : HTXTheme.errorRed
-                    )
-                }
-            }
-
-            Spacer()
-
-            if member.id != auth.user?.uid {
-                Menu {
-                    Button {
-                        updateRole(member, newRole: "member")
-                    } label: {
-                        Label("Member", systemImage: member.role == "member" ? "checkmark" : "person")
-                    }
-
-                    Button {
-                        updateRole(member, newRole: "admin")
-                    } label: {
-                        Label("Admin", systemImage: member.role == "admin" ? "checkmark" : "shield")
-                    }
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .foregroundColor(.white)
-                        .padding(9)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(Circle())
-                }
-
-                Button {
-                    memberToDelete = member
-                    showDeleteConfirm = true
-                } label: {
-                    Image(systemName: member.active ? "person.fill.xmark" : "person.fill.checkmark")
-                        .foregroundColor(member.active ? HTXTheme.errorRed : HTXTheme.successGreen)
-                        .padding(9)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(Circle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(14)
-        .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
     }
 
     // MARK: - Toggle active status

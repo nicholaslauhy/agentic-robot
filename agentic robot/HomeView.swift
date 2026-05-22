@@ -5,107 +5,122 @@ struct HomeView: View {
     @EnvironmentObject var auth: AuthViewModel
 
     @State private var displayedText = ""
+    @State private var showSubtitle = false
     @State private var showButtons = false
-    @State private var goToMembers = false
-    @State private var goToReportGeneration = false
+    @State private var typewriterTask: Task<Void, Never>? = nil
 
     private let fullText = "What do you want to do today?"
 
     var body: some View {
-        ZStack {
-            HTXBackground()
+        VStack(spacing: 24) {
 
-            VStack(spacing: 0) {
-                HTXScreenHeader(
-                    title: "Welcome",
-                    subtitle: auth.isAdmin ? "Administrator Console" : "Operations Member",
-                    trailing: AnyView(HTXLogoutButton { auth.logout() })
-                )
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 8)
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Welcome")
+                        .font(.largeTitle)
+                        .bold()
 
-                Spacer(minLength: 24)
-
-                VStack(spacing: 12) {
-                    HTXLogoView(size: 96)
-
-                    Text("HTX")
-                        .font(.system(size: 30, weight: .black, design: .default))
-                        .tracking(7)
-                        .foregroundColor(.white)
-                        .shadow(color: HTXTheme.accentBright.opacity(0.55), radius: 12)
+                    Text(auth.isAdmin ? "Administrator" : "Member")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
 
-                Spacer().frame(height: 34)
+                Spacer()
 
+                Button("Logout") {
+                    auth.logout()
+                }
+                .foregroundColor(.red)
+            }
+            .padding(.horizontal)
+            .padding(.top)
+
+            Spacer()
+
+            VStack(spacing: 10) {
                 Text(displayedText)
-                    .font(.system(size: 22, weight: .bold, design: .default))
-                    .foregroundColor(.white)
+                    .font(.title2.weight(.bold))
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                    .frame(minHeight: 32)
+                    .frame(minHeight: 34)
+                    .padding(.horizontal)
 
-                Spacer().frame(height: 34)
+                if showSubtitle {
+                    Text("Choose an action below to continue.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.horizontal)
 
-                if showButtons {
-                    VStack(spacing: 14) {
-                        if auth.isAdmin {
-                            Button {
-                                goToMembers = true
-                            } label: {
-                                HTXHomeCard(
-                                    icon: "person.badge.plus.fill",
-                                    title: "Add Member",
-                                    subtitle: "Create, activate, and manage accounts",
-                                    color: HTXTheme.accentBright
-                                )
-                            }
-                            .buttonStyle(.plain)
-                        }
-
-                        Button {
-                            goToReportGeneration = true
+            if showButtons {
+                VStack(spacing: 16) {
+                    if auth.isAdmin {
+                        NavigationLink {
+                            MemberManagementView()
                         } label: {
-                            HTXHomeCard(
-                                icon: "doc.text.viewfinder",
-                                title: "Report Generation",
-                                subtitle: "Scan licence plate and analyse damage",
-                                color: HTXTheme.cyan
+                            HomeActionRow(
+                                icon: "person.badge.plus.fill",
+                                title: "Add Member",
+                                subtitle: "Create and manage team accounts"
                             )
                         }
                         .buttonStyle(.plain)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
-                    .padding(.horizontal, 20)
+
+                    NavigationLink {
+                        LoggedInView()
+                    } label: {
+                        HomeActionRow(
+                            icon: "doc.text.magnifyingglass",
+                            title: "Report Generation",
+                            subtitle: "Scan licence plate and generate report"
+                        )
+                    }
+                    .buttonStyle(.plain)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-
-                Spacer(minLength: 24)
+                .padding(.horizontal)
             }
+
+            Spacer()
         }
-        .navigationBarHidden(true)
-        .navigationDestination(isPresented: $goToMembers) {
-            MemberManagementView()
-                .environmentObject(auth)
-        }
-        .navigationDestination(isPresented: $goToReportGeneration) {
-            LoggedInView()
-                .environmentObject(auth)
-        }
+        .background(Color(.systemBackground))
+        .navigationBarBackButtonHidden(true)
         .onAppear { startTypewriter() }
+        .onDisappear {
+            typewriterTask?.cancel()
+            typewriterTask = nil
+        }
     }
 
     private func startTypewriter() {
+        typewriterTask?.cancel()
         displayedText = ""
+        showSubtitle = false
         showButtons = false
 
-        Task {
+        typewriterTask = Task {
             for char in fullText {
-                try? await Task.sleep(for: .milliseconds(32))
-                await MainActor.run { displayedText.append(char) }
+                if Task.isCancelled { return }
+                try? await Task.sleep(for: .milliseconds(38))
+                if Task.isCancelled { return }
+
+                await MainActor.run {
+                    displayedText.append(char)
+                }
             }
+
+            if Task.isCancelled { return }
+            try? await Task.sleep(for: .milliseconds(180))
+
             await MainActor.run {
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    showSubtitle = true
+                }
+
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.12)) {
                     showButtons = true
                 }
             }
@@ -113,69 +128,38 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Home Action Card
-struct HTXHomeCard: View {
+private struct HomeActionRow: View {
     let icon: String
     let title: String
     let subtitle: String
-    let color: Color
-
-    @State private var isPressed = false
 
     var body: some View {
         HStack(spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [color.opacity(0.38), color.opacity(0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(color.opacity(0.55), lineWidth: 1)
-                    )
-
-                Image(systemName: icon)
-                    .font(.system(size: 23, weight: .semibold))
-                    .foregroundColor(.white)
-            }
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(.blue)
+                .frame(width: 44, height: 44)
+                .background(Color.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 17, weight: .bold, design: .default))
-                    .foregroundColor(.white)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+
                 Text(subtitle)
                     .font(.subheadline)
-                    .foregroundColor(HTXTheme.secondaryText)
-                    .lineLimit(2)
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white.opacity(0.72))
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
         }
-        .padding(18)
-        .background(Color.white.opacity(isPressed ? 0.17 : 0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [Color.white.opacity(0.28), color.opacity(0.44)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.2
-                )
-        )
-        .shadow(color: color.opacity(0.16), radius: 15, y: 8)
-        .scaleEffect(isPressed ? 0.98 : 1)
-        .animation(.spring(response: 0.24), value: isPressed)
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }

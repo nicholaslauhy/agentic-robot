@@ -7,141 +7,6 @@ extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 
-
-// MARK: - Damage Analysis HTX Styling
-private enum DamageHTX {
-    static let cyan = Color(red: 0.00, green: 0.78, blue: 1.00)
-    static let violet = Color(red: 0.88, green: 0.25, blue: 0.98)
-    static let panel = Color(red: 0.16, green: 0.02, blue: 0.30).opacity(0.86)
-    static let panelSoft = Color.white.opacity(0.12)
-    static let panelStrong = Color(red: 0.10, green: 0.00, blue: 0.22).opacity(0.92)
-    static let border = Color.white.opacity(0.24)
-    static let titleText = Color.white
-    static let bodyText = Color.white.opacity(0.92)
-    static let mutedText = Color.white.opacity(0.76)
-}
-
-private struct DamageHTXMiniButton: View {
-    let title: String
-    let systemImage: String
-    let tint: Color
-    let action: () -> Void
-
-    init(title: String, systemImage: String, tint: Color = DamageHTX.cyan, action: @escaping () -> Void) {
-        self.title = title
-        self.systemImage = systemImage
-        self.tint = tint
-        self.action = action
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                Text(title)
-            }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .foregroundColor(tint)
-            .background(tint.opacity(0.14))
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(tint.opacity(0.35), lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-
-private struct DamageReportSectionHeader: View {
-    let title: String
-    var subtitle: String? = nil
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption.weight(.heavy))
-                .tracking(1.1)
-                .foregroundColor(DamageHTX.cyan)
-            if let subtitle {
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundColor(DamageHTX.mutedText)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-private struct DamageReportPrimaryButton: View {
-    let title: String
-    let systemImage: String
-    var isLoading: Bool = false
-    var isDisabled: Bool = false
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                if isLoading {
-                    ProgressView().tint(.white)
-                } else {
-                    Image(systemName: systemImage)
-                }
-                Text(title)
-                    .font(.headline.weight(.semibold))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
-            .foregroundColor(.white)
-            .background(
-                LinearGradient(
-                    colors: isDisabled
-                        ? [Color.gray.opacity(0.65), Color.gray.opacity(0.45)]
-                        : [DamageHTX.cyan, DamageHTX.violet],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.35), lineWidth: 1))
-            .shadow(color: DamageHTX.violet.opacity(isDisabled ? 0 : 0.25), radius: 14, y: 6)
-        }
-        .buttonStyle(.plain)
-        .disabled(isDisabled)
-    }
-}
-
-private extension View {
-    func damageReportFormStyle() -> some View {
-        self
-            .scrollContentBackground(.hidden)
-            .background(HTXBackground())
-            .tint(DamageHTX.cyan)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbarBackground(DamageHTX.panelStrong, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-    }
-
-    func damageReportRowStyle() -> some View {
-        self
-            .listRowBackground(DamageHTX.panel)
-            .listRowSeparatorTint(Color.white.opacity(0.12))
-    }
-
-    func damageReportInputStyle() -> some View {
-        self
-            .padding(12)
-            .foregroundColor(.black)
-            .background(Color.white.opacity(0.96))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.88), lineWidth: 1.2)
-            )
-    }
-}
-
 // MARK: - Mutable Detection Model
 
 class MutableDamageDetection: ObservableObject, Identifiable {
@@ -261,145 +126,133 @@ struct DamageAnalysisResultView: View {
     }
 
     var body: some View {
-        ZStack {
-            HTXBackground()
+        ScrollView {
+            VStack(spacing: 18) {
 
-            ScrollView {
-                VStack(spacing: 20) {
-                    // ── Header ────────────────────────────────────────────────────
-                    HStack(alignment: .center) {
-                        DamageHTXMiniButton(title: "Back", systemImage: "chevron.left") {
-                            onBackToScratchScan()
-                        }
-
-                        Spacer()
-
-                        VStack(spacing: 4) {
-                            Text("Damage Analysis")
-                                .font(.system(size: 24, weight: .semibold, design: .default))
-                                .foregroundColor(DamageHTX.titleText)
-
-                            Text("\(carType.rawValue) · \(plate)")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(DamageHTX.mutedText)
-                        }
-
-                        Spacer()
-
-                        VStack(alignment: .trailing, spacing: 8) {
-                            DamageHTXMiniButton(title: "Add", systemImage: "plus.circle.fill") {
-                                showAddCase = true
-                            }
-
-                            Button("Logout") { onLogout() }
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(DamageHTX.titleText)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(Color.red.opacity(0.18))
-                                .clipShape(Capsule())
-                                .overlay(Capsule().stroke(Color.red.opacity(0.38), lineWidth: 1))
-                        }
-                        .frame(width: 92, alignment: .trailing)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 18)
-
-                    if mutableDetections.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.system(size: 48))
-                                .foregroundColor(Color(red: 0.41, green: 0.94, blue: 0.68))
-
-                            Text("No damage cases")
-                                .font(.title3.weight(.semibold))
-                                .foregroundColor(DamageHTX.titleText)
-
-                            Text("All cases have been removed, or none were detected.")
-                                .font(.subheadline)
-                                .foregroundColor(DamageHTX.mutedText)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(24)
-                        .background(DamageHTX.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).stroke(DamageHTX.border, lineWidth: 1))
-                        .padding(.horizontal, 20)
-                        .padding(.top, 30)
-                    } else {
-                        Text("Found \(mutableDetections.count) possible damage area\(mutableDetections.count == 1 ? "" : "s"). Tap a card for detail, edit, or delete.")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundColor(DamageHTX.bodyText)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 28)
-
-                        LazyVStack(spacing: 18) {
-                            ForEach(mutableDetections) { detection in
-                                DamageDetectionCard(
-                                    detection: detection,
-                                    accentColor: DamageHTX.cyan,
-                                    onEdit: { detectionToEdit = detection },
-                                    onDelete: { remove(detection) }
-                                )
-                                .onTapGesture { selectedDetection = detection }
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-
-                    // ── Next: collect police-report details ─────────────────────────
+                // ── Header ────────────────────────────────────────────────────
+                HStack(alignment: .top) {
                     Button {
-                        showIncidentStageOne = true
+                        onBackToScratchScan()
                     } label: {
-                        HStack {
-                            Image(systemName: "arrow.right.circle.fill")
-                            Text("Continue to Report Details")
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left").fontWeight(.semibold)
+                            Text("Back")
                         }
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            LinearGradient(
-                                colors: [DamageHTX.cyan, DamageHTX.violet],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .foregroundColor(.white)
-                        .clipShape(Capsule())
-                        .shadow(color: DamageHTX.violet.opacity(0.32), radius: 14, y: 6)
-                        .padding(.horizontal, 20)
+                        .foregroundColor(carType.accentColor)
                     }
-                    .padding(.top, 10)
-                    .padding(.bottom, 30)
+
+                    Spacer()
+
+                    VStack(alignment: .center, spacing: 4) {
+                        Text("Damage Analysis")
+                            .font(.title2).bold()
+                        Text("\(carType.rawValue) · \(plate)")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 12) {
+                        // Add Case button
+                        Button {
+                            showAddCase = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "plus.circle.fill")
+                                Text("Add")
+                            }
+                            .font(.subheadline.bold())
+                            .foregroundColor(carType.accentColor)
+                        }
+
+                        Button("Logout") { onLogout() }
+                            .foregroundColor(.red)
+                    }
+                    .frame(width: 130, alignment: .trailing)
                 }
+                .padding(.horizontal)
+                .padding(.top)
+
+                // ── Content ───────────────────────────────────────────────────
+                if mutableDetections.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.seal.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(.green)
+                        Text("No damage cases")
+                            .font(.title3.bold())
+                        Text("All cases have been removed, or none were detected.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 60)
+
+                } else {
+                    Text("Found \(mutableDetections.count) possible damage area\(mutableDetections.count == 1 ? "" : "s"). Tap a card for detail or swipe left to delete.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+
+                    LazyVStack(spacing: 20) {
+                        ForEach(mutableDetections) { detection in
+                            DamageDetectionCard(
+                                detection: detection,
+                                accentColor: carType.accentColor,
+                                onEdit: { detectionToEdit = detection },
+                                onDelete: { remove(detection) }
+                            )
+                            .onTapGesture { selectedDetection = detection }
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+
+                // ── Next: collect police-report details ─────────────────────────
+                Button {
+                    showIncidentStageOne = true
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.right.circle.fill")
+                        Text("Next")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(carType.accentColor)
+                    .foregroundColor(.white)
+                    .cornerRadius(14)
+                    .padding(.horizontal)
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 30)
             }
         }
         .overlay {
             if isGeneratingReport {
                 ZStack {
-                    Color.black.opacity(0.45).ignoresSafeArea()
-
-                    VStack(spacing: 14) {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    VStack(spacing: 20) {
                         ProgressView()
-                            .scaleEffect(1.3)
+                            .scaleEffect(1.4)
                             .tint(.white)
-
                         Text("Generating your report…")
                             .font(.headline)
-                            .foregroundColor(DamageHTX.titleText)
-
+                            .foregroundColor(.white)
                         Text("This may take a few seconds.")
                             .font(.subheadline)
-                            .foregroundColor(DamageHTX.mutedText)
+                            .foregroundColor(.white.opacity(0.75))
                     }
-                    .padding(28)
-                    .background(DamageHTX.panelStrong)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DamageHTX.border, lineWidth: 1))
-                    .shadow(radius: 18)
+                    .padding(32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color(.systemGray2).opacity(0.95))
+                    )
+                    .shadow(radius: 16)
                     .padding(.horizontal, 40)
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -466,7 +319,7 @@ struct DamageDetectionCard: View {
     var onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             Group {
                 if let cropImage = detection.cropImage {
                     Image(uiImage: cropImage)
@@ -475,90 +328,63 @@ struct DamageDetectionCard: View {
                         .frame(maxWidth: .infinity)
                 } else {
                     ZStack {
-                        DamageHTX.panelStrong
+                        Color(.systemGray5)
                         VStack(spacing: 8) {
-                            Image(systemName: "photo")
-                                .font(.title)
-                                .foregroundColor(DamageHTX.mutedText)
-                            Text("Could not load image")
-                                .font(.footnote)
-                                .foregroundColor(DamageHTX.mutedText)
+                            Image(systemName: "photo").font(.title).foregroundColor(.secondary)
+                            Text("Could not load image").font(.footnote).foregroundColor(.secondary)
                         }
                     }
                     .frame(height: 200)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(accentColor.opacity(0.38), lineWidth: 1)
-            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(accentColor.opacity(0.35), lineWidth: 1))
 
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(detection.damageType.capitalized)
-                        .font(.headline.weight(.semibold))
-                        .foregroundColor(DamageHTX.cyan)
-
-                    Text(detection.angleName)
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(DamageHTX.bodyText)
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(detection.damageType.capitalized).font(.headline)
+                    Text(detection.angleName).font(.subheadline).foregroundColor(.secondary)
                 }
-
                 Spacer()
-
                 HStack(spacing: 8) {
                     Text("\(Int(detection.confidence * 100))%")
                         .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(DamageHTX.violet.opacity(0.18))
-                        .foregroundColor(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(accentColor.opacity(0.12))
+                        .foregroundColor(accentColor)
                         .clipShape(Capsule())
-                        .overlay(Capsule().stroke(DamageHTX.violet.opacity(0.35), lineWidth: 1))
 
+                    // Edit bbox button
                     Button {
                         onEdit()
                     } label: {
                         Image(systemName: "pencil.and.outline")
                             .font(.subheadline)
-                            .foregroundColor(DamageHTX.cyan)
+                            .foregroundColor(accentColor)
                             .padding(8)
-                            .background(DamageHTX.cyan.opacity(0.14))
+                            .background(accentColor.opacity(0.1))
                             .clipShape(Circle())
                     }
-                    .buttonStyle(.plain)
 
+                    // Delete button
                     Button {
                         onDelete()
                     } label: {
                         Image(systemName: "trash")
                             .font(.subheadline)
-                            .foregroundColor(Color(red: 1, green: 0.48, blue: 0.48))
+                            .foregroundColor(.red)
                             .padding(8)
-                            .background(Color.red.opacity(0.15))
+                            .background(Color.red.opacity(0.1))
                             .clipShape(Circle())
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            .padding(.top, 10)
         }
-        .padding(14)
-        .background(DamageHTX.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [DamageHTX.cyan.opacity(0.38), DamageHTX.violet.opacity(0.28)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1
-                )
-        )
-        .shadow(color: .black.opacity(0.20), radius: 14, y: 8)
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
     }
 }
 
@@ -571,96 +397,104 @@ struct DamageDetailSheet: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                HTXBackground()
+            ScrollView {
+                VStack(spacing: 20) {
 
-                ScrollView {
-                    VStack(spacing: 18) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Location on car", systemImage: "viewfinder")
-                                .font(.headline)
-                                .foregroundColor(DamageHTX.cyan)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Location on car", systemImage: "viewfinder")
+                            .font(.headline).padding(.horizontal)
 
-                            if let ctxImage = detection.normalizedBBox == nil
-                                ? detection.contextImage
-                                : (detection.cleanContextImage ?? detection.contextImage) {
-                                BoundingBoxOverlayView(
-                                    image: ctxImage,
-                                    normalizedBBox: .constant(detection.normalizedBBox),
-                                    accentColor: accentColor,
-                                    isInteractive: false
-                                )
-                                .frame(maxWidth: .infinity)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            } else {
-                                Text("Context image not available")
-                                    .font(.footnote)
-                                    .foregroundColor(DamageHTX.mutedText)
-                            }
-                        }
-                        .padding()
-                        .background(DamageHTX.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DamageHTX.border, lineWidth: 1))
-                        .padding(.horizontal, 20)
-
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label("Damage close-up", systemImage: "magnifyingglass")
-                                .font(.headline)
-                                .foregroundColor(DamageHTX.cyan)
-
-                            if let cropImage = detection.cropImage {
-                                Image(uiImage: cropImage)
-                                    .resizable()
-                                    .scaledToFit()
-                                    .frame(maxWidth: .infinity)
-                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(accentColor.opacity(0.42), lineWidth: 1))
-                            }
-                        }
-                        .padding()
-                        .background(DamageHTX.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(DamageHTX.border, lineWidth: 1))
-                        .padding(.horizontal, 20)
-
-                        VStack(spacing: 0) {
-                            metaRow(label: "Type",       value: detection.damageType.capitalized)
-                            Divider().overlay(DamageHTX.border)
-                            metaRow(label: "Angle",      value: detection.angleName)
-                            Divider().overlay(DamageHTX.border)
-                            metaRow(label: "Confidence", value: "\(Int(detection.confidence * 100))%")
-                            if !detection.severity.isEmpty {
-                                Divider().overlay(DamageHTX.border)
-                                metaRow(label: "Severity", value: detection.severity.capitalized)
-                            }
-                            if !detection.repairComplexity.isEmpty {
-                                Divider().overlay(DamageHTX.border)
-                                metaRow(label: "Repair Complexity", value: detection.repairComplexity.capitalized)
-                            }
-                        }
-                        .background(DamageHTX.panel)
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DamageHTX.border, lineWidth: 1))
-                        .padding(.horizontal, 20)
-
-                        if !detection.repairRecommendation.isEmpty {
-                            infoBlock(title: "Repair Recommendation", systemImage: "wrench.and.screwdriver", text: detection.repairRecommendation)
-                        }
-
-                        if !detection.explanation.isEmpty {
-                            infoBlock(title: "AI Analysis", systemImage: "sparkles", text: detection.explanation)
+                        // For manual cases, use the clean full-car image + the saved bbox so the
+                        // orange box is positioned from the same coordinates used for the crop.
+                        // For backend cases without a saved bbox, fall back to the annotated context image.
+                        if let ctxImage = detection.normalizedBBox == nil
+                            ? detection.contextImage
+                            : (detection.cleanContextImage ?? detection.contextImage) {
+                            BoundingBoxOverlayView(
+                                image: ctxImage,
+                                normalizedBBox: .constant(detection.normalizedBBox),
+                                accentColor: accentColor,
+                                isInteractive: false
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal)
+                        } else {
+                            Text("Context image not available")
+                                .font(.footnote).foregroundColor(.secondary).padding(.horizontal)
                         }
                     }
-                    .padding(.vertical, 20)
+
+                    Divider().padding(.horizontal)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Damage close-up", systemImage: "magnifyingglass")
+                            .font(.headline).padding(.horizontal)
+
+                        if let cropImage = detection.cropImage {
+                            Image(uiImage: cropImage)
+                                .resizable().scaledToFit().frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(accentColor.opacity(0.4), lineWidth: 1))
+                                .padding(.horizontal)
+                        }
+                    }
+
+                    VStack(spacing: 0) {
+                        metaRow(label: "Type",       value: detection.damageType.capitalized)
+                        Divider()
+                        metaRow(label: "Angle",      value: detection.angleName)
+                        Divider()
+                        metaRow(label: "Confidence", value: "\(Int(detection.confidence * 100))%")
+                        if !detection.severity.isEmpty {
+                            Divider()
+                            metaRow(label: "Severity", value: detection.severity.capitalized)
+                        }
+                        if !detection.repairComplexity.isEmpty {
+                            Divider()
+                            metaRow(label: "Repair Complexity", value: detection.repairComplexity.capitalized)
+                        }
+                    }
+                    .background(Color(.secondarySystemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal)
+
+                    if !detection.repairRecommendation.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Repair Recommendation", systemImage: "wrench.and.screwdriver")
+                                .font(.headline)
+                            Text(detection.repairRecommendation)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal)
+                    }
+
+                    if !detection.explanation.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("AI Analysis", systemImage: "sparkles")
+                                .font(.headline)
+                            Text(detection.explanation)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .padding(.horizontal)
+                    }
                 }
+                .padding(.bottom, 30)
             }
             .navigationTitle("Damage Detail")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundColor(DamageHTX.cyan)
                 }
             }
         }
@@ -668,34 +502,11 @@ struct DamageDetailSheet: View {
 
     private func metaRow(label: String, value: String) -> some View {
         HStack {
-            Text(label)
-                .font(.subheadline.weight(.semibold))
-                .foregroundColor(DamageHTX.cyan)
+            Text(label).foregroundColor(.secondary)
             Spacer()
-            Text(value)
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(DamageHTX.titleText)
-                .multilineTextAlignment(.trailing)
+            Text(value).fontWeight(.medium)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-    }
-
-    private func infoBlock(title: String, systemImage: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-                .foregroundColor(DamageHTX.cyan)
-            Text(text)
-                .font(.subheadline)
-                .foregroundColor(DamageHTX.bodyText)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(DamageHTX.panel)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(DamageHTX.border, lineWidth: 1))
-        .padding(.horizontal, 20)
+        .padding(.horizontal).padding(.vertical, 12)
     }
 }
 
@@ -866,8 +677,8 @@ struct BoundingBoxEditorSheet: View {
                                     .font(.subheadline)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
-                                    .background(pendingDamageType == type ? DamageHTX.violet : DamageHTX.panel)
-                                    .foregroundColor(pendingDamageType == type ? .white : DamageHTX.titleText)
+                                    .background(pendingDamageType == type ? accentColor : Color(.secondarySystemBackground))
+                                    .foregroundColor(pendingDamageType == type ? .white : .primary)
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
                                     .onTapGesture { pendingDamageType = type }
                             }
@@ -885,7 +696,7 @@ struct BoundingBoxEditorSheet: View {
 
                         Text("Drag on the image to draw the boundary around the damage area.")
                             .font(.caption)
-                            .foregroundColor(DamageHTX.mutedText)
+                            .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
 
@@ -914,7 +725,7 @@ struct BoundingBoxEditorSheet: View {
 
                                 Text("Boundary drawn. Draw again to replace it.")
                                     .font(.caption)
-                                    .foregroundColor(DamageHTX.mutedText)
+                                    .foregroundColor(.secondary)
                                     .padding(.horizontal)
                             } else {
                                 Text("No boundary drawn yet.")
@@ -924,7 +735,7 @@ struct BoundingBoxEditorSheet: View {
                             }
                         } else {
                             Text("No image available for this detection.")
-                                .foregroundColor(DamageHTX.mutedText)
+                                .foregroundColor(.secondary)
                                 .padding()
                         }
                     }
@@ -1071,7 +882,7 @@ struct AddCaseSheet: View {
                                                 .frame(width: 110, height: 80)
                                             Text("No Image")
                                                 .font(.caption2)
-                                                .foregroundColor(DamageHTX.mutedText)
+                                                .foregroundColor(.secondary)
                                         }
                                     }
                                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -1112,8 +923,8 @@ struct AddCaseSheet: View {
                                 .font(.subheadline)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
-                                .background(selectedDamageType == type ? DamageHTX.violet : DamageHTX.panel)
-                                .foregroundColor(selectedDamageType == type ? .white : DamageHTX.titleText)
+                                .background(selectedDamageType == type ? accentColor : Color(.secondarySystemBackground))
+                                .foregroundColor(selectedDamageType == type ? .white : .primary)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                                 .onTapGesture { selectedDamageType = type }
                         }
@@ -1146,7 +957,7 @@ struct AddCaseSheet: View {
         VStack(spacing: 12) {
             Text("Drag on the image to draw the orange boundary around the damage.")
                 .font(.subheadline)
-                .foregroundColor(DamageHTX.mutedText)
+                .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
@@ -1175,11 +986,11 @@ struct AddCaseSheet: View {
 
                     Text("Boundary set. Drag again to adjust.")
                         .font(.caption)
-                        .foregroundColor(DamageHTX.mutedText)
+                        .foregroundColor(.secondary)
                 } else {
                     Text("No boundary drawn yet — you can still add the case without one.")
                         .font(.caption)
-                        .foregroundColor(DamageHTX.mutedText)
+                        .foregroundColor(.secondary)
                         .padding(.horizontal)
                 }
             }
@@ -1360,26 +1171,20 @@ struct ReportWelcomeView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                HTXBackground()
+            VStack(spacing: 0) {
 
-                VStack(spacing: 0) {
-
-                    // ── Tab picker ───────────────────────────────────────────────
-                    Picker("View", selection: $showingPreview) {
+                // ── Tab picker ───────────────────────────────────────────────
+                Picker("View", selection: $showingPreview) {
                     Text("Summary").tag(false)
                     Text("Preview PDF").tag(true)
                 }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    .padding(.vertical, 10)
-                    .tint(DamageHTX.cyan)
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 10)
 
-                    Rectangle()
-                        .fill(Color.white.opacity(0.16))
-                        .frame(height: 1)
+                Divider()
 
-                    if showingPreview {
+                if showingPreview {
                     // ── PDF preview ──────────────────────────────────────────
                     PDFKitView(url: pdfURL)
                         .ignoresSafeArea(edges: .bottom)
@@ -1391,39 +1196,38 @@ struct ReportWelcomeView: View {
 
                             Image(systemName: "doc.richtext.fill")
                                 .font(.system(size: 64))
-                                .foregroundColor(DamageHTX.cyan)
+                                .foregroundColor(carType.accentColor)
 
                             VStack(spacing: 8) {
                                 Text("Damage Report")
-                                    .font(.largeTitle.weight(.semibold))
-                                    .foregroundColor(.white)
+                                    .font(.largeTitle).bold()
 
                                 Text("Vehicle: \(carType.rawValue)")
                                     .font(.headline)
-                                    .foregroundColor(DamageHTX.bodyText)
+                                    .foregroundColor(.secondary)
 
                                 Text("Plate: \(plate)")
                                     .font(.subheadline)
-                                    .foregroundColor(DamageHTX.mutedText)
+                                    .foregroundColor(.secondary)
                             }
 
                             VStack(spacing: 4) {
                                 Text("\(detectionCount)")
                                     .font(.system(size: 56, weight: .black))
-                                    .foregroundColor(DamageHTX.cyan)
+                                    .foregroundColor(carType.accentColor)
                                 Text(detectionCount == 1 ? "damage case recorded" : "damage cases recorded")
                                     .font(.subheadline)
-                                    .foregroundColor(DamageHTX.mutedText)
+                                    .foregroundColor(.secondary)
                             }
                             .padding(.vertical, 20)
                             .frame(maxWidth: .infinity)
-                            .background(DamageHTX.panel)
+                            .background(carType.accentColor.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 18))
                             .padding(.horizontal, 40)
 
                             Text("Report successfully generated. Tap \"Preview PDF\" to review the full report before sharing.")
                                 .font(.subheadline)
-                                .foregroundColor(DamageHTX.mutedText)
+                                .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 40)
 
@@ -1442,8 +1246,8 @@ struct ReportWelcomeView: View {
                                     .font(.headline)
                                     .frame(maxWidth: .infinity)
                                     .padding()
-                                    .background(DamageHTX.cyan.opacity(0.16))
-                                    .foregroundColor(DamageHTX.cyan)
+                                    .background(carType.accentColor.opacity(0.12))
+                                    .foregroundColor(carType.accentColor)
                                     .cornerRadius(14)
                                 }
 
@@ -1458,7 +1262,7 @@ struct ReportWelcomeView: View {
                                     .font(.headline)
                                     .frame(maxWidth: .infinity)
                                     .padding()
-                                    .background(LinearGradient(colors: [DamageHTX.cyan, DamageHTX.violet], startPoint: .leading, endPoint: .trailing))
+                                    .background(carType.accentColor)
                                     .foregroundColor(.white)
                                     .cornerRadius(14)
                                 }
@@ -1481,7 +1285,6 @@ struct ReportWelcomeView: View {
                             .frame(maxWidth: .infinity)
                         }
                     }
-                }
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -1657,11 +1460,9 @@ struct PoliceReportStageZeroView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    DamageReportSectionHeader(title: "Police Station of Origin", subtitle: "Choose the NPC/station that will appear in the report")
+                Section("Police Station of Origin") {
                     ForEach(PoliceStationDetails.groupedByDivision, id: \.0) { division, stations in
-                        DisclosureGroup {
-
+                        DisclosureGroup(division) {
                             ForEach(stations) { station in
                                 Button {
                                     selectedStation = station
@@ -1669,34 +1470,27 @@ struct PoliceReportStageZeroView: View {
                                 } label: {
                                     HStack(alignment: .top, spacing: 10) {
                                         Image(systemName: selectedStation == station ? "checkmark.circle.fill" : "circle")
-                                            .foregroundColor(selectedStation == station ? DamageHTX.cyan : Color.white.opacity(0.65))
+                                            .foregroundColor(selectedStation == station ? carType.accentColor : .secondary)
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(station.displayName).font(.subheadline.bold()).foregroundColor(.white)
+                                            Text(station.displayName).font(.subheadline.bold())
                                             Text("\(station.address), Singapore \(station.postalCode)")
                                                 .font(.caption)
-                                                .foregroundColor(DamageHTX.mutedText)
+                                                .foregroundColor(.secondary)
                                             Text("Tel: \(station.telephone)")
                                                 .font(.caption)
-                                                .foregroundColor(DamageHTX.mutedText)
+                                                .foregroundColor(.secondary)
                                         }
                                     }
                                 }
                                 .buttonStyle(.plain)
                                 .padding(.vertical, 4)
                             }
-                        } label: {
-                            Text(division)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.white)
                         }
                     }
                 }
-                .damageReportRowStyle()
 
-                Section {
-                    DamageReportSectionHeader(title: "Other Station", subtitle: "Use this only if the station is not listed above")
+                Section("Other Station") {
                     Toggle("Use other / manual NPC", isOn: $useOtherStation)
-                        .foregroundColor(.white)
                     if useOtherStation {
                         reportTextField("Division", text: $customDivision, placeholder: "Enter division")
                         reportTextField("Location", text: $customAddress, placeholder: "Enter station location", axis: .vertical)
@@ -1706,36 +1500,31 @@ struct PoliceReportStageZeroView: View {
                             .keyboardType(.phonePad)
                     }
                 }
-                .damageReportRowStyle()
 
-                Section {
-                    DamageReportSectionHeader(title: "Selected Station")
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(stationForReport.displayName)
-                            .font(.headline.weight(.semibold))
-                            .foregroundColor(.white)
-                        Text(stationForReport.division)
-                            .font(.subheadline)
-                            .foregroundColor(DamageHTX.bodyText)
-                        Text(stationForReport.address)
-                            .foregroundColor(DamageHTX.bodyText)
-                        Text("Singapore \(stationForReport.postalCode)")
-                            .foregroundColor(DamageHTX.bodyText)
-                        Text(stationForReport.telephone.isEmpty ? "Tel:" : "Tel: \(stationForReport.telephone)")
-                            .foregroundColor(DamageHTX.bodyText)
+                Section("Selected Station") {
+                    let station = stationForReport
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(station.displayName).font(.headline)
+                        Text(station.division).font(.subheadline).foregroundColor(.secondary)
+                        Text(station.address)
+                        Text("Singapore \(station.postalCode)")
+                        Text(station.telephone.isEmpty ? "Tel:" : "Tel: \(station.telephone)")
                     }
                 }
-                .damageReportRowStyle()
 
                 Section {
-                    DamageReportPrimaryButton(title: "Proceed to Stage 1", systemImage: "arrow.right.circle.fill") {
+                    Button {
                         showStageOne = true
+                    } label: {
+                        Text("Proceed to Stage 1")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
                     }
-                    .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                    .buttonStyle(.borderedProminent)
+                    .tint(carType.accentColor)
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 }
-                .damageReportRowStyle()
             }
-            .damageReportFormStyle()
             .navigationTitle("Report Stage 0")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1767,10 +1556,9 @@ struct PoliceReportStageZeroView: View {
         axis: Axis = .horizontal
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
-                .damageReportInputStyle()
         }
     }
 }
@@ -1856,8 +1644,7 @@ struct PoliceReportStageOneView: View {
 
     var body: some View {
         Form {
-            Section {
-                DamageReportSectionHeader(title: "Incident Details", subtitle: "Fill in the informant and incident information")
+            Section("Incident Details") {
                     reportTextField(
                         "Station Diary No.",
                         text: $details.stationDiaryNo,
@@ -1870,7 +1657,7 @@ struct PoliceReportStageOneView: View {
                     reportTextField("FIN NO /", text: $details.finNo, placeholder: "Enter FIN, if any")
 
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Contact No.").font(.caption.weight(.bold)).foregroundColor(.white)
+                        Text("Contact No.").font(.caption).foregroundColor(.secondary)
                         Picker("Contact Type", selection: $details.contactType) {
                             ForEach(contactOptions, id: \.self) { option in
                                 Text(option).tag(option)
@@ -1879,7 +1666,6 @@ struct PoliceReportStageOneView: View {
                         .pickerStyle(.segmented)
                         TextField("Enter \(details.contactType.lowercased()) number", text: $details.contactNumber)
                             .keyboardType(.phonePad)
-                            .damageReportInputStyle()
                     }
 
                     reportTextField("Email Address", text: $details.emailAddress, placeholder: "name@example.com")
@@ -1912,7 +1698,6 @@ struct PoliceReportStageOneView: View {
                     )
                     reportTextField("Location of Incident", text: $details.locationOfIncident, placeholder: "Enter location", axis: .vertical)
                 }
-                .damageReportRowStyle()
 
                 Section {
                     Button {
@@ -1923,30 +1708,16 @@ struct PoliceReportStageOneView: View {
                         details.dateTimeOfIncident = PoliceReportFormFormatter.reportDateTimeDisplay(from: incidentDateTimeValue)
                         showStageTwo = true
                     } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "arrow.right.circle.fill")
-                            Text("Proceed to Stage 2")
-                                .font(.headline.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .foregroundColor(.white)
-                        .background(
-                            LinearGradient(
-                                colors: canProceed ? [DamageHTX.cyan, DamageHTX.violet] : [Color.gray.opacity(0.65), Color.gray.opacity(0.45)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .clipShape(Capsule())
+                        Text("Proceed to Stage 2")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderedProminent)
+                    .tint(canProceed ? carType.accentColor : .gray)
                     .disabled(!canProceed)
-                    .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 }
-                .damageReportRowStyle()
             }
-            .damageReportFormStyle()
             .navigationTitle("Report Stage 1")
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(isPresented: $showStageTwo) {
@@ -1978,10 +1749,9 @@ struct PoliceReportStageOneView: View {
         axis: Axis = .horizontal
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
-                .damageReportInputStyle()
         }
     }
 
@@ -1993,14 +1763,13 @@ struct PoliceReportStageOneView: View {
         emptyTitle: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             Picker(emptyTitle, selection: selection) {
                 ForEach(options, id: \.self) { option in
                     Text(option.isEmpty ? emptyTitle : option).tag(option)
                 }
             }
             .pickerStyle(.menu)
-            .damageReportInputStyle()
         }
     }
 
@@ -2011,18 +1780,17 @@ struct PoliceReportStageOneView: View {
         output: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             DatePicker("", selection: date, displayedComponents: .date)
                 .datePickerStyle(.wheel)
                 .labelsHidden()
-                .damageReportInputStyle()
                 .onAppear { output.wrappedValue = PoliceReportFormFormatter.dobDisplay(from: date.wrappedValue) }
                 .onChange(of: date.wrappedValue) { _, newDate in
                     output.wrappedValue = PoliceReportFormFormatter.dobDisplay(from: newDate)
                 }
             Text(output.wrappedValue.isEmpty ? "DD/MM/YYYY" : output.wrappedValue)
                 .font(.caption.monospacedDigit())
-                .foregroundColor(DamageHTX.mutedText)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -2033,11 +1801,10 @@ struct PoliceReportStageOneView: View {
         output: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.wheel)
                 .labelsHidden()
-                .damageReportInputStyle()
                 .environment(\.locale, Locale(identifier: "en_GB"))
                 .onAppear { output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: date.wrappedValue) }
                 .onChange(of: date.wrappedValue) { _, newDate in
@@ -2045,7 +1812,7 @@ struct PoliceReportStageOneView: View {
                 }
             Text(output.wrappedValue.isEmpty ? "Day Month Year, HH:mm" : output.wrappedValue)
                 .font(.caption.monospacedDigit())
-                .foregroundColor(DamageHTX.mutedText)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -2096,8 +1863,7 @@ struct PoliceReportStageTwoView: View {
 
     var body: some View {
         Form {
-            Section {
-                DamageReportSectionHeader(title: "Enter your details")
+            Section("Enter your details") {
                 reportTextField("Name of officer recording the report", text: $details.officerRecordingName, placeholder: "Enter officer name")
 
                 signatureInput(
@@ -2107,14 +1873,11 @@ struct PoliceReportStageTwoView: View {
                     clearTitle: "Clear Officer Signature"
                 )
             }
-            .damageReportRowStyle()
 
-            Section {
-                DamageReportSectionHeader(title: "Interpreter")
+            Section("Interpreter") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Interpreter status").font(.caption.weight(.bold)).foregroundColor(.white)
+                    Text("Interpreter status").font(.caption).foregroundColor(.secondary)
                     TextField("Not available", text: $details.interpreterAvailability)
-                        .damageReportInputStyle()
                 }
                 signatureInput(
                     title: "Signature of Interpreter",
@@ -2124,10 +1887,8 @@ struct PoliceReportStageTwoView: View {
                 )
                 dateTimePickerField("Date/Time", date: $interpreterDateTimeValue, output: $details.interpreterSignatureDateTime)
             }
-            .damageReportRowStyle()
 
-            Section {
-                DamageReportSectionHeader(title: "Informant")
+            Section("Informant") {
                 reportTextField("Name of Informant", text: $details.informantName, placeholder: stageOne.nameOfInformant.isEmpty ? "Enter informant name" : stageOne.nameOfInformant)
                 signatureInput(
                     title: "Signature of Informant",
@@ -2138,29 +1899,31 @@ struct PoliceReportStageTwoView: View {
 
                 dateTimePickerField("Date/Time", date: $informantDateTimeValue, output: $details.informantSignatureDateTime)
             }
-            .damageReportRowStyle()
 
-            Section {
-                DamageReportSectionHeader(title: "Case")
+            Section("Case") {
                 reportTextField("Name of Officer In-Charge of Case", text: $details.officerInCharge, placeholder: "Enter officer-in-charge")
                 reportTextField("Classification of Case", text: $details.classificationOfCase, placeholder: "Enter classification", axis: .vertical)
             }
-            .damageReportRowStyle()
 
             Section {
-                DamageReportPrimaryButton(
-                    title: isGeneratingReport ? "Generating Report..." : "Generate Report",
-                    systemImage: "doc.richtext.fill",
-                    isLoading: isGeneratingReport,
-                    isDisabled: isGeneratingReport
-                ) {
+                Button {
                     generateReport()
+                } label: {
+                    HStack {
+                        if isGeneratingReport {
+                            ProgressView().tint(.white)
+                        }
+                        Text(isGeneratingReport ? "Generating Report..." : "Generate Report")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .listRowInsets(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
+                .buttonStyle(.borderedProminent)
+                .tint(isGeneratingReport ? .gray : carType.accentColor)
+                .disabled(isGeneratingReport)
+                .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
             }
-            .damageReportRowStyle()
         }
-        .damageReportFormStyle()
         .navigationTitle("Report Stage 2")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $pdfURL) { url in
@@ -2191,10 +1954,9 @@ struct PoliceReportStageTwoView: View {
         axis: Axis = .horizontal
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
-                .damageReportInputStyle()
         }
     }
 
@@ -2205,11 +1967,10 @@ struct PoliceReportStageTwoView: View {
         output: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.bold)).foregroundColor(.white)
+            Text(title).font(.caption).foregroundColor(.secondary)
             DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.wheel)
                 .labelsHidden()
-                .damageReportInputStyle()
                 .environment(\.locale, Locale(identifier: "en_GB"))
                 .onAppear { output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: date.wrappedValue) }
                 .onChange(of: date.wrappedValue) { _, newDate in
@@ -2217,7 +1978,7 @@ struct PoliceReportStageTwoView: View {
                 }
             Text(output.wrappedValue.isEmpty ? "Day Month Year, HH:mm" : output.wrappedValue)
                 .font(.caption.monospacedDigit())
-                .foregroundColor(DamageHTX.mutedText)
+                .foregroundColor(.secondary)
         }
     }
 
@@ -2230,13 +1991,10 @@ struct PoliceReportStageTwoView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundColor(.white)
+                .font(.caption)
+                .foregroundColor(.secondary)
             SignaturePadView(image: image, clearTrigger: clearTrigger.wrappedValue)
                 .frame(height: 150)
-                .background(Color.white.opacity(0.96))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.white.opacity(0.88), lineWidth: 1.2))
             Button(clearTitle) {
                 image.wrappedValue = nil
                 clearTrigger.wrappedValue = UUID()
