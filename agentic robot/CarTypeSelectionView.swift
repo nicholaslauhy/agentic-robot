@@ -53,10 +53,7 @@ enum CarType: String, CaseIterable, Identifiable {
     }
 
     var accentColor: Color {
-        switch self.category {
-        case .civilian: return Color(red: 0.18, green: 0.45, blue: 0.95)
-        case .scdf:     return Color(red: 0.90, green: 0.25, blue: 0.18)
-        }
+        HTXTheme.primaryPurple
     }
 }
 
@@ -103,6 +100,7 @@ struct CarTypeSelectionView: View {
                 }
             }
             .pickerStyle(.segmented)
+            .tint(HTXTheme.primaryPurple)
             .padding(.horizontal)
             .onChange(of: selectedCategory) { _, _ in
                 selectedType = nil
@@ -146,7 +144,7 @@ struct CarTypeSelectionView: View {
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding()
-                            .background(selected.accentColor)
+                            .background(HTXTheme.primaryPurple)
                             .foregroundColor(.white)
                             .cornerRadius(14)
                             .padding(.horizontal)
@@ -172,7 +170,7 @@ struct CarTypeCard: View {
         VStack(spacing: 12) {
             Image(systemName: type.icon)
                 .font(.system(size: 32))
-                .foregroundColor(isSelected ? .white : type.accentColor)
+                .foregroundColor(isSelected ? .white : HTXTheme.primaryPurple)
 
             Text(type.rawValue)
                 .font(.subheadline)
@@ -185,14 +183,14 @@ struct CarTypeCard: View {
         .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(isSelected ? type.accentColor : Color(.secondarySystemBackground))
+                .fill(isSelected ? HTXTheme.primaryPurple : Color(.secondarySystemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(isSelected ? type.accentColor : Color.clear, lineWidth: 2)
+                .stroke(isSelected ? HTXTheme.primaryPurple : HTXTheme.softPurpleBorder, lineWidth: 2)
         )
         .scaleEffect(isSelected ? 1.04 : 1.0)
-        .shadow(color: isSelected ? type.accentColor.opacity(0.3) : .clear, radius: 8, y: 4)
+        .shadow(color: isSelected ? HTXTheme.primaryPurple.opacity(0.28) : .clear, radius: 8, y: 4)
         .animation(.spring(response: 0.3), value: isSelected)
     }
 }

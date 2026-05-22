@@ -107,7 +107,7 @@ struct ScratchScanView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5)).frame(height: 8)
-                        RoundedRectangle(cornerRadius: 4).fill(carType.accentColor)
+                        RoundedRectangle(cornerRadius: 4).fill(HTXTheme.primaryPurple)
                             .frame(width: geo.size.width * progress, height: 8)
                             .animation(.spring(response: 0.5), value: progress)
                     }
@@ -238,7 +238,7 @@ struct ScratchScanView: View {
 
             HStack(spacing: 16) {
                 Image(systemName: scanAngles[currentAngleIndex].iconName)
-                    .font(.system(size: 26, weight: .bold)).foregroundColor(carType.accentColor).frame(width: 40)
+                    .font(.system(size: 26, weight: .bold)).foregroundColor(HTXTheme.primaryPurple).frame(width: 40)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(scanAngles[currentAngleIndex].label).font(.headline)
                     Text(scanAngles[currentAngleIndex].instruction)
@@ -257,7 +257,7 @@ struct ScratchScanView: View {
                             label: scanAngles[idx].label,
                             image: capturedImages[idx],
                             isCurrent: idx == currentAngleIndex,
-                            accentColor: carType.accentColor
+                            accentColor: HTXTheme.primaryPurple
                         )
                         .onTapGesture { withAnimation { currentAngleIndex = idx } }
                     }
@@ -286,7 +286,7 @@ struct ScratchScanView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(carType.accentColor)
+                        .foregroundColor(HTXTheme.primaryPurple)
                         .frame(width: 52, height: 52)
                         .background(Color(.secondarySystemBackground))
                         .cornerRadius(12)
@@ -294,6 +294,7 @@ struct ScratchScanView: View {
 
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                     Label("Library", systemImage: "photo.on.rectangle")
+                        .foregroundColor(HTXTheme.primaryPurple)
                         .frame(maxWidth: .infinity).padding()
                         .background(Color(.secondarySystemBackground)).cornerRadius(12)
                 }
@@ -306,7 +307,7 @@ struct ScratchScanView: View {
                 } label: {
                     Label("Take Photo", systemImage: "camera.fill")
                         .frame(maxWidth: .infinity).padding()
-                        .background(carType.accentColor).foregroundColor(.white).cornerRadius(12)
+                        .background(HTXTheme.primaryPurple).foregroundColor(.white).cornerRadius(12)
                 }
             }
             .padding(.horizontal).padding(.bottom, 24)
@@ -331,7 +332,7 @@ struct ScratchScanView: View {
                                 .fontWeight(.semibold)
                             Text("Back")
                         }
-                        .foregroundColor(carType.accentColor)
+                        .foregroundColor(HTXTheme.primaryPurple)
                     }
 
                     Spacer()
@@ -362,7 +363,7 @@ struct ScratchScanView: View {
                         ReviewThumbnail(
                             label: scanAngles[idx].label,
                             image: capturedImages[idx],
-                            accentColor: carType.accentColor
+                            accentColor: HTXTheme.primaryPurple
                         ) {
                             replacingIndex = idx
                             showReplaceSheet = true
@@ -384,7 +385,7 @@ struct ScratchScanView: View {
                 } label: {
                     Text("Submit for Analysis")
                         .font(.headline).frame(maxWidth: .infinity).padding()
-                        .background(carType.accentColor).foregroundColor(.white)
+                        .background(HTXTheme.primaryPurple).foregroundColor(.white)
                         .cornerRadius(14).padding(.horizontal)
                 }
                 .disabled(isSubmittingAnalysis)
@@ -926,7 +927,7 @@ struct CameraSilhouetteOverlay: View {
                                     dash: [14, 9]
                                 )
                             )
-                            .foregroundColor(.white.opacity(0.96))
+                            .foregroundColor(HTXTheme.primaryPurple.opacity(0.95))
 
                         CarSilhouetteView(
                             carType: carType,

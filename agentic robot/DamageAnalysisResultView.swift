@@ -141,7 +141,7 @@ struct DamageAnalysisResultView: View {
                             Image(systemName: "chevron.left").fontWeight(.semibold)
                             Text("Back")
                         }
-                        .foregroundColor(carType.accentColor)
+                        .foregroundColor(HTXTheme.primaryPurple)
                     }
 
                     Spacer()
@@ -167,7 +167,7 @@ struct DamageAnalysisResultView: View {
                                 Text("Add")
                             }
                             .font(.subheadline.bold())
-                            .foregroundColor(carType.accentColor)
+                            .foregroundColor(HTXTheme.primaryPurple)
                         }
 
                         Button("Logout") { onLogout() }
@@ -206,7 +206,7 @@ struct DamageAnalysisResultView: View {
                         ForEach(mutableDetections) { detection in
                             DamageDetectionCard(
                                 detection: detection,
-                                accentColor: carType.accentColor,
+                                accentColor: HTXTheme.primaryPurple,
                                 onEdit: { detectionToEdit = detection },
                                 onDelete: { remove(detection) }
                             )
@@ -244,20 +244,27 @@ struct DamageAnalysisResultView: View {
                     VStack(spacing: 20) {
                         ProgressView()
                             .scaleEffect(1.4)
-                            .tint(.white)
+                            .tint(HTXTheme.primaryPurple)
+                        Image(systemName: "doc.richtext.fill")
+                            .font(.system(size: 34, weight: .semibold))
+                            .foregroundColor(HTXTheme.primaryPurple)
                         Text("Generating your report…")
                             .font(.headline)
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                         Text("This may take a few seconds.")
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.75))
+                            .foregroundColor(.secondary)
                     }
                     .padding(32)
                     .background(
                         RoundedRectangle(cornerRadius: 20)
-                            .fill(Color(.systemGray2).opacity(0.95))
+                            .fill(HTXTheme.softPurpleCard)
                     )
-                    .shadow(radius: 16)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(HTXTheme.softPurpleBorder, lineWidth: 1)
+                    )
+                    .shadow(color: HTXTheme.primaryPurple.opacity(0.18), radius: 16, y: 6)
                     .padding(.horizontal, 40)
                 }
                 .transition(.opacity.animation(.easeInOut(duration: 0.2)))
@@ -268,14 +275,14 @@ struct DamageAnalysisResultView: View {
         .sheet(item: $selectedDetection) { detection in
             DamageDetailSheet(
                 detection: detection,
-                accentColor: carType.accentColor
+                accentColor: HTXTheme.primaryPurple
             )
         }
         // ── Edit bounding-box sheet ───────────────────────────────────────────
         .sheet(item: $detectionToEdit) { detection in
             BoundingBoxEditorSheet(
                 detection: detection,
-                accentColor: carType.accentColor,
+                accentColor: HTXTheme.primaryPurple,
                 scanImage: detection.angleIndex < scanImages.count ? scanImages[detection.angleIndex] : nil
             )
         }
@@ -283,7 +290,7 @@ struct DamageAnalysisResultView: View {
         .sheet(isPresented: $showAddCase) {
             AddCaseSheet(
                 scanImages: scanImages,
-                accentColor: carType.accentColor
+                accentColor: HTXTheme.primaryPurple
             ) { newDetection in
                 mutableDetections.insert(newDetection, at: 0)
             }
@@ -500,7 +507,6 @@ struct DamageDetailSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .scrollContentBackground(.hidden)
             .background(SubtleHTXBackground())
-            .tint(HTXTheme.primaryPurple)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -1180,7 +1186,10 @@ struct ReportWelcomeView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
+            ZStack {
+                SubtleHTXBackground()
+
+                VStack(spacing: 0) {
 
                 // ── Tab picker ───────────────────────────────────────────────
                 Picker("View", selection: $showingPreview) {
@@ -1205,7 +1214,7 @@ struct ReportWelcomeView: View {
 
                             Image(systemName: "doc.richtext.fill")
                                 .font(.system(size: 64))
-                                .foregroundColor(carType.accentColor)
+                                .foregroundColor(HTXTheme.primaryPurple)
 
                             VStack(spacing: 8) {
                                 Text("Damage Report")
@@ -1223,14 +1232,14 @@ struct ReportWelcomeView: View {
                             VStack(spacing: 4) {
                                 Text("\(detectionCount)")
                                     .font(.system(size: 56, weight: .black))
-                                    .foregroundColor(carType.accentColor)
+                                    .foregroundColor(HTXTheme.primaryPurple)
                                 Text(detectionCount == 1 ? "damage case recorded" : "damage cases recorded")
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             }
                             .padding(.vertical, 20)
                             .frame(maxWidth: .infinity)
-                            .background(carType.accentColor.opacity(0.08))
+                            .background(HTXTheme.primaryPurple.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 18))
                             .padding(.horizontal, 40)
 
@@ -1255,8 +1264,8 @@ struct ReportWelcomeView: View {
                                     .font(.headline)
                                     .frame(maxWidth: .infinity)
                                     .padding()
-                                    .background(carType.accentColor.opacity(0.12))
-                                    .foregroundColor(carType.accentColor)
+                                    .background(HTXTheme.primaryPurple.opacity(0.12))
+                                    .foregroundColor(HTXTheme.primaryPurple)
                                     .cornerRadius(14)
                                 }
 
@@ -1271,7 +1280,7 @@ struct ReportWelcomeView: View {
                                     .font(.headline)
                                     .frame(maxWidth: .infinity)
                                     .padding()
-                                    .background(carType.accentColor)
+                                    .background(HTXTheme.primaryPurple)
                                     .foregroundColor(.white)
                                     .cornerRadius(14)
                                 }
@@ -1296,6 +1305,7 @@ struct ReportWelcomeView: View {
                     }
                 }
             }
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1318,6 +1328,7 @@ struct ReportWelcomeView: View {
                     }
                 }
             }
+            .tint(HTXTheme.primaryPurple)
         }
     }
 
@@ -1451,6 +1462,7 @@ struct PoliceReportStageZeroView: View {
     @State private var customPostalCode = ""
     @State private var customTelephone = ""
     @State private var showStageOne = false
+    @State private var expandedDivisions: Set<String> = [PoliceStationDetails.defaultStation.division]
     @Environment(\.dismiss) private var dismiss
 
     private var stationForReport: PoliceStationDetails {
@@ -1471,28 +1483,82 @@ struct PoliceReportStageZeroView: View {
             Form {
                 Section("Police Station of Origin") {
                     ForEach(PoliceStationDetails.groupedByDivision, id: \.0) { division, stations in
-                        DisclosureGroup(division) {
+                        let isDivisionSelected = !useOtherStation && selectedStation.division == division
+                        let isExpanded = expandedDivisions.contains(division)
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                if isExpanded {
+                                    expandedDivisions.remove(division)
+                                } else {
+                                    expandedDivisions.insert(division)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Text(division)
+                                    .font(.headline.weight(.semibold))
+                                    .foregroundColor(isDivisionSelected ? HTXTheme.primaryPurple : .primary)
+
+                                if isDivisionSelected {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(isDivisionSelected ? HTXTheme.primaryPurple : .secondary)
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(isDivisionSelected ? HTXTheme.primaryPurple.opacity(0.12) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Color(.systemBackground).opacity(0.86))
+
+                        if isExpanded {
                             ForEach(stations) { station in
+                                let isSelected = selectedStation.id == station.id && !useOtherStation
+
                                 Button {
                                     selectedStation = station
                                     useOtherStation = false
+                                    expandedDivisions.insert(division)
                                 } label: {
                                     HStack(alignment: .top, spacing: 10) {
-                                        Image(systemName: selectedStation == station ? "checkmark.circle.fill" : "circle")
-                                            .foregroundColor(selectedStation == station ? carType.accentColor : .secondary)
+                                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                                            .foregroundColor(isSelected ? HTXTheme.primaryPurple : .secondary)
+                                            .font(.system(size: 18, weight: .semibold))
+
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(station.displayName).font(.subheadline.bold())
+                                            Text(station.displayName)
+                                                .font(.subheadline.bold())
+                                                .foregroundColor(.primary)
                                             Text("\(station.address), Singapore \(station.postalCode)")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
-                                            Text("Tel: \(station.telephone)")
+                                            Text(station.telephone.isEmpty ? "Tel:" : "Tel: \(station.telephone)")
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
                                         }
+
+                                        Spacer()
                                     }
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 10)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .fill(isSelected ? HTXTheme.primaryPurple.opacity(0.12) : Color.clear)
+                                    )
                                 }
                                 .buttonStyle(.plain)
-                                .padding(.vertical, 4)
+                                .listRowBackground(Color(.systemBackground).opacity(0.86))
                             }
                         }
                     }
@@ -1536,6 +1602,9 @@ struct PoliceReportStageZeroView: View {
             }
             .navigationTitle("Report Stage 0")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(SubtleHTXBackground())
+            .tint(HTXTheme.primaryPurple)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -1875,7 +1944,7 @@ struct PoliceReportStageTwoView: View {
 
     var body: some View {
         Form {
-            Section("Enter your details") {
+            Section("Officer") {
                 reportTextField("Name of officer recording the report", text: $details.officerRecordingName, placeholder: "Enter officer name")
 
                 signatureInput(
@@ -2006,15 +2075,16 @@ struct PoliceReportStageTwoView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(HTXTheme.primaryPurple)
             SignaturePadView(image: image, clearTrigger: clearTrigger.wrappedValue)
                 .frame(height: 150)
             Button(clearTitle) {
                 image.wrappedValue = nil
                 clearTrigger.wrappedValue = UUID()
             }
-            .font(.caption)
+            .font(.caption.weight(.semibold))
+            .foregroundColor(HTXTheme.primaryPurple)
         }
         .padding(.vertical, 6)
     }

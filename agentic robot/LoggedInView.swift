@@ -97,6 +97,8 @@ struct LoggedInView: View {
 
             VStack(spacing: 25) {
 
+                Spacer().frame(height: 72)
+
                 Text(displayedText)
                     .font(.headline.weight(.semibold))
                     .foregroundColor(.primary)
