@@ -30,7 +30,7 @@ struct LoggedInView: View {
     // MARK: - API Call
     func sendToANPRServer(image: UIImage) {
 
-        guard let url = URL(string: "http://192.168.86.190:8000/detect") else { return }
+        guard let url = URL(string: "http://192.168.86.191:8000/detect") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -91,113 +91,117 @@ struct LoggedInView: View {
 
     // MARK: - UI
     var body: some View {
-
         ZStack {
+            HTXBackground()
 
-            VStack(spacing: 25) {
+            ScrollView {
+                VStack(spacing: 22) {
+                    HTXScreenHeader(
+                        title: "Report Generation",
+                        subtitle: "Licence plate capture",
+                        trailing: AnyView(HTXLogoutButton { auth.logout() })
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
 
-                Text(displayedText)
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                if let selectedImage = selectedImage {
-
-                    Image(uiImage: selectedImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 300)
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-
-                    HStack(spacing: 20) {
-
-                        Button("Choose Another Photo") {
-                            self.selectedImage = nil
-                            self.localErrorMessage = nil
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("Confirm") {
-                            guard !isSubmitting else { return }
-                            isSubmitting = true
-                            sendToANPRServer(image: selectedImage)
-                        }
-                        .disabled(isSubmitting)
-                        .buttonStyle(.borderedProminent)
+                    VStack(spacing: 14) {
+                        HTXLogoView(size: 74)
+                        Text(displayedText)
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 52)
                     }
+                    .padding(.top, 10)
 
-                } else {
+                    HTXCard {
+                        VStack(spacing: 18) {
+                            if let selectedImage {
+                                Image(uiImage: selectedImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxHeight: 310)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                            .stroke(Color.white.opacity(0.22), lineWidth: 1)
+                                    )
 
-                    VStack(spacing: 15) {
+                                VStack(spacing: 12) {
+                                    HTXPrimaryButton("CONFIRM", isLoading: isSubmitting) {
+                                        guard !isSubmitting else { return }
+                                        isSubmitting = true
+                                        localErrorMessage = nil
+                                        sendToANPRServer(image: selectedImage)
+                                    }
 
-                        Button("Take Photo") {
-                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                                showCamera = true
-                                localErrorMessage = nil
+                                    HTXSecondaryButton("Choose Another Photo", systemImage: "arrow.triangle.2.circlepath") {
+                                        self.selectedImage = nil
+                                        self.localErrorMessage = nil
+                                    }
+                                }
                             } else {
-                                localErrorMessage = "Camera is not available on this device."
+                                VStack(spacing: 14) {
+                                    Text("Upload Plate Image")
+                                        .font(.system(size: 20, weight: .black, design: .rounded))
+                                        .foregroundColor(.white)
+
+                                    Text("Take a photo, pick from your photo library, or upload a JPG/PNG file.")
+                                        .font(.subheadline)
+                                        .foregroundColor(HTXTheme.accent.opacity(0.88))
+                                        .multilineTextAlignment(.center)
+
+                                    VStack(spacing: 12) {
+                                        HTXPrimaryButton("TAKE PHOTO") {
+                                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                                showCamera = true
+                                                localErrorMessage = nil
+                                            } else {
+                                                localErrorMessage = "Camera is not available on this device."
+                                            }
+                                        }
+
+                                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                                            HStack(spacing: 8) {
+                                                Image(systemName: "photo.on.rectangle")
+                                                Text("Choose From Library")
+                                                    .fontWeight(.semibold)
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .frame(height: 52)
+                                            .background(Color.white.opacity(0.10))
+                                            .clipShape(Capsule())
+                                            .foregroundColor(.white)
+                                            .overlay(Capsule().stroke(Color.white.opacity(0.20), lineWidth: 1))
+                                        }
+
+                                        HTXSecondaryButton("Upload JPG/PNG File", systemImage: "folder") {
+                                            showFileImporter = true
+                                            localErrorMessage = nil
+                                        }
+                                    }
+                                    .opacity(showButtons ? 1 : 0)
+                                }
+                            }
+
+                            if let localErrorMessage {
+                                HTXAlert(message: localErrorMessage, isError: true)
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-
-                        PhotosPicker(
-                            selection: $selectedPhotoItem,
-                            matching: .images
-                        ) {
-                            Text("Choose From Library")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("Upload JPG/PNG File") {
-                            showFileImporter = true
-                        }
-                        .buttonStyle(.bordered)
                     }
-                    .opacity(showButtons ? 1 : 0)
-                }
+                    .padding(.horizontal, 20)
 
-                if let localErrorMessage = localErrorMessage {
-                    Text(localErrorMessage)
-                        .foregroundColor(.red)
-                        .font(.footnote)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                    Spacer(minLength: 28)
                 }
-
-                Spacer()
             }
 
-            // MARK: - LOADING OVERLAY
             if isSubmitting {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(1.3)
-
-                    Text("Processing image...")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                }
+                HTXLoadingOverlay(message: "Processing image...")
             }
         }
-
-        .navigationTitle("Report Generation")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Logout") {
-                    auth.logout()
-                }
-                .foregroundColor(.red)
-            }
-        }
-
-        .padding(.top)
-
-        // MARK: - TYPEWRITER (run once)
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             guard !didRunTypewriter else { return }
             didRunTypewriter = true
@@ -207,10 +211,8 @@ struct LoggedInView: View {
 
             Task {
                 for char in fullText {
-                    try? await Task.sleep(for: .milliseconds(25))
-                    await MainActor.run {
-                        displayedText.append(char)
-                    }
+                    try? await Task.sleep(for: .milliseconds(22))
+                    await MainActor.run { displayedText.append(char) }
                 }
 
                 await MainActor.run {
@@ -220,8 +222,6 @@ struct LoggedInView: View {
                 }
             }
         }
-
-        // MARK: - CAMERA
         .fullScreenCover(isPresented: $showCamera) {
             PlateCameraImagePicker { image in
                 self.selectedImage = image
@@ -229,8 +229,6 @@ struct LoggedInView: View {
             }
             .ignoresSafeArea()
         }
-
-        // MARK: - PHOTO PICKER
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem = newItem else { return }
 
@@ -241,13 +239,11 @@ struct LoggedInView: View {
                     await MainActor.run {
                         self.selectedImage = uiImage
                         self.selectedPhotoItem = nil
+                        self.localErrorMessage = nil
                     }
                 }
             }
         }
-
-
-        // MARK: - FILE IMPORTER
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: [.jpeg, .png],
@@ -284,8 +280,6 @@ struct LoggedInView: View {
                 localErrorMessage = "File selection failed: \(error.localizedDescription)"
             }
         }
-
-        // MARK: - NAVIGATION
         .navigationDestination(isPresented: $navigateToResultPage) {
             CarPlateResultView(plate: plateResult) {
                 auth.logout()

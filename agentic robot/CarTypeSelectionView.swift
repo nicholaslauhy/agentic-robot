@@ -54,8 +54,8 @@ enum CarType: String, CaseIterable, Identifiable {
 
     var accentColor: Color {
         switch self.category {
-        case .civilian: return Color(red: 0.18, green: 0.45, blue: 0.95)
-        case .scdf:     return Color(red: 0.90, green: 0.25, blue: 0.18)
+        case .civilian: return HTXTheme.cyan
+        case .scdf:     return Color(red: 1.00, green: 0.36, blue: 0.30)
         }
     }
 }
@@ -75,85 +75,77 @@ struct CarTypeSelectionView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            HTXBackground()
 
-            // HEADER
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Vehicle Type")
-                        .font(.largeTitle).bold()
-                    Text("Plate: \(plate)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+            VStack(spacing: 0) {
+                HTXScreenHeader(
+                    title: "Vehicle Type",
+                    subtitle: "Plate: \(plate)",
+                    trailing: AnyView(HTXLogoutButton { onLogout() })
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+                .padding(.bottom, 18)
+
+                Picker("Category", selection: $selectedCategory) {
+                    ForEach(CarCategory.allCases, id: \.self) { category in
+                        Text(category.rawValue).tag(category)
+                    }
                 }
-                Spacer()
-                Button("Logout") { onLogout() }
-                    .foregroundColor(.red)
-            }
-            .padding()
-
-            // CATEGORY PICKER
-            Picker("Category", selection: $selectedCategory) {
-                ForEach(CarCategory.allCases, id: \.self) { cat in
-                    Text(cat.rawValue).tag(cat)
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
+                .tint(HTXTheme.accentBright)
+                .onChange(of: selectedCategory) { _, _ in
+                    selectedType = nil
                 }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .onChange(of: selectedCategory) { _, _ in
-                selectedType = nil
-            }
 
-            // TYPE GRID
-            ScrollView {
-                LazyVGrid(
-                    columns: [GridItem(.flexible()), GridItem(.flexible())],
-                    spacing: 16
-                ) {
-                    ForEach(filteredTypes) { type in
-                        CarTypeCard(
-                            type: type,
-                            isSelected: selectedType == type
-                        )
-                        .onTapGesture {
-                            withAnimation(.spring(response: 0.3)) {
-                                selectedType = type
+                ScrollView {
+                    LazyVGrid(
+                        columns: [GridItem(.flexible()), GridItem(.flexible())],
+                        spacing: 14
+                    ) {
+                        ForEach(filteredTypes) { type in
+                            CarTypeCard(
+                                type: type,
+                                isSelected: selectedType == type
+                            )
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                                    selectedType = type
+                                }
                             }
                         }
                     }
+                    .padding(20)
+                    .padding(.bottom, selectedType == nil ? 24 : 118)
                 }
-                .padding()
             }
 
-            // CONFIRM BUTTON
-            if let selected = selectedType {
-                VStack(spacing: 8) {
-                    Text("Let's now start scanning the car for any scratches or dents.")
-                        .font(.subheadline)
-                        .multilineTextAlignment(.center)
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+            VStack {
+                Spacer()
+                if let selected = selectedType {
+                    HTXCard {
+                        VStack(spacing: 12) {
+                            Text("Let's now start scanning the car for any scratches or dents.")
+                                .font(.subheadline)
+                                .multilineTextAlignment(.center)
+                                .foregroundColor(HTXTheme.accent.opacity(0.95))
 
-                    Button {
-                        onCarTypeSelected(selected)
-                    } label: {
-                        Text("Start Scan — \(selected.rawValue)")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(selected.accentColor)
-                            .foregroundColor(.white)
-                            .cornerRadius(14)
-                            .padding(.horizontal)
+                            HTXPrimaryButton("START SCAN — \(selected.rawValue.uppercased())") {
+                                onCarTypeSelected(selected)
+                            }
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                .padding(.bottom, 20)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                .animation(.spring(response: 0.4), value: selectedType)
             }
+            .animation(.spring(response: 0.4, dampingFraction: 0.86), value: selectedType)
         }
         .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
     }
 }
 
@@ -165,28 +157,34 @@ struct CarTypeCard: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: type.icon)
-                .font(.system(size: 32))
-                .foregroundColor(isSelected ? .white : type.accentColor)
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 58, height: 58)
+                .background(type.accentColor.opacity(isSelected ? 0.42 : 0.20))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(type.accentColor.opacity(isSelected ? 0.85 : 0.35), lineWidth: 1)
+                )
 
             Text(type.rawValue)
-                .font(.subheadline)
-                .fontWeight(.medium)
+                .font(.subheadline.weight(.bold))
                 .multilineTextAlignment(.center)
-                .foregroundColor(isSelected ? .white : .primary)
+                .foregroundColor(.white)
+                .lineLimit(3)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
-        .padding(.horizontal, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(isSelected ? type.accentColor : Color(.secondarySystemBackground))
-        )
+        .frame(minHeight: 142)
+        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .background(Color.white.opacity(isSelected ? 0.17 : 0.09))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(isSelected ? type.accentColor : Color.clear, lineWidth: 2)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(type.accentColor.opacity(isSelected ? 0.70 : 0.18), lineWidth: isSelected ? 1.8 : 1)
         )
-        .scaleEffect(isSelected ? 1.04 : 1.0)
-        .shadow(color: isSelected ? type.accentColor.opacity(0.3) : .clear, radius: 8, y: 4)
+        .shadow(color: isSelected ? type.accentColor.opacity(0.25) : .clear, radius: 14, y: 8)
+        .scaleEffect(isSelected ? 1.035 : 1.0)
         .animation(.spring(response: 0.3), value: isSelected)
     }
 }

@@ -20,7 +20,7 @@ struct MemberManagementView: View {
     @State private var isLoadingMembers = false
     @State private var listError: String? = nil
 
-    // Confirmation alert for deletion
+    // Confirmation alert for deactivation/reactivation
     @State private var memberToDelete: MemberEntry? = nil
     @State private var showDeleteConfirm = false
 
@@ -34,189 +34,118 @@ struct MemberManagementView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
+        ZStack {
+            HTXBackground()
 
-                // ── Add Member ──────────────────────────────────────────
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 14) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HTXScreenHeader(
+                        title: "Add Member",
+                        subtitle: "Admin account management",
+                        trailing: nil
+                    )
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
 
-                        Text("Add New Member")
-                            .font(.headline)
-
-                        TextField("Email", text: $newEmail)
-                            .textFieldStyle(.roundedBorder)
-                            .autocapitalization(.none)
-                            .keyboardType(.emailAddress)
-
-                        HStack {
-                            Group {
-                                if isPasswordVisible {
-                                    TextField("Temporary Password", text: $newPassword)
-                                        .textInputAutocapitalization(.never)
-                                        .autocorrectionDisabled()
-                                } else {
-                                    SecureField("Temporary Password", text: $newPassword)
-                                }
-                            }
-                            Button {
-                                isPasswordVisible.toggle()
-                            } label: {
-                                Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
-                                    .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color(.systemGray4), lineWidth: 1)
-                        )
-                        
-                        VStack(alignment: .leading, spacing: 6) {
-
-                            Text("Role")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-
-                            Picker("Role", selection: $selectedRole) {
-                                Text("Member").tag("member")
-                                Text("Admin").tag("admin")
-                            }
-                            .pickerStyle(.segmented)
-                        }
-
-                        if let addError {
-                            Text(addError).foregroundColor(.red).font(.footnote)
-                        }
-                        if let addSuccess {
-                            Text(addSuccess).foregroundColor(.green).font(.footnote)
-                        }
-
-                        Button {
-                            addMemberViaREST()
-                        } label: {
-                            if isAdding {
-                                ProgressView().frame(maxWidth: .infinity)
-                            } else {
-                                Text("Create Account").frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isAdding)
-                    }
-                }
-                .padding(.horizontal)
-
-                // ── Member List ─────────────────────────────────────────
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 12) {
-
-                        HStack {
-                            Text("All Members")
+                    HTXCard {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Label("Create New Account", systemImage: "person.badge.plus.fill")
                                 .font(.headline)
-                            Spacer()
-                            Button { fetchMembers() } label: {
-                                Image(systemName: "arrow.clockwise")
+                                .foregroundColor(.white)
+
+                            HTXTextField(
+                                label: "Email",
+                                placeholder: "member@email.com",
+                                text: $newEmail,
+                                keyboardType: .emailAddress
+                            )
+
+                            HTXSecureField(
+                                label: "Temporary Password",
+                                placeholder: "Minimum 6 characters",
+                                text: $newPassword,
+                                isVisible: $isPasswordVisible
+                            )
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("ROLE")
+                                    .font(.caption)
+                                    .fontWeight(.bold)
+                                    .tracking(1.2)
+                                    .foregroundColor(HTXTheme.accent)
+
+                                Picker("Role", selection: $selectedRole) {
+                                    Text("Member").tag("member")
+                                    Text("Admin").tag("admin")
+                                }
+                                .pickerStyle(.segmented)
+                                .tint(HTXTheme.accentBright)
                             }
+
+                            if let addError {
+                                HTXAlert(message: addError, isError: true)
+                            }
+                            if let addSuccess {
+                                HTXAlert(message: addSuccess, isError: false)
+                            }
+
+                            HTXPrimaryButton("CREATE ACCOUNT", isLoading: isAdding) {
+                                addMemberViaREST()
+                            }
+                            .disabled(isAdding)
                         }
+                    }
+                    .padding(.horizontal, 20)
 
-                        if isLoadingMembers {
-                            ProgressView().frame(maxWidth: .infinity)
-                        } else if let listError {
-                            Text(listError).foregroundColor(.red).font(.footnote)
-                        } else if members.isEmpty {
-                            Text("No members yet.")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        } else {
-                            ForEach(members) { member in
-                                VStack(spacing: 0) {
-                                    HStack(spacing: 12) {
+                    HTXCard {
+                        VStack(alignment: .leading, spacing: 16) {
+                            HStack {
+                                Label("All Members", systemImage: "person.3.fill")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                Spacer()
+                                Button { fetchMembers() } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .foregroundColor(.white)
+                                        .padding(9)
+                                        .background(Color.white.opacity(0.10))
+                                        .clipShape(Circle())
+                                }
+                            }
 
-                                        // Email + role badge
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(member.email)
-                                                .font(.subheadline)
-                                                .foregroundColor(member.active ? .primary : .gray)
-                                            HStack(spacing: 6) {
-
-                                                Text(member.role.capitalized)
-                                                    .font(.caption)
-                                                    .foregroundColor(member.role == "admin" ? .blue : .secondary)
-
-                                                Text(member.active ? "ACTIVE" : "INACTIVE")
-                                                    .font(.caption2)
-                                                    .padding(.horizontal, 6)
-                                                    .padding(.vertical, 2)
-                                                    .background(member.active ? Color.green.opacity(0.2)
-                                                                              : Color.red.opacity(0.2))
-                                                    .cornerRadius(6)
-                                            }
-                                        }
-
-                                        Spacer()
-
-                                        // ── Action buttons (only for others, not yourself) ──
-                                        if member.id != auth.user?.uid {
-
-                                            // Promote / Demote button
-                                            Menu {
-
-                                                Button {
-                                                    updateRole(member, newRole: "member")
-                                                } label: {
-                                                    Label("Member", systemImage: member.role == "member" ? "checkmark" : "")
-                                                }
-
-                                                Button {
-                                                    updateRole(member, newRole: "admin")
-                                                } label: {
-                                                    Label("Admin", systemImage: member.role == "admin" ? "checkmark" : "")
-                                                }
-
-                                            } label: {
-
-                                                HStack(spacing: 4) {
-                                                    Text(member.role.capitalized)
-                                                        .font(.caption)
-
-                                                    Image(systemName: "chevron.down")
-                                                        .font(.caption2)
-                                                }
-                                                .padding(.horizontal, 10)
-                                                .padding(.vertical, 6)
-                                                .background(Color(.systemGray6))
-                                                .cornerRadius(8)
-                                            }
-
-                                            // Delete button
-                                            Button {
-                                                memberToDelete = member
-                                                showDeleteConfirm = true
-                                            } label: {
-                                                Image(systemName: member.active ? "person.fill.xmark" : "person.fill.checkmark")
-                                                    .foregroundColor(.red)
-                                                    .imageScale(.large)
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
+                            if isLoadingMembers {
+                                HStack {
+                                    Spacer()
+                                    ProgressView()
+                                        .tint(.white)
+                                    Spacer()
+                                }
+                                .padding(.vertical, 18)
+                            } else if let listError {
+                                HTXAlert(message: listError, isError: true)
+                            } else if members.isEmpty {
+                                Text("No members yet.")
+                                    .font(.subheadline)
+                                    .foregroundColor(HTXTheme.accent.opacity(0.85))
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.vertical, 18)
+                            } else {
+                                VStack(spacing: 12) {
+                                    ForEach(members) { member in
+                                        memberRow(member)
                                     }
-                                    .padding(.vertical, 8)
-                                    Divider()
                                 }
                             }
                         }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 28)
                 }
-                .padding(.horizontal)
             }
-            .padding(.vertical)
         }
-        .navigationTitle("Add Member")
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fetchMembers() }
-        // Deactivation confirmation alert
         .alert(
             memberToDelete?.active == true
             ? "Deactivate \(memberToDelete?.email ?? "this user")?"
@@ -224,17 +153,12 @@ struct MemberManagementView: View {
             isPresented: $showDeleteConfirm,
             presenting: memberToDelete
         ) { member in
-
             Button(member.active ? "Deactivate" : "Reactivate",
                    role: member.active ? .destructive : nil) {
-
                 toggleActiveStatus(member)
             }
-
             Button("Cancel", role: .cancel) {}
-
         } message: { member in
-
             Text(
                 member.active
                 ? "This user will lose access to the application until reactivated."
@@ -242,28 +166,94 @@ struct MemberManagementView: View {
             )
         }
     }
-    
-    private func toggleActiveStatus(_ member: MemberEntry) {
 
+    @ViewBuilder
+    private func memberRow(_ member: MemberEntry) -> some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(member.role == "admin" ? HTXTheme.accentBright.opacity(0.28) : HTXTheme.cyan.opacity(0.22))
+                .frame(width: 42, height: 42)
+                .overlay(
+                    Image(systemName: member.role == "admin" ? "shield.lefthalf.filled" : "person.fill")
+                        .foregroundColor(.white)
+                )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(member.email)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(member.active ? .white : .white.opacity(0.45))
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    HTXStatusPill(
+                        text: member.role.capitalized,
+                        color: member.role == "admin" ? HTXTheme.accentBright : HTXTheme.cyan
+                    )
+                    HTXStatusPill(
+                        text: member.active ? "Active" : "Inactive",
+                        color: member.active ? HTXTheme.successGreen : HTXTheme.errorRed
+                    )
+                }
+            }
+
+            Spacer()
+
+            if member.id != auth.user?.uid {
+                Menu {
+                    Button {
+                        updateRole(member, newRole: "member")
+                    } label: {
+                        Label("Member", systemImage: member.role == "member" ? "checkmark" : "person")
+                    }
+
+                    Button {
+                        updateRole(member, newRole: "admin")
+                    } label: {
+                        Label("Admin", systemImage: member.role == "admin" ? "checkmark" : "shield")
+                    }
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundColor(.white)
+                        .padding(9)
+                        .background(Color.white.opacity(0.10))
+                        .clipShape(Circle())
+                }
+
+                Button {
+                    memberToDelete = member
+                    showDeleteConfirm = true
+                } label: {
+                    Image(systemName: member.active ? "person.fill.xmark" : "person.fill.checkmark")
+                        .foregroundColor(member.active ? HTXTheme.errorRed : HTXTheme.successGreen)
+                        .padding(9)
+                        .background(Color.white.opacity(0.10))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Toggle active status
+    private func toggleActiveStatus(_ member: MemberEntry) {
         let newStatus = !member.active
 
         Firestore.firestore()
             .collection("users")
             .document(member.id)
-            .updateData([
-                "active": newStatus
-            ]) { err in
-
+            .updateData(["active": newStatus]) { err in
                 DispatchQueue.main.async {
-
                     if let err {
                         self.listError = err.localizedDescription
                     } else {
-
-                        if let idx = self.members.firstIndex(where: {
-                            $0.id == member.id
-                        }) {
-
+                        if let idx = self.members.firstIndex(where: { $0.id == member.id }) {
                             self.members[idx].active = newStatus
                         }
                     }
@@ -272,7 +262,6 @@ struct MemberManagementView: View {
     }
 
     // MARK: - Add member via REST (keeps admin session intact)
-
     private func addMemberViaREST() {
         let email = newEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -336,7 +325,7 @@ struct MemberManagementView: View {
                 return
             }
 
-            // Write Firestore record with default "member" role
+            // Write Firestore record
             Firestore.firestore().collection("users").document(newUid).setData([
                 "email": email,
                 "role": self.selectedRole,
@@ -359,22 +348,14 @@ struct MemberManagementView: View {
     }
 
     // MARK: - Promote / Demote role
-
     private func updateRole(_ member: MemberEntry, newRole: String) {
-
         Firestore.firestore()
             .collection("users")
             .document(member.id)
-            .updateData([
-                "role": newRole
-            ]) { err in
-
+            .updateData(["role": newRole]) { err in
                 DispatchQueue.main.async {
-
                     if err == nil {
-
                         if let idx = self.members.firstIndex(where: { $0.id == member.id }) {
-
                             self.members[idx] = MemberEntry(
                                 id: member.id,
                                 email: member.email,
@@ -382,45 +363,14 @@ struct MemberManagementView: View {
                                 active: member.active
                             )
                         }
-
                     } else {
-
                         self.listError = "Failed to update role."
                     }
                 }
             }
     }
 
-    // MARK: - Deactivate member
-    private func deactivateMember(_ member: MemberEntry) {
-
-        Firestore.firestore()
-            .collection("users")
-            .document(member.id)
-            .updateData([
-                "active": false
-            ]) { err in
-
-                DispatchQueue.main.async {
-
-                    if let err {
-                        self.listError = err.localizedDescription
-                    } else {
-
-                        if let idx = self.members.firstIndex(where: {
-                            $0.id == member.id
-                        }) {
-
-                            self.members[idx].active = false
-                        }
-                    }
-                }
-            }
-    }
-    
-
     // MARK: - Fetch members
-
     private func fetchMembers() {
         isLoadingMembers = true
         listError = nil
@@ -432,20 +382,10 @@ struct MemberManagementView: View {
                     return
                 }
                 self.members = (snapshot?.documents ?? []).compactMap { doc in
-
-                    guard let email = doc.data()["email"] as? String else {
-                        return nil
-                    }
-
+                    guard let email = doc.data()["email"] as? String else { return nil }
                     let role = doc.data()["role"] as? String ?? "member"
                     let active = doc.data()["active"] as? Bool ?? true
-
-                    return MemberEntry(
-                        id: doc.documentID,
-                        email: email,
-                        role: role,
-                        active: active
-                    )
+                    return MemberEntry(id: doc.documentID, email: email, role: role, active: active)
                 }
                 .sorted { $0.email < $1.email }
             }

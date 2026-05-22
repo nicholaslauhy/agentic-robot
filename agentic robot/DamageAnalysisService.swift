@@ -69,7 +69,7 @@ final class DamageAnalysisService {
 //        guard let url = URL(string: "http://127.0.0.1:8000/analyze-damage") else {
 //            throw URLError(.badURL)
 //        }
-        guard let url = URL(string: "http://192.168.86.190:8000/analyze-damage") else {
+        guard let url = URL(string: "http://192.168.86.191:8000/analyze-damage") else {
             throw URLError(.badURL)
         }
 

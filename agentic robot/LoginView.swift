@@ -8,84 +8,104 @@ struct LoginView: View {
     @State private var isPasswordVisible = false
     @State private var shakeTrigger: CGFloat = 0
 
-    // onCreateAccount removed — admins create accounts from HomeView
     @Binding var successMessage: String?
 
     var body: some View {
-        VStack(spacing: 20) {
+        ZStack {
+            HTXBackground()
 
-            Text("Login")
-                .font(.largeTitle)
-                .bold()
-
-            if let successMessage = successMessage {
-                Text(successMessage)
-                    .foregroundColor(.green)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-
-            if let errorMessage = authViewModel.errorMessage {
-                Text(errorMessage)
-                    .foregroundColor(.red)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-
-            TextField("Email", text: $email)
-                .textFieldStyle(.roundedBorder)
-                .autocapitalization(.none)
-                .padding()
-
-            HStack {
-                Group {
-                    if isPasswordVisible {
-                        TextField("Password", text: $password)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    } else {
-                        SecureField("Password", text: $password)
-                    }
-                }
-
-                Button {
-                    isPasswordVisible.toggle()
-                } label: {
-                    Image(systemName: isPasswordVisible ? "eye.slash" : "eye")
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color(.systemGray4), lineWidth: 1)
+            // Radial glow accent top-right
+            RadialGradient(
+                colors: [HTXTheme.accentBright.opacity(0.18), .clear],
+                center: UnitPoint(x: 0.75, y: 0.15),
+                startRadius: 0,
+                endRadius: 320
             )
-            .padding()
+            .ignoresSafeArea()
 
-            Button("Login") {
-                if email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                    password.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    authViewModel.errorMessage = "Please fill in all fields."
-                    shakeTrigger += 1
-                    return
-                }
+            ScrollView {
+                VStack(spacing: 0) {
 
-                authViewModel.login(email: email, password: password) { success in
-                    if success {
-                        successMessage = nil
-                    } else {
-                        shakeTrigger += 1
+                    Spacer().frame(height: 60)
+
+                    // MARK: Logo + Wordmark
+                    VStack(spacing: 14) {
+                        HTXLogoView(size: 120)
+                            .transition(.opacity.combined(with: .scale))
+
+                        Text("HTX")
+                            .font(.system(size: 36, weight: .black, design: .rounded))
+                            .tracking(8)
+                            .foregroundColor(.white)
+                            .shadow(color: HTXTheme.accentBright.opacity(0.55), radius: 12)
                     }
+
+                    Spacer().frame(height: 52)
+
+                    // MARK: Login Card
+                    HTXCard {
+                        VStack(spacing: 20) {
+
+                            if let successMessage {
+                                HTXAlert(message: successMessage, isError: false)
+                            }
+
+                            if let errorMessage = authViewModel.errorMessage {
+                                HTXAlert(message: errorMessage, isError: true)
+                            }
+
+                            HTXTextField(
+                                label: "Username",
+                                placeholder: "Enter your email",
+                                text: $email,
+                                keyboardType: .emailAddress
+                            )
+
+                            HTXSecureField(
+                                label: "Password",
+                                placeholder: "Enter your password",
+                                text: $password,
+                                isVisible: $isPasswordVisible
+                            )
+
+                            HTXPrimaryButton("LOGIN") {
+                                handleLogin()
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .modifier(ShakeEffect(animatableData: shakeTrigger))
+                    .animation(.default, value: shakeTrigger)
+
+                    Spacer().frame(height: 24)
+
+                    Text("Contact your admin to register")
+                        .font(.subheadline)
+                        .foregroundColor(HTXTheme.accent.opacity(0.75))
+
+                    Spacer().frame(height: 40)
                 }
             }
-            .buttonStyle(.borderedProminent)
-
-            // "Create Account" button intentionally removed.
-            // Only admins can create accounts, from the home screen.
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding()
-        .modifier(ShakeEffect(animatableData: shakeTrigger))
-        .animation(.default, value: shakeTrigger)
+    }
+
+    private func handleLogin() {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedEmail.isEmpty, !trimmedPassword.isEmpty else {
+            authViewModel.errorMessage = "Please fill in all fields."
+            shakeTrigger += 1
+            return
+        }
+
+        authViewModel.login(email: trimmedEmail, password: trimmedPassword) { success in
+            if success {
+                successMessage = nil
+            } else {
+                shakeTrigger += 1
+            }
+        }
     }
 }

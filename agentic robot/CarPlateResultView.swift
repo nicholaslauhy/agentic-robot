@@ -21,7 +21,7 @@ struct CarPlateResultView: View {
     @State private var analysisErrorMessage: String? = nil
     @State private var damageDetections: [DamageDetection] = []
     @State private var navigateToDamageResults = false
-    
+
     @State private var didRunTypewriter = false
 
     private let damageAnalysisService = DamageAnalysisService.shared
@@ -37,88 +37,82 @@ struct CarPlateResultView: View {
 
     var body: some View {
         ZStack {
+            HTXBackground()
+
             VStack(spacing: 20) {
-                
-                HStack {
-                    Text("Car Plate Result")
-                        .font(.largeTitle)
-                        .bold()
-                    
-                    Spacer()
-                    
-                    Button("Logout") {
-                        onLogout()
+                HTXScreenHeader(
+                    title: "Car Plate Result",
+                    subtitle: "Confirm vehicle identity",
+                    trailing: AnyView(HTXLogoutButton { onLogout() })
+                )
+                .padding(.horizontal, 20)
+                .padding(.top, 18)
+
+                Spacer(minLength: 20)
+
+                HTXCard {
+                    VStack(spacing: 18) {
+                        Image(systemName: "licenseplate.fill")
+                            .font(.system(size: 46, weight: .bold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [HTXTheme.cyan, HTXTheme.accentBright],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        Text("Detected Plate")
+                            .font(.headline)
+                            .foregroundColor(HTXTheme.accent.opacity(0.9))
+
+                        Text(editablePlate.isEmpty ? "No result" : editablePlate)
+                            .font(.system(size: 42, weight: .black, design: .rounded))
+                            .tracking(2)
+                            .foregroundColor(.white)
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.white.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.14), lineWidth: 1))
+
+                        if let plateEditError {
+                            HTXAlert(message: plateEditError, isError: true)
+                        }
+
+                        if let analysisErrorMessage {
+                            HTXAlert(message: analysisErrorMessage, isError: true)
+                        }
+
+                        VStack(spacing: 12) {
+                            HTXPrimaryButton("PROCEED TO SCRATCH SCAN") {
+                                let cleanedPlate = editablePlate
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                                    .uppercased()
+
+                                guard !cleanedPlate.isEmpty else {
+                                    plateEditError = "Please enter a valid licence plate number."
+                                    return
+                                }
+
+                                editablePlate = cleanedPlate
+                                shouldOpenScratchOnReview = false
+                                navigateToTypeSelection = true
+                            }
+
+                            HTXSecondaryButton("Edit Licence Plate", systemImage: "pencil") {
+                                plateDraft = editablePlate
+                                plateEditError = nil
+                                showEditPlateSheet = true
+                            }
+                        }
                     }
-                    .foregroundColor(.red)
                 }
-                .padding()
-                
-                Text("Detected Plate:")
-                    .font(.headline)
-                
-                Text(editablePlate.isEmpty ? "No result" : editablePlate)
-                    .font(.system(size: 40, weight: .bold))
+                .padding(.horizontal, 20)
 
-                if let plateEditError {
-                    Text(plateEditError)
-                        .font(.footnote)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-                
-                if let analysisErrorMessage {
-                    Text(analysisErrorMessage)
-                        .font(.footnote)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-                
-                Spacer()
-
-                Button {
-                    plateDraft = editablePlate
-                    plateEditError = nil
-                    showEditPlateSheet = true
-                } label: {
-                    HStack {
-                        Image(systemName: "pencil")
-                        Text("Edit Licence Plate")
-                    }
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color(.secondarySystemBackground))
-                    .foregroundColor(.blue)
-                    .cornerRadius(14)
-                    .padding(.horizontal)
-                }
-                
-                Button {
-                    let cleanedPlate = editablePlate
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .uppercased()
-
-                    guard !cleanedPlate.isEmpty else {
-                        plateEditError = "Please enter a valid licence plate number."
-                        return
-                    }
-
-                    editablePlate = cleanedPlate
-                    shouldOpenScratchOnReview = false
-                    navigateToTypeSelection = true
-                } label: {
-                    Text("Proceed to Scratch Scan")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .cornerRadius(14)
-                        .padding(.horizontal)
-                }
-                .padding(.bottom, 24)
+                Spacer(minLength: 34)
             }
 
             if isAnalyzing {
@@ -128,6 +122,8 @@ struct CarPlateResultView: View {
         .sheet(isPresented: $showEditPlateSheet) {
             editPlateSheet
         }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $navigateToTypeSelection) {
             CarTypeSelectionView(
                 plate: editablePlate,
@@ -188,55 +184,55 @@ struct CarPlateResultView: View {
 
     private var editPlateSheet: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 18) {
-                Text("Edit Licence Plate")
-                    .font(.title2)
-                    .bold()
+            ZStack {
+                HTXBackground()
 
-                Text("Update the plate number if the AI detected it wrongly.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-
-                TextField("Enter licence plate", text: $plateDraft)
-                    .textInputAutocapitalization(.characters)
-                    .autocorrectionDisabled()
-                    .font(.system(size: 28, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(14)
-
-                Spacer()
-
-                Button {
-                    let cleanedPlate = plateDraft
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .uppercased()
-
-                    guard !cleanedPlate.isEmpty else {
-                        plateEditError = "Please enter a valid licence plate number."
-                        return
-                    }
-
-                    editablePlate = cleanedPlate
-                    plateEditError = nil
-                    showEditPlateSheet = false
-                } label: {
-                    Text("Save Plate Number")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Edit Licence Plate")
+                        .font(.title2.bold())
                         .foregroundColor(.white)
-                        .cornerRadius(14)
+
+                    Text("Update the plate number if the AI detected it wrongly.")
+                        .font(.subheadline)
+                        .foregroundColor(HTXTheme.accent.opacity(0.9))
+
+                    TextField("Enter licence plate", text: $plateDraft)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(size: 28, weight: .black, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.white)
+                        .tint(HTXTheme.accentBright)
+                        .padding()
+                        .background(Color.white.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color.white.opacity(0.2), lineWidth: 1))
+
+                    Spacer()
+
+                    HTXPrimaryButton("SAVE PLATE NUMBER") {
+                        let cleanedPlate = plateDraft
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .uppercased()
+
+                        guard !cleanedPlate.isEmpty else {
+                            plateEditError = "Please enter a valid licence plate number."
+                            return
+                        }
+
+                        editablePlate = cleanedPlate
+                        plateEditError = nil
+                        showEditPlateSheet = false
+                    }
                 }
+                .padding(22)
             }
-            .padding()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Cancel") {
                         showEditPlateSheet = false
                     }
+                    .foregroundColor(.white)
                 }
             }
         }
@@ -244,34 +240,7 @@ struct CarPlateResultView: View {
     }
 
     private var analyzingOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.35)
-                .ignoresSafeArea()
-
-            VStack(spacing: 14) {
-                ProgressView()
-                    .scaleEffect(1.3)
-
-                Text("Analyzing your pictures for any dents or scratches...")
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                if let analysisErrorMessage {
-                    Text(analysisErrorMessage)
-                        .font(.footnote)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .shadow(radius: 12)
-            .padding(.horizontal, 28)
-        }
+        HTXLoadingOverlay(message: "Analyzing your pictures for any dents or scratches...")
     }
 
     private func startDamageAnalysis(
