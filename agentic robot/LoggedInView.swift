@@ -93,11 +93,13 @@ struct LoggedInView: View {
     var body: some View {
 
         ZStack {
+            SubtleHTXBackground()
 
             VStack(spacing: 25) {
 
                 Text(displayedText)
-                    .font(.headline)
+                    .font(.headline.weight(.semibold))
+                    .foregroundColor(.primary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
@@ -125,6 +127,7 @@ struct LoggedInView: View {
                         }
                         .disabled(isSubmitting)
                         .buttonStyle(.borderedProminent)
+                        .tint(HTXTheme.primaryPurple)
                     }
 
                 } else {
@@ -140,6 +143,7 @@ struct LoggedInView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(HTXTheme.primaryPurple)
 
                         PhotosPicker(
                             selection: $selectedPhotoItem,
@@ -153,7 +157,11 @@ struct LoggedInView: View {
                             showFileImporter = true
                         }
                         .buttonStyle(.bordered)
+                        .tint(HTXTheme.primaryPurple)
                     }
+                    .padding(20)
+                    .subtleHTXCard()
+                    .padding(.horizontal)
                     .opacity(showButtons ? 1 : 0)
                 }
 
@@ -186,6 +194,7 @@ struct LoggedInView: View {
 
         .navigationTitle("Report Generation")
         .navigationBarTitleDisplayMode(.inline)
+        .tint(HTXTheme.primaryPurple)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Logout") {

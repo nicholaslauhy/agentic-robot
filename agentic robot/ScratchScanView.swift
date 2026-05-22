@@ -78,12 +78,15 @@ struct ScratchScanView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            SubtleHTXBackground()
+
+            VStack(spacing: 0) {
 
             // HEADER
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Scratch Scan").font(.largeTitle).bold()
+                    Text("Scratch Scan").font(.largeTitle).bold().foregroundColor(HTXTheme.primaryPurple)
                     Text("\(carType.rawValue)  ·  \(plate)")
                         .font(.subheadline).foregroundColor(.secondary)
                 }
@@ -99,7 +102,7 @@ struct ScratchScanView: View {
                         .font(.caption).foregroundColor(.secondary)
                     Spacer()
                     Text("\(Int(progress * 100))%")
-                        .font(.caption.bold()).foregroundColor(carType.accentColor)
+                        .font(.caption.bold()).foregroundColor(HTXTheme.primaryPurple)
                 }
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -114,6 +117,7 @@ struct ScratchScanView: View {
             .padding(.horizontal).padding(.bottom, 12)
 
             if showCompletionScreen { reviewView } else { scanGuideView }
+        }
         }
         .overlay {
             if isSubmittingAnalysis {
@@ -140,6 +144,7 @@ struct ScratchScanView: View {
 
         // ── Main capture ───────────────────────────────────────────────────
         .navigationBarBackButtonHidden(true)
+        .tint(HTXTheme.primaryPurple)
 
         // ── Main capture ───────────────────────────────────────────────────
         .fullScreenCover(isPresented: $showCamera) {

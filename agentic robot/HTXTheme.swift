@@ -248,3 +248,104 @@ struct HTXLogoView: View {
         .shadow(color: HTXTheme.accentBright.opacity(0.4), radius: 20)
     }
 }
+
+
+// MARK: - Subtle HTX Styling Helpers
+// These are meant for the post-login screens: light, readable iOS UI with a small HTX purple accent.
+extension HTXTheme {
+    static let primaryPurple = Color(red: 0.36, green: 0.10, blue: 0.58)
+    static let secondaryPurple = Color(red: 0.52, green: 0.18, blue: 0.72)
+    static let softPurpleBackground = Color(red: 0.985, green: 0.970, blue: 1.000)
+    static let softPurpleCard = Color(red: 0.995, green: 0.985, blue: 1.000)
+    static let softPurpleBorder = Color(red: 0.36, green: 0.10, blue: 0.58).opacity(0.16)
+}
+
+struct SubtleHTXBackground: View {
+    var body: some View {
+        ZStack {
+            Color(.systemGroupedBackground).ignoresSafeArea()
+            LinearGradient(
+                colors: [HTXTheme.primaryPurple.opacity(0.16), HTXTheme.softPurpleBackground.opacity(0.55), .clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
+    }
+}
+
+struct SubtleHTXTitleBar: View {
+    let title: String
+    let subtitle: String?
+    let trailing: AnyView?
+
+    init(title: String, subtitle: String? = nil, trailing: AnyView? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(HTXTheme.primaryPurple)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+            if let trailing { trailing }
+        }
+        .padding(.horizontal)
+        .padding(.top, 12)
+    }
+}
+
+struct SubtleHTXCardModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(HTXTheme.softPurpleCard)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(HTXTheme.softPurpleBorder, lineWidth: 1)
+            )
+            .shadow(color: HTXTheme.primaryPurple.opacity(0.06), radius: 8, x: 0, y: 4)
+    }
+}
+
+struct SubtleHTXPrimaryButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(configuration.isPressed ? HTXTheme.secondaryPurple : HTXTheme.primaryPurple)
+            )
+            .foregroundColor(.white)
+            .shadow(color: HTXTheme.primaryPurple.opacity(configuration.isPressed ? 0.08 : 0.18), radius: 8, x: 0, y: 4)
+    }
+}
+
+struct SubtleHTXGroupBoxStyle: GroupBoxStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            configuration.label
+                .font(.headline)
+                .foregroundColor(HTXTheme.primaryPurple)
+            configuration.content
+        }
+        .padding(16)
+        .modifier(SubtleHTXCardModifier())
+    }
+}
+
+extension View {
+    func subtleHTXCard() -> some View { modifier(SubtleHTXCardModifier()) }
+}

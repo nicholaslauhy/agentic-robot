@@ -12,82 +12,93 @@ struct HomeView: View {
     private let fullText = "What do you want to do today?"
 
     var body: some View {
-        VStack(spacing: 24) {
+        ZStack {
+            SubtleHTXBackground()
 
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Welcome")
-                        .font(.largeTitle)
-                        .bold()
+            VStack(spacing: 24) {
 
-                    Text(auth.isAdmin ? "Administrator" : "Member")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Welcome")
+                            .font(.largeTitle.weight(.bold))
+                            .foregroundColor(HTXTheme.primaryPurple)
+
+                        Text(auth.isAdmin ? "Administrator" : "Member")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Logout") {
+                        auth.logout()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.red)
                 }
+                .padding(.horizontal)
+                .padding(.top)
 
                 Spacer()
 
-                Button("Logout") {
-                    auth.logout()
+                VStack(spacing: 12) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(.system(size: 42, weight: .semibold))
+                        .foregroundColor(HTXTheme.primaryPurple)
+                        .padding(.bottom, 4)
+
+                    Text(displayedText)
+                        .font(.title2.weight(.bold))
+                        .foregroundColor(.primary)
+                        .multilineTextAlignment(.center)
+                        .frame(minHeight: 34)
+                        .padding(.horizontal)
+
+                    if showSubtitle {
+                        Text("Choose an action below to continue.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
-                .foregroundColor(.red)
-            }
-            .padding(.horizontal)
-            .padding(.top)
+                .padding(.horizontal)
 
-            Spacer()
+                if showButtons {
+                    VStack(spacing: 16) {
+                        if auth.isAdmin {
+                            NavigationLink {
+                                MemberManagementView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "person.badge.plus.fill",
+                                    title: "Add Member",
+                                    subtitle: "Create and manage team accounts"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
 
-            VStack(spacing: 10) {
-                Text(displayedText)
-                    .font(.title2.weight(.bold))
-                    .multilineTextAlignment(.center)
-                    .frame(minHeight: 34)
-                    .padding(.horizontal)
-
-                if showSubtitle {
-                    Text("Choose an action below to continue.")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-            .padding(.horizontal)
-
-            if showButtons {
-                VStack(spacing: 16) {
-                    if auth.isAdmin {
                         NavigationLink {
-                            MemberManagementView()
+                            LoggedInView()
                         } label: {
                             HomeActionRow(
-                                icon: "person.badge.plus.fill",
-                                title: "Add Member",
-                                subtitle: "Create and manage team accounts"
+                                icon: "doc.text.magnifyingglass",
+                                title: "Report Generation",
+                                subtitle: "Scan licence plate and generate report"
                             )
                         }
                         .buttonStyle(.plain)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
-
-                    NavigationLink {
-                        LoggedInView()
-                    } label: {
-                        HomeActionRow(
-                            icon: "doc.text.magnifyingglass",
-                            title: "Report Generation",
-                            subtitle: "Scan licence plate and generate report"
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
-            }
 
-            Spacer()
+                Spacer()
+            }
         }
-        .background(Color(.systemBackground))
         .navigationBarBackButtonHidden(true)
+        .tint(HTXTheme.primaryPurple)
         .onAppear { startTypewriter() }
         .onDisappear {
             typewriterTask?.cancel()
@@ -137,10 +148,16 @@ private struct HomeActionRow: View {
         HStack(spacing: 16) {
             Image(systemName: icon)
                 .font(.title2)
-                .foregroundColor(.blue)
-                .frame(width: 44, height: 44)
-                .background(Color.blue.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .foregroundColor(.white)
+                .frame(width: 46, height: 46)
+                .background(
+                    LinearGradient(
+                        colors: [HTXTheme.primaryPurple, HTXTheme.secondaryPurple],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -156,10 +173,9 @@ private struct HomeActionRow: View {
 
             Image(systemName: "chevron.right")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(HTXTheme.primaryPurple)
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .subtleHTXCard()
     }
 }

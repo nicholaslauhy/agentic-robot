@@ -75,13 +75,17 @@ struct CarTypeSelectionView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            SubtleHTXBackground()
+
+            VStack(spacing: 0) {
 
             // HEADER
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Vehicle Type")
-                        .font(.largeTitle).bold()
+                        .font(.largeTitle)
+                        .foregroundColor(HTXTheme.primaryPurple).bold()
                     Text("Plate: \(plate)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
@@ -153,7 +157,9 @@ struct CarTypeSelectionView: View {
                 .animation(.spring(response: 0.4), value: selectedType)
             }
         }
+        }
         .navigationBarBackButtonHidden(true)
+        .tint(HTXTheme.primaryPurple)
     }
 }
 

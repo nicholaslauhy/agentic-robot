@@ -34,7 +34,10 @@ struct MemberManagementView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ZStack {
+            SubtleHTXBackground()
+
+            ScrollView {
             VStack(alignment: .leading, spacing: 28) {
 
                 // ── Add Member ──────────────────────────────────────────
@@ -102,6 +105,7 @@ struct MemberManagementView: View {
                             }
                         }
                         .buttonStyle(.borderedProminent)
+                        .tint(HTXTheme.primaryPurple)
                         .disabled(isAdding)
                     }
                 }
@@ -141,7 +145,7 @@ struct MemberManagementView: View {
                                             HStack(spacing: 6) {
                                                 Text(member.role.capitalized)
                                                     .font(.caption)
-                                                    .foregroundColor(member.role == "admin" ? .blue : .secondary)
+                                                    .foregroundColor(member.role == "admin" ? HTXTheme.primaryPurple : .secondary)
 
                                                 Text(member.active ? "ACTIVE" : "INACTIVE")
                                                     .font(.caption2)
@@ -206,6 +210,9 @@ struct MemberManagementView: View {
                 .padding(.horizontal)
             }
             .padding(.vertical)
+        }
+        .groupBoxStyle(SubtleHTXGroupBoxStyle())
+        .tint(HTXTheme.primaryPurple)
         }
         .navigationTitle("Add Member")
         .navigationBarTitleDisplayMode(.inline)

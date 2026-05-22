@@ -126,7 +126,10 @@ struct DamageAnalysisResultView: View {
     }
 
     var body: some View {
-        ScrollView {
+        ZStack {
+            SubtleHTXBackground()
+
+            ScrollView {
             VStack(spacing: 18) {
 
                 // ── Header ────────────────────────────────────────────────────
@@ -146,6 +149,7 @@ struct DamageAnalysisResultView: View {
                     VStack(alignment: .center, spacing: 4) {
                         Text("Damage Analysis")
                             .font(.title2).bold()
+                            .foregroundColor(HTXTheme.primaryPurple)
                         Text("\(carType.rawValue) · \(plate)")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -223,7 +227,7 @@ struct DamageAnalysisResultView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(carType.accentColor)
+                    .background(HTXTheme.primaryPurple)
                     .foregroundColor(.white)
                     .cornerRadius(14)
                     .padding(.horizontal)
@@ -231,6 +235,7 @@ struct DamageAnalysisResultView: View {
                 .padding(.top, 12)
                 .padding(.bottom, 30)
             }
+        }
         }
         .overlay {
             if isGeneratingReport {
@@ -342,7 +347,7 @@ struct DamageDetectionCard: View {
 
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(detection.damageType.capitalized).font(.headline)
+                    Text(detection.damageType.capitalized).font(.headline).foregroundColor(HTXTheme.primaryPurple)
                     Text(detection.angleName).font(.subheadline).foregroundColor(.secondary)
                 }
                 Spacer()
@@ -382,8 +387,9 @@ struct DamageDetectionCard: View {
             .padding(.top, 10)
         }
         .padding(12)
-        .background(Color(.secondarySystemBackground))
+        .background(HTXTheme.softPurpleCard)
         .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(HTXTheme.softPurpleBorder, lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 18))
     }
 }
@@ -492,6 +498,9 @@ struct DamageDetailSheet: View {
             }
             .navigationTitle("Damage Detail")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(SubtleHTXBackground())
+            .tint(HTXTheme.primaryPurple)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -1521,7 +1530,7 @@ struct PoliceReportStageZeroView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(carType.accentColor)
+                    .tint(HTXTheme.primaryPurple)
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 }
             }
@@ -1556,7 +1565,7 @@ struct PoliceReportStageZeroView: View {
         axis: Axis = .horizontal
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
         }
@@ -1713,13 +1722,16 @@ struct PoliceReportStageOneView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(canProceed ? carType.accentColor : .gray)
+                    .tint(canProceed ? HTXTheme.primaryPurple : .gray)
                     .disabled(!canProceed)
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 }
             }
             .navigationTitle("Report Stage 1")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollContentBackground(.hidden)
+            .background(SubtleHTXBackground())
+            .tint(HTXTheme.primaryPurple)
             .navigationDestination(isPresented: $showStageTwo) {
                 PoliceReportStageTwoView(
                     plate: plate,
@@ -1749,7 +1761,7 @@ struct PoliceReportStageOneView: View {
         axis: Axis = .horizontal
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
         }
@@ -1763,7 +1775,7 @@ struct PoliceReportStageOneView: View {
         emptyTitle: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             Picker(emptyTitle, selection: selection) {
                 ForEach(options, id: \.self) { option in
                     Text(option.isEmpty ? emptyTitle : option).tag(option)
@@ -1780,7 +1792,7 @@ struct PoliceReportStageOneView: View {
         output: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             DatePicker("", selection: date, displayedComponents: .date)
                 .datePickerStyle(.wheel)
                 .labelsHidden()
@@ -1801,7 +1813,7 @@ struct PoliceReportStageOneView: View {
         output: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.wheel)
                 .labelsHidden()
@@ -1876,7 +1888,7 @@ struct PoliceReportStageTwoView: View {
 
             Section("Interpreter") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Interpreter status").font(.caption).foregroundColor(.secondary)
+                    Text("Interpreter status").font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
                     TextField("Not available", text: $details.interpreterAvailability)
                 }
                 signatureInput(
@@ -1919,13 +1931,16 @@ struct PoliceReportStageTwoView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(isGeneratingReport ? .gray : carType.accentColor)
+                .tint(isGeneratingReport ? .gray : HTXTheme.primaryPurple)
                 .disabled(isGeneratingReport)
                 .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
             }
         }
         .navigationTitle("Report Stage 2")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .background(SubtleHTXBackground())
+        .tint(HTXTheme.primaryPurple)
         .sheet(item: $pdfURL) { url in
             ReportWelcomeView(
                 plate: plate,
@@ -1954,7 +1969,7 @@ struct PoliceReportStageTwoView: View {
         axis: Axis = .horizontal
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
         }
@@ -1967,7 +1982,7 @@ struct PoliceReportStageTwoView: View {
         output: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption).foregroundColor(.secondary)
+            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
             DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.wheel)
                 .labelsHidden()

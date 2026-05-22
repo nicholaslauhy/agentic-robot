@@ -37,12 +37,14 @@ struct CarPlateResultView: View {
 
     var body: some View {
         ZStack {
+            SubtleHTXBackground()
+
             VStack(spacing: 20) {
                 
                 HStack {
-                    Text("Car Plate Result")
-                        .font(.largeTitle)
-                        .bold()
+                    Text("Licence Plate Result")
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundColor(HTXTheme.primaryPurple)
                     
                     Spacer()
                     
@@ -57,7 +59,12 @@ struct CarPlateResultView: View {
                     .font(.headline)
                 
                 Text(editablePlate.isEmpty ? "No result" : editablePlate)
-                    .font(.system(size: 40, weight: .bold))
+                    .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(HTXTheme.primaryPurple.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 if let plateEditError {
                     Text(plateEditError)
@@ -90,7 +97,7 @@ struct CarPlateResultView: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Color(.secondarySystemBackground))
-                    .foregroundColor(.blue)
+                    .foregroundColor(HTXTheme.primaryPurple)
                     .cornerRadius(14)
                     .padding(.horizontal)
                 }
@@ -113,7 +120,7 @@ struct CarPlateResultView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.blue)
+                        .background(HTXTheme.primaryPurple)
                         .foregroundColor(.white)
                         .cornerRadius(14)
                         .padding(.horizontal)
@@ -226,7 +233,7 @@ struct CarPlateResultView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.blue)
+                        .background(HTXTheme.primaryPurple)
                         .foregroundColor(.white)
                         .cornerRadius(14)
                 }
