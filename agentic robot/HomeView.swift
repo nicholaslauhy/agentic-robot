@@ -17,6 +17,7 @@ struct HomeView: View {
 
             VStack(spacing: 24) {
 
+                // MARK: - Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Welcome")
@@ -41,6 +42,7 @@ struct HomeView: View {
 
                 Spacer()
 
+                // MARK: - Typewriter
                 VStack(spacing: 12) {
                     Image(systemName: "shield.lefthalf.filled")
                         .font(.system(size: 42, weight: .semibold))
@@ -63,8 +65,11 @@ struct HomeView: View {
                 }
                 .padding(.horizontal)
 
+                // MARK: - Action Buttons
                 if showButtons {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 14) {
+
+                        // Admin only: Add Member
                         if auth.isAdmin {
                             NavigationLink {
                                 MemberManagementView()
@@ -79,6 +84,7 @@ struct HomeView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
 
+                        // Everyone: Report Generation
                         NavigationLink {
                             LoggedInView()
                         } label: {
@@ -86,6 +92,32 @@ struct HomeView: View {
                                 icon: "doc.text.magnifyingglass",
                                 title: "Report Generation",
                                 subtitle: "Scan licence plate and generate report"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                        // Everyone: Scan Barcode
+                        NavigationLink {
+                            ReportScannerView()
+                        } label: {
+                            HomeActionRow(
+                                icon: "barcode.viewfinder",
+                                title: "Scan Report Barcode",
+                                subtitle: "Point camera at a report barcode"
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                        // Everyone: View All Reports
+                        NavigationLink {
+                            ReportsListView()
+                        } label: {
+                            HomeActionRow(
+                                icon: "folder.fill",
+                                title: "View Existing Reports",
+                                subtitle: "Browse and search all generated reports"
                             )
                         }
                         .buttonStyle(.plain)
@@ -117,20 +149,14 @@ struct HomeView: View {
                 if Task.isCancelled { return }
                 try? await Task.sleep(for: .milliseconds(38))
                 if Task.isCancelled { return }
-
-                await MainActor.run {
-                    displayedText.append(char)
-                }
+                await MainActor.run { displayedText.append(char) }
             }
 
             if Task.isCancelled { return }
             try? await Task.sleep(for: .milliseconds(180))
 
             await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.35)) {
-                    showSubtitle = true
-                }
-
+                withAnimation(.easeInOut(duration: 0.35)) { showSubtitle = true }
                 withAnimation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.12)) {
                     showButtons = true
                 }
@@ -139,6 +165,7 @@ struct HomeView: View {
     }
 }
 
+// MARK: - Shared Action Row
 private struct HomeActionRow: View {
     let icon: String
     let title: String
