@@ -1,10 +1,44 @@
 import SwiftUI
 import UIKit
 import Combine
+import FirebaseAuth
 
 // Make URL usable as a sheet item
 extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
+}
+
+// MARK: - Navigation Helper
+
+private enum HTXNavigationHelper {
+    static func popToActivityList() {
+        DispatchQueue.main.async {
+            guard let root = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })?
+                .windows
+                .first(where: { $0.isKeyWindow })?
+                .rootViewController else { return }
+
+            root.findNavigationController()?.popToRootViewController(animated: true)
+        }
+    }
+}
+
+private extension UIViewController {
+    func findNavigationController() -> UINavigationController? {
+        if let navigationController = self as? UINavigationController {
+            return navigationController
+        }
+
+        for child in children {
+            if let navigationController = child.findNavigationController() {
+                return navigationController
+            }
+        }
+
+        return presentedViewController?.findNavigationController()
+    }
 }
 
 // MARK: - Mutable Detection Model
@@ -1170,7 +1204,7 @@ struct PDFKitView: UIViewRepresentable {
     }
 }
 
-// MARK: - Report Welcome View
+// MARK: - Full Page Report Generated View
 
 struct ReportWelcomeView: View {
     let plate: String
@@ -1178,6 +1212,7 @@ struct ReportWelcomeView: View {
     let detectionCount: Int
     let pdfURL: URL
     var onLogout: () -> Void
+    var onBackToActivityList: () -> Void
 
     @Environment(\.dismiss) private var dismiss
 
@@ -1286,6 +1321,21 @@ struct ReportWelcomeView: View {
                                 }
 
                                 Button {
+                                    onBackToActivityList()
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "list.bullet.rectangle")
+                                        Text("Back to Activity List")
+                                    }
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(HTXTheme.primaryPurple.opacity(0.12))
+                                    .foregroundColor(HTXTheme.primaryPurple)
+                                    .cornerRadius(14)
+                                }
+
+                                Button {
                                     onLogout()
                                 } label: {
                                     Text("Logout")
@@ -1308,27 +1358,19 @@ struct ReportWelcomeView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
-                }
-
-                ToolbarItemGroup(placement: .primaryAction) {
-                    if showingPreview {
+                if showingPreview {
+                    ToolbarItem(placement: .primaryAction) {
                         Button {
                             sharePDF(url: pdfURL)
                         } label: {
                             Image(systemName: "square.and.arrow.up")
                         }
                     }
-
-                    Button(role: .destructive) {
-                        onLogout()
-                    } label: {
-                        Text("Logout")
-                    }
                 }
             }
             .tint(HTXTheme.primaryPurple)
+            .navigationBarBackButtonHidden(true)
+            .interactiveDismissDisabled(true)
         }
     }
 
@@ -1670,7 +1712,7 @@ struct PoliceReportStageOneDetails {
 struct PoliceReportStageTwoDetails {
     var officerRecordingName = ""
     var officerSignature: UIImage? = nil
-    var interpreterAvailability = "Not available"
+    var interpreterAvailability = ""
     var interpreterSignature: UIImage? = nil
     var interpreterSignatureDateTime = ""
     var informantName = ""
@@ -1941,6 +1983,7 @@ struct PoliceReportStageTwoView: View {
     @State private var officerSignatureImage: UIImage? = nil
     @State private var interpreterSignatureImage: UIImage? = nil
     @State private var informantSignatureImage: UIImage? = nil
+    @State private var showReportReview = false
 
     var body: some View {
         Form {
@@ -1956,10 +1999,8 @@ struct PoliceReportStageTwoView: View {
             }
 
             Section("Interpreter") {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Interpreter status").font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
-                    TextField("Not available", text: $details.interpreterAvailability)
-                }
+                reportTextField("Name of Interpreter", text: $details.interpreterAvailability, placeholder: "Enter interpreter name")
+
                 signatureInput(
                     title: "Signature of Interpreter",
                     image: $interpreterSignatureImage,
@@ -1988,19 +2029,17 @@ struct PoliceReportStageTwoView: View {
 
             Section {
                 Button {
-                    generateReport()
+                    showReportReview = true
                 } label: {
                     HStack {
-                        if isGeneratingReport {
-                            ProgressView().tint(.white)
-                        }
-                        Text(isGeneratingReport ? "Generating Report..." : "Generate Report")
+                        Image(systemName: "checkmark.seal.fill")
+                        Text("Confirm Report Details")
                             .font(.headline)
                     }
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(isGeneratingReport ? .gray : HTXTheme.primaryPurple)
+                .tint(HTXTheme.primaryPurple)
                 .disabled(isGeneratingReport)
                 .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
             }
@@ -2010,7 +2049,19 @@ struct PoliceReportStageTwoView: View {
         .scrollContentBackground(.hidden)
         .background(SubtleHTXBackground())
         .tint(HTXTheme.primaryPurple)
-        .sheet(item: $pdfURL) { url in
+        .navigationDestination(isPresented: $showReportReview) {
+            PoliceReportReviewView(
+                plate: plate,
+                carType: carType,
+                detections: detections,
+                policeStation: policeStation,
+                stageOne: stageOne,
+                stageTwo: finalizedStageTwoDetails(),
+                isGeneratingReport: isGeneratingReport,
+                onGenerate: { generateReport() }
+            )
+        }
+        .fullScreenCover(item: $pdfURL) { url in
             ReportWelcomeView(
                 plate: plate,
                 carType: carType,
@@ -2020,10 +2071,16 @@ struct PoliceReportStageTwoView: View {
                     pdfURL = nil
                     isPresented = false
 
-                    // Wait for the PDF sheet/full-screen report flow to dismiss,
-                    // then trigger the app-level logout from DamageAnalysisResultView.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         onLogout()
+                    }
+                },
+                onBackToActivityList: {
+                    pdfURL = nil
+                    isPresented = false
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        HTXNavigationHelper.popToActivityList()
                     }
                 }
             )
@@ -2089,21 +2146,23 @@ struct PoliceReportStageTwoView: View {
         .padding(.vertical, 6)
     }
 
+    private func finalizedStageTwoDetails() -> PoliceReportStageTwoDetails {
+        var finalStageTwo = details
+        finalStageTwo.officerSignature = officerSignatureImage
+        finalStageTwo.interpreterSignature = interpreterSignatureImage
+        if finalStageTwo.informantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            finalStageTwo.informantName = stageOne.nameOfInformant
+        }
+        finalStageTwo.informantSignature = informantSignatureImage
+        return finalStageTwo
+    }
+
     private func generateReport() {
         guard !isGeneratingReport else { return }
         isGeneratingReport = true
         pdfURL = nil
 
-        var finalStageTwo = details
-        finalStageTwo.officerSignature = officerSignatureImage
-        finalStageTwo.interpreterSignature = interpreterSignatureImage
-        if finalStageTwo.interpreterAvailability.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && interpreterSignatureImage == nil {
-            finalStageTwo.interpreterAvailability = "Not available"
-        }
-        if finalStageTwo.informantName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            finalStageTwo.informantName = stageOne.nameOfInformant
-        }
-        finalStageTwo.informantSignature = informantSignatureImage
+        let finalStageTwo = finalizedStageTwoDetails()
 
         let plate = plate
         let carTypeValue = carType.rawValue
@@ -2111,6 +2170,14 @@ struct PoliceReportStageTwoView: View {
         let scanImages = scanImages
         let policeStation = policeStation
         let stageOne = stageOne
+        let numericBarcodeId = ReportStore.makeNumericBarcodeId()
+        let reportNo = ReportStore.makeReportNo(plate: plate)
+        let officerName = finalStageTwo.officerRecordingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let signedInName = Auth.auth().currentUser?.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let signedInEmail = Auth.auth().currentUser?.email?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let generatedBy = !officerName.isEmpty
+            ? officerName
+            : (!(signedInName ?? "").isEmpty ? signedInName! : (signedInEmail?.isEmpty == false ? signedInEmail! : "Not recorded"))
 
         Task(priority: .userInitiated) {
             let url = await Task(priority: .userInitiated) {
@@ -2121,15 +2188,190 @@ struct PoliceReportStageTwoView: View {
                     scanImages: scanImages,
                     policeStation: policeStation,
                     stageOne: stageOne,
-                    stageTwo: finalStageTwo
+                    stageTwo: finalStageTwo,
+                    numericBarcodeId: numericBarcodeId
                 )
             }.value
 
             await MainActor.run {
                 isGeneratingReport = false
+                if let url {
+                    ReportStore.saveReport(
+                        reportNo: reportNo,
+                        plate: plate,
+                        carType: carTypeValue,
+                        generatedBy: generatedBy,
+                        detectionCount: detections.count,
+                        numericBarcodeId: numericBarcodeId,
+                        pdfURL: url
+                    )
+                }
                 pdfURL = url
             }
         }
+    }
+}
+
+// MARK: - Report Confirmation Review
+
+struct PoliceReportReviewView: View {
+    let plate: String
+    let carType: CarType
+    let detections: [MutableDamageDetection]
+    let policeStation: PoliceStationDetails
+    let stageOne: PoliceReportStageOneDetails
+    let stageTwo: PoliceReportStageTwoDetails
+    let isGeneratingReport: Bool
+    var onGenerate: () -> Void
+
+    @State private var showGenerateConfirmation = false
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                VStack(spacing: 8) {
+                    Image(systemName: "checklist.checked")
+                        .font(.system(size: 46, weight: .semibold))
+                        .foregroundColor(HTXTheme.primaryPurple)
+
+                    Text("Confirm Report Details")
+                        .font(.title2.weight(.bold))
+
+                    Text("Review all fields before creating the final PDF report.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 18)
+
+                reviewSection("Vehicle") {
+                    reviewRow("Plate", plate)
+                    reviewRow("Vehicle Type", carType.rawValue)
+                    reviewRow("Damage Cases", "\(detections.count)")
+                }
+
+                reviewSection("Station") {
+                    reviewRow("Division", policeStation.division)
+                    reviewRow("NPC", policeStation.displayName)
+                    reviewRow("Address", "\(policeStation.address), Singapore \(policeStation.postalCode)")
+                    reviewRow("Telephone", policeStation.telephone.isEmpty ? "-" : policeStation.telephone)
+                }
+
+                reviewSection("Stage 1 — Informant & Incident") {
+                    reviewRow("Name Of Informant", stageOne.nameOfInformant)
+                    reviewRow("Address", stageOne.address)
+                    reviewRow("ID Type / ID No.", stageOne.idTypeAndNo)
+                    reviewRow("FIN No.", stageOne.finNo)
+                    reviewRow("Contact", stageOne.contactNumber)
+                    reviewRow("Nationality", stageOne.nationality)
+                    reviewRow("Email", stageOne.emailAddress)
+                    reviewRow("Occupation", stageOne.occupation)
+                    reviewRow("Sex", stageOne.sex)
+                    reviewRow("Age", stageOne.age)
+                    reviewRow("Date of Birth", stageOne.dateOfBirth)
+                    reviewRow("Race", stageOne.race)
+                    reviewRow("Institution / School", stageOne.institutionSchoolName)
+                    reviewRow("Language", stageOne.language)
+                    reviewRow("Date/Time Of Incident", stageOne.dateTimeOfIncident)
+                    reviewRow("Location Of Incident", stageOne.locationOfIncident)
+                    reviewRow("Vide Report No.", stageOne.videReportNo)
+                    reviewRow("Station Diary No.", stageOne.stationDiaryNo)
+                }
+
+                reviewSection("Stage 2 — Officer & Signatures") {
+                    reviewRow("Officer Recording", stageTwo.officerRecordingName)
+                    reviewRow("Officer Signature", stageTwo.officerSignature == nil ? "Not provided" : "Provided")
+                    reviewRow("Interpreter Name", stageTwo.interpreterAvailability)
+                    reviewRow("Interpreter Signature", stageTwo.interpreterSignature == nil ? "Not provided" : "Provided")
+                    reviewRow("Interpreter Date/Time", stageTwo.interpreterSignatureDateTime)
+                    reviewRow("Informant Name", stageTwo.informantName)
+                    reviewRow("Informant Signature", stageTwo.informantSignature == nil ? "Not provided" : "Provided")
+                    reviewRow("Informant Date/Time", stageTwo.informantSignatureDateTime)
+                    reviewRow("Officer In-Charge", stageTwo.officerInCharge)
+                    reviewRow("Classification", stageTwo.classificationOfCase)
+                }
+
+                Button {
+                    showGenerateConfirmation = true
+                } label: {
+                    HStack {
+                        if isGeneratingReport {
+                            ProgressView().tint(.white)
+                        }
+                        Text(isGeneratingReport ? "Generating Report..." : "Generate Report")
+                            .font(.headline)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(isGeneratingReport ? Color.gray : HTXTheme.primaryPurple)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(isGeneratingReport)
+                .padding(.horizontal)
+                .padding(.bottom, 28)
+            }
+        }
+        .navigationTitle("Review Details")
+        .navigationBarTitleDisplayMode(.inline)
+        .background(SubtleHTXBackground())
+        .alert("Are you sure you want to generate the report?", isPresented: $showGenerateConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Yes, Generate Report") {
+                onGenerate()
+            }
+        } message: {
+            Text("Make sure that all fields are correct")
+        }
+    }
+
+    @ViewBuilder
+    private func reviewSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.headline.weight(.bold))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+
+            content()
+        }
+        .background(Color(.systemBackground).opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(HTXTheme.primaryPurple.opacity(0.14), lineWidth: 1)
+        )
+        .padding(.horizontal)
+    }
+
+    private func reviewRow(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 128, alignment: .leading)
+
+                Text(displayValue(value))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            Divider().padding(.leading, 16)
+        }
+    }
+
+    private func displayValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "-" : trimmed
     }
 }
 
@@ -2175,6 +2417,7 @@ struct SignaturePadView: UIViewRepresentable {
         view.onImageChanged = { image in
             self.image = image
         }
+        view.loadCommittedImageIfNeeded(image)
         return view
     }
 
@@ -2182,6 +2425,8 @@ struct SignaturePadView: UIViewRepresentable {
         if context.coordinator.lastClearTrigger != clearTrigger {
             uiView.clear()
             context.coordinator.lastClearTrigger = clearTrigger
+        } else {
+            uiView.loadCommittedImageIfNeeded(image)
         }
     }
 
@@ -2199,8 +2444,13 @@ struct SignaturePadView: UIViewRepresentable {
 
 final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
     var onImageChanged: ((UIImage?) -> Void)?
-    private var lines: [[CGPoint]] = []
+
+    /// Previously completed strokes are committed into this bitmap.
+    /// This prevents the signature from disappearing when SwiftUI redraws
+    /// the parent view after the user lifts their finger/stylus.
+    private var committedImage: UIImage?
     private var currentLine: [CGPoint] = []
+    private var isDrawing = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -2227,6 +2477,28 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
         false
     }
 
+    /// Rehydrates the canvas when SwiftUI recreates/updates the UIView.
+    /// We do not call this while the user is actively drawing, otherwise a
+    /// state update could overwrite the in-progress stroke.
+    func loadCommittedImageIfNeeded(_ image: UIImage?) {
+        guard !isDrawing else { return }
+
+        if image == nil {
+            if committedImage != nil {
+                committedImage = nil
+                currentLine.removeAll()
+                setNeedsDisplay()
+            }
+            return
+        }
+
+        if committedImage == nil {
+            committedImage = image
+            currentLine.removeAll()
+            setNeedsDisplay()
+        }
+    }
+
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let point = gesture.location(in: self)
         let clampedPoint = CGPoint(
@@ -2236,18 +2508,25 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
 
         switch gesture.state {
         case .began:
+            isDrawing = true
             currentLine = [clampedPoint]
             setNeedsDisplay()
+
         case .changed:
             currentLine.append(clampedPoint)
             setNeedsDisplay()
+
         case .ended, .cancelled, .failed:
             if !currentLine.isEmpty {
-                lines.append(currentLine)
-                currentLine = []
-                onImageChanged?(renderSignatureImage())
+                // Commit the just-finished stroke into the bitmap instead of
+                // throwing it away. The next stroke will draw on top of this.
+                committedImage = renderSignatureImage(includeCurrentLine: true)
+                currentLine.removeAll()
+                onImageChanged?(committedImage)
             }
+            isDrawing = false
             setNeedsDisplay()
+
         default:
             break
         }
@@ -2258,37 +2537,57 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
         UIColor.white.setFill()
         UIRectFill(rect)
 
+        if let committedImage {
+            committedImage.draw(in: bounds)
+        }
+
+        drawLine(currentLine)
+    }
+
+    func clear() {
+        committedImage = nil
+        currentLine.removeAll()
+        isDrawing = false
+        setNeedsDisplay()
+        onImageChanged?(nil)
+    }
+
+    private func drawLine(_ line: [CGPoint]) {
+        guard let first = line.first else { return }
+
         let path = UIBezierPath()
         path.lineWidth = 2.2
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
+        path.move(to: first)
 
-        for line in lines + (currentLine.isEmpty ? [] : [currentLine]) {
-            guard let first = line.first else { continue }
-            path.move(to: first)
-            for point in line.dropFirst() {
-                path.addLine(to: point)
-            }
+        for point in line.dropFirst() {
+            path.addLine(to: point)
         }
 
         UIColor.black.setStroke()
         path.stroke()
     }
 
-    func clear() {
-        lines.removeAll()
-        currentLine.removeAll()
-        setNeedsDisplay()
-        onImageChanged?(nil)
-    }
+    private func renderSignatureImage(includeCurrentLine: Bool) -> UIImage? {
+        guard bounds.width > 0, bounds.height > 0 else { return committedImage }
+        guard committedImage != nil || !currentLine.isEmpty else { return nil }
 
-    private func renderSignatureImage() -> UIImage? {
-        guard !lines.isEmpty else { return nil }
-        let renderer = UIGraphicsImageRenderer(bounds: bounds)
-        return renderer.image { context in
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = window?.screen.scale ?? traitCollection.displayScale
+        let renderer = UIGraphicsImageRenderer(bounds: bounds, format: format)
+
+        return renderer.image { _ in
             UIColor.white.setFill()
             UIRectFill(bounds)
-            layer.render(in: context.cgContext)
+
+            if let committedImage {
+                committedImage.draw(in: bounds)
+            }
+
+            if includeCurrentLine {
+                drawLine(currentLine)
+            }
         }
     }
 }

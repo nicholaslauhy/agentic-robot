@@ -211,7 +211,7 @@ struct CarPlateResultView: View {
                     .multilineTextAlignment(.center)
                     .padding()
                     .background(Color(.secondarySystemBackground))
-                    .cornerRadius(14)
+                    .cornerRadius(14)#imageLiteral(resourceName: "simulator_screenshot_61E30555-95AE-436E-88EF-85DDB23C4E17.png")
 
                 Spacer()
 
