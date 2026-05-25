@@ -48,6 +48,7 @@ struct ScratchScanView: View {
     @State private var replaceImage: UIImage? = nil // set by PHPicker callback
 
     private var capturedCount: Int { capturedImages.compactMap { $0 }.count }
+    private var allCaptured: Bool { capturedCount == scanAngles.count }
     private var progress: Double { Double(capturedCount) / Double(scanAngles.count) }
 
     init(
@@ -338,8 +339,10 @@ struct ScratchScanView: View {
                     Spacer()
 
                     HStack(spacing: 6) {
-                        Image(systemName: "checkmark.seal.fill").foregroundColor(.green)
-                        Text("All Angles Captured").font(.title3.bold())
+                        Image(systemName: allCaptured ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                            .foregroundColor(allCaptured ? .green : .orange)
+                        Text(allCaptured ? "All Angles Captured" : "\(capturedCount) of 4 Captured")
+                            .font(.title3.bold())
                     }
 
                     Spacer()
@@ -354,8 +357,10 @@ struct ScratchScanView: View {
                 .padding(.horizontal)
                 .padding(.top, 8)
 
-                Text("Tap any photo to replace it, then submit.")
-                    .font(.subheadline).foregroundColor(.secondary)
+                Text(allCaptured
+                    ? "Tap any photo to replace it, then submit."
+                    : "All 4 angles are required before submitting. Tap a slot to add the missing photo.")
+                    .font(.subheadline).foregroundColor(allCaptured ? .secondary : .orange)
                     .multilineTextAlignment(.center).padding(.horizontal)
 
                 LazyVStack(spacing: 16) {
@@ -385,10 +390,11 @@ struct ScratchScanView: View {
                 } label: {
                     Text("Submit for Analysis")
                         .font(.headline).frame(maxWidth: .infinity).padding()
-                        .background(HTXTheme.primaryPurple).foregroundColor(.white)
+                        .background(allCaptured && !isSubmittingAnalysis ? HTXTheme.primaryPurple : Color.gray)
+                        .foregroundColor(.white)
                         .cornerRadius(14).padding(.horizontal)
                 }
-                .disabled(isSubmittingAnalysis)
+                .disabled(!allCaptured || isSubmittingAnalysis)
                 .opacity(isSubmittingAnalysis ? 0.6 : 1)
                 .padding(.bottom, 32)
             }

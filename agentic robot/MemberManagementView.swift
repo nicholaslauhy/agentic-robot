@@ -334,7 +334,8 @@ struct MemberManagementView: View {
                     if let err {
                         self.addError = err.localizedDescription
                     } else {
-                        self.addSuccess = "\(email) added successfully."
+                        self.sendPasswordResetEmail(to: email)
+                        self.addSuccess = "\(email) added successfully. Password reset email sent to user."
                         self.newEmail = ""
                         self.newPassword = ""
                         self.selectedRole = "member"
@@ -398,5 +399,34 @@ struct MemberManagementView: View {
                                         return "Password must be at least 6 characters."
         default:                        return "Error: \(code)"
         }
+    }
+    
+    private func sendPasswordResetEmail(to email: String) {
+
+        guard let url = URL(
+            string: "https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=\(apiKey)"
+        ) else {
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "requestType": "PASSWORD_RESET",
+            "email": email
+        ])
+
+        URLSession.shared.dataTask(with: request) { _, _, error in
+
+            DispatchQueue.main.async {
+
+                if let error {
+                    self.addError = "Failed to send reset email: \(error.localizedDescription)"
+                }
+            }
+
+        }.resume()
     }
 }

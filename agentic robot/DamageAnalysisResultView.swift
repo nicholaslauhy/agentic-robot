@@ -8,6 +8,17 @@ extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
 
+extension UIApplication {
+    func endEditing() {
+        sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+}
+
 // MARK: - Navigation Helper
 
 private enum HTXNavigationHelper {
@@ -209,8 +220,8 @@ struct DamageAnalysisResultView: View {
                     }
                     .frame(width: 130, alignment: .trailing)
                 }
-                .padding(.horizontal)
-                .padding(.top)
+                .padding(.horizontal, 24)
+                .padding(.top, 44)
 
                 // ── Content ───────────────────────────────────────────────────
                 if mutableDetections.isEmpty {
@@ -1738,11 +1749,86 @@ struct PoliceReportStageOneView: View {
     @State private var dateOfBirthValue = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     @State private var incidentDateTimeValue = Date()
     @State private var showStageTwo = false
+    @State private var expandedDropdown: DropdownField? = nil
     @Environment(\.dismiss) private var dismiss
 
     private let sexOptions = ["", "Male", "Female", "Prefer not to say"]
     private let raceOptions = ["", "Chinese", "Malay", "Indian", "Other"]
     private let contactOptions = ["Home", "Office"]
+    
+    @FocusState private var focusedField: Field?
+
+    enum Field {
+        case id
+        case fin
+        case contact
+        case email
+        case age
+    }
+
+    enum DropdownField {
+        case sex
+        case race
+    }
+
+    private func dismissKeyboard() {
+        focusedField = nil
+        UIApplication.shared.endEditing()
+    }
+
+    // MARK: - Validators
+
+    private func isValidNRIC(_ value: String) -> Bool {
+        let regex = "^[ST]\\d{7}[A-Z]$"
+        return NSPredicate(format: "SELF MATCHES %@", regex)
+            .evaluate(with: value.uppercased())
+    }
+
+    private func isValidFIN(_ value: String) -> Bool {
+        let regex = "^[FGM]\\d{7}[A-Z]$"
+        return NSPredicate(format: "SELF MATCHES %@", regex)
+            .evaluate(with: value.uppercased())
+    }
+
+    private func isValidSingaporePhone(_ value: String) -> Bool {
+        let regex = "^[89]\\d{7}$"
+        return NSPredicate(format: "SELF MATCHES %@", regex)
+            .evaluate(with: value)
+    }
+
+    private func isValidEmail(_ value: String) -> Bool {
+        let regex = #"^[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"#
+        return NSPredicate(format: "SELF MATCHES %@", regex)
+            .evaluate(with: value)
+    }
+
+    private var isNRICValid: Bool {
+        let trimmed = details.idTypeAndNo
+            .replacingOccurrences(of: "NRIC /", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return trimmed.isEmpty || isValidNRIC(trimmed)
+    }
+
+    private var isFINValid: Bool {
+        let trimmed = details.finNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || isValidFIN(trimmed)
+    }
+
+    private var isPhoneValid: Bool {
+        let trimmed = details.contactNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || isValidSingaporePhone(trimmed)
+    }
+
+    private var isEmailValid: Bool {
+        let trimmed = details.emailAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty || isValidEmail(trimmed)
+    }
+
+    private var isAgeTwoDigits: Bool {
+        let trimmed = details.age.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count <= 2
+    }
 
     private var isAgeValid: Bool {
         let trimmed = details.age.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1759,7 +1845,14 @@ struct PoliceReportStageOneView: View {
     }
 
     private var canProceed: Bool {
-        isAgeValid && isDOBValid && isIncidentDateTimeValid
+        isAgeValid &&
+        isDOBValid &&
+        isIncidentDateTimeValid &&
+        isNRICValid &&
+        isFINValid &&
+        isPhoneValid &&
+        isEmailValid &&
+        isAgeTwoDigits
     }
 
     var body: some View {
@@ -1773,9 +1866,40 @@ struct PoliceReportStageOneView: View {
                     reportTextField("Vide Report No.", text: $details.videReportNo, placeholder: "Leave blank if not available")
                     reportTextField("Name of Informant", text: $details.nameOfInformant, placeholder: "Enter full name")
                     reportTextField("Address", text: $details.address, placeholder: "Enter address", axis: .vertical)
-                    reportTextField("ID Type / ID No.", text: $details.idTypeAndNo, placeholder: "e.g. NRIC / S1234567A")
-                    reportTextField("FIN NO /", text: $details.finNo, placeholder: "Enter FIN, if any")
+                    VStack(alignment: .leading, spacing: 6) {
 
+                        reportTextField(
+                            "ID Type / ID No.",
+                            text: $details.idTypeAndNo,
+                            placeholder: "e.g. NRIC / S1234567A"
+                        )
+                        .focused($focusedField, equals: .id)
+                        .textInputAutocapitalization(.characters)
+                        .onChange(of: details.idTypeAndNo) { _, newValue in
+                            details.idTypeAndNo = newValue.uppercased()
+                        }
+
+                        if !isNRICValid {
+                            validationText("Invalid NRIC format. Example: S1234567A")
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+
+                        reportTextField(
+                            "FIN NO /",
+                            text: $details.finNo,
+                            placeholder: "Example: F1234567N"
+                        )
+                        .focused($focusedField, equals: .fin)
+                        .textInputAutocapitalization(.characters)
+                        .onChange(of: details.finNo) { _, newValue in
+                            details.finNo = newValue.uppercased()
+                        }
+
+                        if !isFINValid {
+                            validationText("Invalid FIN format.")
+                        }
+                    }
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Contact No.").font(.caption).foregroundColor(.secondary)
                         Picker("Contact Type", selection: $details.contactType) {
@@ -1784,31 +1908,97 @@ struct PoliceReportStageOneView: View {
                             }
                         }
                         .pickerStyle(.segmented)
-                        TextField("Enter \(details.contactType.lowercased()) number", text: $details.contactNumber)
-                            .keyboardType(.phonePad)
+                        .simultaneousGesture(TapGesture().onEnded {
+                            dismissKeyboard()
+                        })
+                        TextField(
+                            "Enter \(details.contactType.lowercased()) number",
+                            text: $details.contactNumber
+                        )
+                        .keyboardType(.numberPad)
+                        .focused($focusedField, equals: .contact)
+                        .onChange(of: details.contactNumber) { _, newValue in
+
+                            details.contactNumber = String(
+                                newValue.filter(\.isNumber).prefix(8)
+                            )
+
+                            if details.contactNumber.count == 8 {
+                                UIApplication.shared.endEditing()
+                            }
+                        }
+
+                        if !isPhoneValid {
+                            validationText("Must be 8 digits starting with 8 or 9.")
+                        }
                     }
 
-                    reportTextField("Email Address", text: $details.emailAddress, placeholder: "name@example.com")
+                    VStack(alignment: .leading, spacing: 6) {
+
+                        reportTextField(
+                            "Email Address",
+                            text: $details.emailAddress,
+                            placeholder: "name@example.com"
+                        )
                         .keyboardType(.emailAddress)
+                        .focused($focusedField, equals: .email)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+
+                        if !isEmailValid {
+                            validationText("Invalid email address.")
+                        }
+                    }
                     reportTextField("Nationality", text: $details.nationality, placeholder: "Enter nationality")
                     reportTextField("Occupation", text: $details.occupation, placeholder: "Enter occupation")
 
-                    dropdownField("Sex", selection: $details.sex, options: sexOptions, emptyTitle: "Select sex")
-                    reportTextField("Age", text: $details.age, placeholder: "Enter age")
+                    dropdownField(
+                        "Sex",
+                        selection: $details.sex,
+                        options: sexOptions,
+                        emptyTitle: "Select sex",
+                        field: .sex
+                    )
+                    VStack(alignment: .leading, spacing: 6) {
+                        reportTextField(
+                            "Age",
+                            text: $details.age,
+                            placeholder: "Enter age"
+                        )
                         .keyboardType(.numberPad)
-                    if !isAgeValid {
-                        validationText("Age must be a valid number between 0 and 130.")
-                    }
+                        .focused($focusedField, equals: .age)
+                        .onChange(of: details.age) { _, newValue in
 
+                            details.age = String(
+                                newValue.filter(\.isNumber).prefix(2)
+                            )
+
+                            if details.age.count == 2 {
+                                UIApplication.shared.endEditing()
+                            }
+                        }
+
+                        if !isAgeValid {
+                            validationText("Age must be valid.")
+                        }
+
+                        if !isAgeTwoDigits {
+                            validationText("Age must be 2 digits only.")
+                        }
+                    }
                     dateOnlyPickerField(
                         "Date of Birth",
                         date: $dateOfBirthValue,
                         output: $details.dateOfBirth
                     )
 
-                    dropdownField("Race", selection: $details.race, options: raceOptions, emptyTitle: "Select race")
+                    dropdownField(
+                        "Race",
+                        selection: $details.race,
+                        options: raceOptions,
+                        emptyTitle: "Select race",
+                        field: .race
+                    )
                     reportTextField("Institution/School Name", text: $details.institutionSchoolName, placeholder: "Enter institution/school, if any")
                     reportTextField("Language", text: $details.language, placeholder: "Enter language")
                     dateTimePickerField(
@@ -1883,16 +2073,77 @@ struct PoliceReportStageOneView: View {
         _ title: String,
         selection: Binding<String>,
         options: [String],
-        emptyTitle: String
+        emptyTitle: String,
+        field: DropdownField
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
-            Picker(emptyTitle, selection: selection) {
-                ForEach(options, id: \.self) { option in
-                    Text(option.isEmpty ? emptyTitle : option).tag(option)
+
+            Button {
+                dismissKeyboard()
+
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    expandedDropdown = expandedDropdown == field ? nil : field
                 }
+            } label: {
+                HStack {
+                    Text(selection.wrappedValue.isEmpty ? emptyTitle : selection.wrappedValue)
+                        .foregroundColor(selection.wrappedValue.isEmpty ? .secondary : .primary)
+
+                    Spacer()
+
+                    Image(systemName: expandedDropdown == field ? "chevron.up" : "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .pickerStyle(.menu)
+            .buttonStyle(.plain)
+
+            if expandedDropdown == field {
+                VStack(spacing: 0) {
+                    ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                        Button {
+                            dismissKeyboard()
+                            selection.wrappedValue = option
+
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                expandedDropdown = nil
+                            }
+                        } label: {
+                            HStack {
+                                Text(option.isEmpty ? emptyTitle : option)
+                                    .foregroundColor(option.isEmpty ? .secondary : .primary)
+
+                                Spacer()
+
+                                if selection.wrappedValue == option {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                }
+                            }
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 12)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if index < options.count - 1 {
+                            Divider().padding(.leading, 12)
+                        }
+                    }
+                }
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(.separator), lineWidth: 0.5)
+                )
+            }
         }
     }
 
@@ -1907,6 +2158,9 @@ struct PoliceReportStageOneView: View {
             DatePicker("", selection: date, displayedComponents: .date)
                 .datePickerStyle(.wheel)
                 .labelsHidden()
+                .simultaneousGesture(TapGesture().onEnded {
+                    dismissKeyboard()
+                })
                 .onAppear { output.wrappedValue = PoliceReportFormFormatter.dobDisplay(from: date.wrappedValue) }
                 .onChange(of: date.wrappedValue) { _, newDate in
                     output.wrappedValue = PoliceReportFormFormatter.dobDisplay(from: newDate)
@@ -1928,6 +2182,9 @@ struct PoliceReportStageOneView: View {
             DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.wheel)
                 .labelsHidden()
+                .simultaneousGesture(TapGesture().onEnded {
+                    dismissKeyboard()
+                })
                 .environment(\.locale, Locale(identifier: "en_GB"))
                 .onAppear { output.wrappedValue = PoliceReportFormFormatter.reportDateTimeDisplay(from: date.wrappedValue) }
                 .onChange(of: date.wrappedValue) { _, newDate in
@@ -2130,20 +2387,43 @@ struct PoliceReportStageTwoView: View {
         clearTrigger: Binding<UUID>,
         clearTitle: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundColor(HTXTheme.primaryPurple)
+
+            // Keep the tappable/drawable signature canvas visually and interactively
+            // separate from the clear action below.
             SignaturePadView(image: image, clearTrigger: clearTrigger.wrappedValue)
                 .frame(height: 150)
-            Button(clearTitle) {
-                image.wrappedValue = nil
-                clearTrigger.wrappedValue = UUID()
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(.systemGray3), lineWidth: 1)
+                )
+
+            HStack {
+                Spacer()
+                Button {
+                    image.wrappedValue = nil
+                    clearTrigger.wrappedValue = UUID()
+                } label: {
+                    Label(clearTitle, systemImage: "trash")
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(HTXTheme.primaryPurple.opacity(0.10))
+                        .clipShape(Capsule())
+                }
+                // Important inside Form: without a borderless/plain style, SwiftUI can
+                // make the whole row behave like the button. That is why tapping blank
+                // space near the signature can accidentally trigger Clear.
+                .buttonStyle(.borderless)
+                .foregroundColor(HTXTheme.primaryPurple)
             }
-            .font(.caption.weight(.semibold))
-            .foregroundColor(HTXTheme.primaryPurple)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 8)
     }
 
     private func finalizedStageTwoDetails() -> PoliceReportStageTwoDetails {
@@ -2455,6 +2735,12 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
     private var currentLine: [CGPoint] = []
     private var isDrawing = false
 
+    /// A tiny tap / dot should still count as a valid signature stroke.
+    /// Previously, a dot could render as a blank white image because a one-point
+    /// UIBezierPath has no visible length. We render it as a filled circle instead.
+    private let dotRadius: CGFloat = 2.2
+    private let tinyStrokeThreshold: CGFloat = 3.0
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupDrawingGesture()
@@ -2480,20 +2766,11 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
         false
     }
 
-    /// Rehydrates the canvas when SwiftUI recreates/updates the UIView.
-    /// We do not call this while the user is actively drawing, otherwise a
-    /// state update could overwrite the in-progress stroke.
+    /// Rehydrates the canvas when SwiftUI creates the UIView.
+    /// Clearing must only happen through clear(), which is triggered by the Clear button.
     func loadCommittedImageIfNeeded(_ image: UIImage?) {
         guard !isDrawing else { return }
-
-        if image == nil {
-            if committedImage != nil {
-                committedImage = nil
-                currentLine.removeAll()
-                setNeedsDisplay()
-            }
-            return
-        }
+        guard let image else { return }
 
         if committedImage == nil {
             committedImage = image
@@ -2519,14 +2796,13 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
             currentLine.append(clampedPoint)
             setNeedsDisplay()
 
-        case .ended, .cancelled, .failed:
-            if !currentLine.isEmpty {
-                // Commit the just-finished stroke into the bitmap instead of
-                // throwing it away. The next stroke will draw on top of this.
-                committedImage = renderSignatureImage(includeCurrentLine: true)
-                currentLine.removeAll()
-                onImageChanged?(committedImage)
-            }
+        case .ended:
+            commitCurrentStroke()
+
+        case .cancelled, .failed:
+            // Do not treat a cancelled gesture as a clear action.
+            // Keep the already-committed signature exactly as it is.
+            currentLine.removeAll()
             isDrawing = false
             setNeedsDisplay()
 
@@ -2555,8 +2831,27 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
         onImageChanged?(nil)
     }
 
+    private func commitCurrentStroke() {
+        guard !currentLine.isEmpty else {
+            isDrawing = false
+            setNeedsDisplay()
+            return
+        }
+
+        committedImage = renderSignatureImage(includeCurrentLine: true)
+        currentLine.removeAll()
+        isDrawing = false
+        setNeedsDisplay()
+        onImageChanged?(committedImage)
+    }
+
     private func drawLine(_ line: [CGPoint]) {
         guard let first = line.first else { return }
+
+        if shouldRenderAsDot(line) {
+            drawDot(at: first)
+            return
+        }
 
         let path = UIBezierPath()
         path.lineWidth = 2.2
@@ -2570,6 +2865,30 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
 
         UIColor.black.setStroke()
         path.stroke()
+    }
+
+    private func drawDot(at point: CGPoint) {
+        let path = UIBezierPath(
+            arcCenter: point,
+            radius: dotRadius,
+            startAngle: 0,
+            endAngle: .pi * 2,
+            clockwise: true
+        )
+        UIColor.black.setFill()
+        path.fill()
+    }
+
+    private func shouldRenderAsDot(_ line: [CGPoint]) -> Bool {
+        guard let first = line.first else { return false }
+
+        let minX = line.map(\.x).min() ?? first.x
+        let maxX = line.map(\.x).max() ?? first.x
+        let minY = line.map(\.y).min() ?? first.y
+        let maxY = line.map(\.y).max() ?? first.y
+
+        return line.count == 1 ||
+            (maxX - minX <= tinyStrokeThreshold && maxY - minY <= tinyStrokeThreshold)
     }
 
     private func renderSignatureImage(includeCurrentLine: Bool) -> UIImage? {
