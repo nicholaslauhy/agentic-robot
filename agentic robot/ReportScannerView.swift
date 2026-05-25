@@ -20,6 +20,8 @@ struct ReportScannerView: View {
     @State private var pdfErrorMessage: String? = nil
     @State private var selectedBarcodePhotoItem: PhotosPickerItem? = nil
     @State private var isReadingBarcodePhoto = false
+    @State private var isCameraFrozen = false      // true while a result card is shown
+    @State private var scannerRestartToken: UUID = UUID()
 
     private var isBusy: Bool {
         isLoading || isReadingBarcodePhoto
@@ -31,6 +33,8 @@ struct ReportScannerView: View {
             // MARK: Camera background
             if !cameraPermissionDenied {
                 BarcodeScannerRepresentable(
+                    isFrozen: isCameraFrozen,
+                    restartToken: scannerRestartToken,
                     onScan: { code in
                         guard scannedCode == nil, report == nil else { return }
                         let cleanedCode = cleanBarcode(code)
@@ -43,6 +47,9 @@ struct ReportScannerView: View {
                     }
                 )
                 .ignoresSafeArea()
+                // Prevent the full-screen camera layer from eating taps
+                // while the result card is visible.
+                .allowsHitTesting(!isCameraFrozen)
             } else {
                 Color.black.ignoresSafeArea()
             }
@@ -285,6 +292,9 @@ struct ReportScannerView: View {
                         pdfFileName:   data["pdfFileName"]   as? String,
                         pdfBase64:     data["pdfBase64"]     as? String
                     )
+                    // Freeze the camera now that we have a result — regardless
+                    // of whether the code came from camera, manual entry, or photo.
+                    self.isCameraFrozen = true
                 }
             }
     }
@@ -391,8 +401,12 @@ struct ReportScannerView: View {
         errorMessage = nil
         pdfErrorMessage = nil
         manualCode = ""
+        showManualEntry = false
         selectedBarcodePhotoItem = nil
         isReadingBarcodePhoto = false
+        isCameraFrozen = false
+        // Bump token so updateUIViewController fires and restarts the session.
+        scannerRestartToken = UUID()
     }
 
     private func cleanBarcode(_ raw: String) -> String {
@@ -427,17 +441,9 @@ private struct ReportResultCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
 
-            HStack {
-                Label("Report Found", systemImage: "checkmark.seal.fill")
-                    .font(.headline.weight(.bold))
-                    .foregroundColor(.green)
-                Spacer()
-                Button(action: onScanAnother) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(HTXTheme.primaryPurple)
-                }
-            }
+            Label("Report Found", systemImage: "checkmark.seal.fill")
+                .font(.headline.weight(.bold))
+                .foregroundColor(.green)
 
             Divider()
 
@@ -462,6 +468,23 @@ private struct ReportResultCard: View {
                 .background(report.hasPDF ? HTXTheme.primaryPurple : Color.gray)
                 .foregroundColor(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+
+            Button(action: onScanAnother) {
+                HStack {
+                    Image(systemName: "barcode.viewfinder")
+                    Text("Scan Another Report")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.systemBackground))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(HTXTheme.primaryPurple, lineWidth: 1.5)
+                )
             }
         }
         .padding(18)
@@ -562,6 +585,8 @@ private struct CornerBracket: View {
 
 // MARK: - Camera Scanner (reads Code 128 barcodes)
 struct BarcodeScannerRepresentable: UIViewControllerRepresentable {
+    var isFrozen: Bool
+    var restartToken: UUID
     var onScan: (String) -> Void
     var onPermissionDenied: () -> Void
 
@@ -572,7 +597,24 @@ struct BarcodeScannerRepresentable: UIViewControllerRepresentable {
         return vc
     }
 
-    func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {}
+    func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {
+        if isFrozen {
+            // Stop scanning the moment a result is shown — prevents a second
+            // barcode being read while the result card is on screen.
+            uiViewController.stopSession()
+        } else if context.coordinator.lastRestartToken != restartToken {
+            // Token was bumped by resetForAnotherLookup — restart the camera.
+            context.coordinator.lastRestartToken = restartToken
+            uiViewController.restartSession()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(token: restartToken) }
+
+    final class Coordinator {
+        var lastRestartToken: UUID
+        init(token: UUID) { lastRestartToken = token }
+    }
 }
 
 class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
@@ -650,6 +692,20 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
 
         session.stopRunning()
         onScan?(code)
+    }
+
+    func stopSession() {
+        guard session.isRunning else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.session.stopRunning()
+        }
+    }
+
+    func restartSession() {
+        guard !session.isRunning else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.session.startRunning()
+        }
     }
 }
 

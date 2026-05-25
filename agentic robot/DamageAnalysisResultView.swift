@@ -2422,11 +2422,14 @@ struct SignaturePadView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: SignatureCanvasView, context: Context) {
+        // Only touch the canvas when the clear button was explicitly pressed.
+        // Do NOT call loadCommittedImageIfNeeded here — SwiftUI calls updateUIView
+        // immediately after onImageChanged fires (e.g. after a dot/short stroke),
+        // and passing the stale `image` binding back into the canvas would wipe
+        // the stroke the user just drew.
         if context.coordinator.lastClearTrigger != clearTrigger {
             uiView.clear()
             context.coordinator.lastClearTrigger = clearTrigger
-        } else {
-            uiView.loadCommittedImageIfNeeded(image)
         }
     }
 
@@ -2591,4 +2594,3 @@ final class SignatureCanvasView: UIView, UIGestureRecognizerDelegate {
         }
     }
 }
-

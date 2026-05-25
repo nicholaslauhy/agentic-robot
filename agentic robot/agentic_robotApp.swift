@@ -13,6 +13,7 @@ struct agentic_robotApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(auth)
+                .preferredColorScheme(.light)
         }
     }
 }
