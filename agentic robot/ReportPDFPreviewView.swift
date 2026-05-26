@@ -26,7 +26,7 @@ struct ReportPDFPreviewView: View {
                     }
                 }
                 .sheet(isPresented: $showShareSheet) {
-                    ShareSheet(items: [url])
+                    ShareSheet(fileURL: url)
                 }
         }
     }
