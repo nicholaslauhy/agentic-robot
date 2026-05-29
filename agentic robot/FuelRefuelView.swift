@@ -436,33 +436,52 @@ struct FuelRefuelView: View {
             "odometer":         cleanOdometer,
             "usedMastercard":   usedMastercard ?? false,
             "generatedBy":      Auth.auth().currentUser?.email ?? "Unknown",
-            "detectionCount":   0,
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
-        if let receiptImage {
-            guard let receiptBase64 = receiptBase64ForFirestore(from: receiptImage) else {
-                isSubmitting = false
-                submitError = "Receipt image is too large. Please retake it or choose a smaller image."
-                return
-            }
-            data["receiptBase64"] = receiptBase64
-        }
-
-        Firestore.firestore()
-            .collection("fuel_refuel_reports")
-            .document(barcodeId)
-            .setData(data, merge: true) { error in
-                DispatchQueue.main.async {
-                    isSubmitting = false
-                    if let error {
-                        submitError = "Failed to save: \(error.localizedDescription)"
-                    } else {
-                        showReviewSheet = false
-                        onReportGenerated()
+        let saveFirestore: ([String: Any]) -> Void = { finalData in
+            Firestore.firestore()
+                .collection("fuel_refuel_reports")
+                .document(barcodeId)
+                .setData(finalData, merge: true) { error in
+                    DispatchQueue.main.async {
+                        isSubmitting = false
+                        if let error {
+                            submitError = "Failed to save: \(error.localizedDescription)"
+                        } else {
+                            showReviewSheet = false
+                            onReportGenerated()
+                        }
                     }
                 }
+        }
+
+        guard let receiptImage else {
+            saveFirestore(data)
+            return
+        }
+
+        guard let receiptData = receiptImage.jpegData(compressionQuality: 0.82) else {
+            isSubmitting = false
+            submitError = "Could not read the receipt image. Please try another photo."
+            return
+        }
+
+        let receiptPath = "fuel_refuel_reports/\(barcodeId)/receipt.jpg"
+        ReportStore.uploadDataToStorage(receiptData, path: receiptPath, contentType: "image/jpeg") { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let path):
+                    var finalData = data
+                    finalData["receiptStoragePath"] = path
+                    finalData["receiptFileName"] = "receipt.jpg"
+                    saveFirestore(finalData)
+                case .failure(let error):
+                    isSubmitting = false
+                    submitError = "Failed to upload receipt to Firebase Storage: \(error.localizedDescription)"
+                }
             }
+        }
     }
 }
 

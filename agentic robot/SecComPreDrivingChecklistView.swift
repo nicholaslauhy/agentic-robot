@@ -583,27 +583,56 @@ struct SecComPreDrivingChecklistView: View {
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
-        // Encode damage images as base64 (capped at 5 for Firestore size limit)
-        let cappedImages = Array(damageImages.prefix(5))
-        let base64Images = cappedImages.compactMap { $0.jpegData(compressionQuality: 0.6)?.base64EncodedString() }
-        if !base64Images.isEmpty {
-            data["damageImagesBase64"] = base64Images
+        let saveFirestore: ([String: Any]) -> Void = { finalData in
+            Firestore.firestore()
+                .collection("seccom_checklists")
+                .document(barcodeId)
+                .setData(finalData, merge: true) { error in
+                    DispatchQueue.main.async {
+                        isSubmitting = false
+                        if let error {
+                            submitError = "Failed to save: \(error.localizedDescription)"
+                        } else {
+                            showReviewSheet = false
+                            onReportGenerated()
+                        }
+                    }
+                }
         }
 
-        Firestore.firestore()
-            .collection("seccom_checklists")
-            .document(barcodeId)
-            .setData(data, merge: true) { error in
+        func uploadDamageImages(_ images: [UIImage], index: Int = 0, paths: [String] = []) {
+            guard index < images.count else {
+                var finalData = data
+                if !paths.isEmpty {
+                    finalData["damageImageStoragePaths"] = paths
+                }
+                saveFirestore(finalData)
+                return
+            }
+
+            guard let imageData = images[index].jpegData(compressionQuality: 0.82) else {
                 DispatchQueue.main.async {
                     isSubmitting = false
-                    if let error {
-                        submitError = "Failed to save: \(error.localizedDescription)"
-                    } else {
-                        showReviewSheet = false
-                        onReportGenerated()
+                    submitError = "Could not read damage image \(index + 1). Please try again."
+                }
+                return
+            }
+
+            let imagePath = "seccom_checklists/\(barcodeId)/damage_images/damage_\(index + 1).jpg"
+            ReportStore.uploadDataToStorage(imageData, path: imagePath, contentType: "image/jpeg") { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let path):
+                        uploadDamageImages(images, index: index + 1, paths: paths + [path])
+                    case .failure(let error):
+                        isSubmitting = false
+                        submitError = "Failed to upload damage image \(index + 1) to Firebase Storage: \(error.localizedDescription)"
                     }
                 }
             }
+        }
+
+        uploadDamageImages(damageImages)
     }
 }
 

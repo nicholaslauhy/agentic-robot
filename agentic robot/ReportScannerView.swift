@@ -290,7 +290,8 @@ struct ReportScannerView: View {
                         createdAt:      createdAt,
                         barcodeId:      data["barcodeId"]      as? String ?? snapshot!.documentID,
                         pdfFileName:   data["pdfFileName"]   as? String,
-                        pdfBase64:     data["pdfBase64"]     as? String
+                        pdfBase64:     data["pdfBase64"]     as? String,
+                        pdfStoragePath: data["pdfStoragePath"] as? String
                     )
                     // Freeze the camera now that we have a result — regardless
                     // of whether the code came from camera, manual entry, or photo.
@@ -387,12 +388,17 @@ struct ReportScannerView: View {
     }
 
     private func openPDF(for report: ReportEntry) {
-        guard let url = ReportStore.resolvedPDFURL(for: report) else {
-            pdfErrorMessage = "This report was found, but the PDF file is not available. Generate it again with the updated app so the PDF can be saved."
-            return
-        }
+        isLoading = true
         pdfErrorMessage = nil
-        selectedPDFURL = url
+
+        ReportStore.resolvePDFURL(for: report) { url in
+            isLoading = false
+            guard let url else {
+                pdfErrorMessage = "This report was found, but the PDF file is not available. Make sure Firebase Storage is enabled and the report has pdfStoragePath."
+                return
+            }
+            selectedPDFURL = url
+        }
     }
 
     private func resetForAnotherLookup() {

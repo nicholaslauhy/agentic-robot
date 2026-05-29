@@ -266,7 +266,8 @@ struct ReportsListView: View {
                             createdAt:      createdAt,
                             barcodeId:      data["barcodeId"]      as? String ?? doc.documentID,
                             pdfFileName:    data["pdfFileName"]    as? String,
-                            pdfBase64:      data["pdfBase64"]      as? String
+                            pdfBase64:      data["pdfBase64"]      as? String,
+                            pdfStoragePath: data["pdfStoragePath"] as? String
                         )
                         return RawReportDocument(id: doc.documentID, entry: entry, raw: data)
                     }
@@ -330,6 +331,7 @@ struct ReportDetailSheet: View {
     var onViewPDF: (URL) -> Void
     @Environment(\.dismiss) var dismiss
     @State private var pdfErrorMessage: String? = nil
+    @State private var isLoadingPDF = false
 
     private var generatedByText: String {
         let t = report.generatedBy.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -381,21 +383,31 @@ struct ReportDetailSheet: View {
                         }
 
                         Button {
-                            guard let url = ReportStore.resolvedPDFURL(for: report) else {
-                                pdfErrorMessage = "PDF not available. Regenerate the report to save a PDF."
-                                return
-                            }
+                            isLoadingPDF = true
                             pdfErrorMessage = nil
-                            onViewPDF(url)
+
+                            ReportStore.resolvePDFURL(for: report) { url in
+                                isLoadingPDF = false
+                                guard let url else {
+                                    pdfErrorMessage = "PDF not available. Make sure Firebase Storage is enabled and this report has pdfStoragePath."
+                                    return
+                                }
+                                onViewPDF(url)
+                            }
                         } label: {
                             HStack {
-                                Image(systemName: "doc.richtext.fill")
-                                Text(report.hasPDF ? "View PDF Report" : "PDF Not Saved")
+                                if isLoadingPDF {
+                                    ProgressView().tint(.white)
+                                } else {
+                                    Image(systemName: "doc.richtext.fill")
+                                }
+                                Text(isLoadingPDF ? "Loading PDF…" : (report.hasPDF ? "View PDF Report" : "PDF Not Saved"))
                             }
                             .font(.headline).frame(maxWidth: .infinity).padding()
                             .background(report.hasPDF ? HTXTheme.primaryPurple : Color.gray)
                             .foregroundColor(.white).clipShape(RoundedRectangle(cornerRadius: 14))
                         }
+                        .disabled(isLoadingPDF || !report.hasPDF)
                         .padding(.horizontal)
                         Spacer().frame(height: 10)
                     }
@@ -420,16 +432,23 @@ struct SecComDetailSheet: View {
 
     private var d: [String: Any] { doc.raw }
 
+    @State private var damageImages: [UIImage] = []
+    @State private var isLoadingDamageImages = false
+    @State private var damageImageError: String? = nil
+
     private var equipment: [String] { d["equipment"] as? [String] ?? [] }
     private var selectedEquipmentSet: Set<String> {
         Set(equipment.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
     }
-    private var damageImages: [UIImage] {
+    private var legacyDamageImages: [UIImage] {
         guard let b64Array = d["damageImagesBase64"] as? [String] else { return [] }
         return b64Array.compactMap { b64 in
             guard let data = Data(base64Encoded: b64) else { return nil }
             return UIImage(data: data)
         }
+    }
+    private var damageImageStoragePaths: [String] {
+        d["damageImageStoragePaths"] as? [String] ?? []
     }
     private var bodyworkAllInOrder: Bool { d["bodyworkAllInOrder"] as? Bool ?? true }
     private var bodyworkDetails: String { d["bodyworkDetails"] as? String ?? "" }
@@ -501,7 +520,28 @@ struct SecComDetailSheet: View {
                         }
 
                         // Damage images
-                        if !damageImages.isEmpty {
+                        if isLoadingDamageImages {
+                            sectionCard(title: "New Damage Detected", icon: "camera.fill", accent: accent) {
+                                HStack(spacing: 10) {
+                                    ProgressView().tint(accent)
+                                    Text("Loading damage images…")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 10)
+                            }
+                        } else if let damageImageError {
+                            sectionCard(title: "New Damage Detected", icon: "camera.fill", accent: accent) {
+                                Text(damageImageError)
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundColor(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.bottom, 10)
+                            }
+                        } else if !damageImages.isEmpty {
                             sectionCard(title: "New Damage Detected", icon: "camera.fill", accent: accent) {
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
                                     ForEach(damageImages.indices, id: \.self) { idx in
@@ -532,8 +572,52 @@ struct SecComDetailSheet: View {
                     Button("Done") { dismiss() }.foregroundColor(accent).fontWeight(.semibold)
                 }
             }
+            .onAppear { loadDamageImages() }
         }
     }
+
+    private func loadDamageImages() {
+        damageImageError = nil
+
+        let paths = damageImageStoragePaths
+        guard !paths.isEmpty else {
+            damageImages = legacyDamageImages
+            return
+        }
+
+        isLoadingDamageImages = true
+        loadDamageImage(paths: paths, index: 0, loaded: [])
+    }
+
+    private func loadDamageImage(paths: [String], index: Int, loaded: [UIImage]) {
+        guard index < paths.count else {
+            isLoadingDamageImages = false
+            damageImages = loaded
+            return
+        }
+
+        ReportStore.downloadDataFromStorage(path: paths[index], maxSize: 20 * 1024 * 1024) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let data):
+                    let image = UIImage(data: data)
+                    loadDamageImage(
+                        paths: paths,
+                        index: index + 1,
+                        loaded: loaded + (image.map { [$0] } ?? [])
+                    )
+                case .failure(let error):
+                    isLoadingDamageImages = false
+                    if loaded.isEmpty {
+                        damageImageError = "Could not load damage images from Firebase Storage: \(error.localizedDescription)"
+                    } else {
+                        damageImages = loaded
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 // MARK: - Fuel Detail Sheet
@@ -542,9 +626,14 @@ struct FuelDetailSheet: View {
     @Environment(\.dismiss) var dismiss
     private let accent = HTXTheme.fuelOrange
 
+    @State private var receiptImage: UIImage? = nil
+    @State private var isLoadingReceipt = false
+    @State private var receiptError: String? = nil
+
     private var d: [String: Any] { doc.raw }
     private var usedMastercard: Bool { d["usedMastercard"] as? Bool ?? false }
-    private var receiptImage: UIImage? {
+    private var receiptStoragePath: String? { d["receiptStoragePath"] as? String }
+    private var legacyReceiptImage: UIImage? {
         guard let b64 = d["receiptBase64"] as? String,
               let data = Data(base64Encoded: b64) else { return nil }
         return UIImage(data: data)
@@ -591,7 +680,24 @@ struct FuelDetailSheet: View {
                         }
 
                         // Receipt
-                        if let img = receiptImage {
+                        if isLoadingReceipt {
+                            sectionCard(title: "Fuel Receipt", icon: "doc.text.fill", accent: accent) {
+                                HStack(spacing: 10) {
+                                    ProgressView().tint(accent)
+                                    Text("Loading receipt…")
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        } else if let receiptError {
+                            sectionCard(title: "Fuel Receipt", icon: "doc.text.fill", accent: accent) {
+                                Text(receiptError)
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundColor(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        } else if let img = receiptImage {
                             sectionCard(title: "Fuel Receipt", icon: "doc.text.fill", accent: accent) {
                                 Image(uiImage: img)
                                     .resizable().scaledToFit()
@@ -609,6 +715,32 @@ struct FuelDetailSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }.foregroundColor(accent).fontWeight(.semibold)
+                }
+            }
+            .onAppear { loadReceiptImage() }
+        }
+    }
+
+    private func loadReceiptImage() {
+        receiptError = nil
+
+        guard let path = receiptStoragePath, !path.isEmpty else {
+            receiptImage = legacyReceiptImage
+            return
+        }
+
+        isLoadingReceipt = true
+        ReportStore.downloadDataFromStorage(path: path, maxSize: 20 * 1024 * 1024) { result in
+            DispatchQueue.main.async {
+                isLoadingReceipt = false
+                switch result {
+                case .success(let data):
+                    receiptImage = UIImage(data: data)
+                    if receiptImage == nil {
+                        receiptError = "Receipt image could not be opened."
+                    }
+                case .failure(let error):
+                    receiptError = "Could not load receipt from Firebase Storage: \(error.localizedDescription)"
                 }
             }
         }

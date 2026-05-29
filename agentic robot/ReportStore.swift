@@ -1,6 +1,7 @@
 import Foundation
 import FirebaseFirestore
 import FirebaseAuth
+import FirebaseStorage
 
 // MARK: - Shared Report Model
 struct ReportEntry: Identifiable {
@@ -13,7 +14,8 @@ struct ReportEntry: Identifiable {
     let createdAt: Date?
     let barcodeId: String
     let pdfFileName: String?
-    let pdfBase64: String?
+    let pdfBase64: String?        // Legacy fallback for older reports only
+    let pdfStoragePath: String?   // New Firebase Storage path
 
     var dateString: String {
         guard let date = createdAt else { return "Unknown date" }
@@ -30,6 +32,7 @@ struct ReportEntry: Identifiable {
     }
 
     var hasPDF: Bool {
+        if let pdfStoragePath, !pdfStoragePath.isEmpty { return true }
         if let pdfFileName, !pdfFileName.isEmpty { return true }
         if let pdfBase64, !pdfBase64.isEmpty { return true }
         return false
@@ -38,14 +41,9 @@ struct ReportEntry: Identifiable {
 
 struct ReportStore {
 
-    // Keep this under Firestore's 1 MiB document limit.
-    // Larger PDFs will still be saved locally on the generating device via pdfFileName.
-    private static let maxFirestorePDFBytes = 850_000
-
     static func makeNumericBarcodeId(date: Date = Date()) -> String {
         // Always produce a positive, digits-only barcode.
         // Format: YYYYMMDD + 4 random digits = 12 digits.
-        // This avoids negative IDs caused by signed integer overflow / hashing.
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd"
@@ -91,6 +89,47 @@ struct ReportStore {
         }
     }
 
+    static func uploadDataToStorage(
+        _ data: Data,
+        path: String,
+        contentType: String,
+        completion: @escaping (Result<String, Error>) -> Void
+    ) {
+        let metadata = StorageMetadata()
+        metadata.contentType = contentType
+
+        Storage.storage().reference().child(path).putData(data, metadata: metadata) { _, error in
+            if let error {
+                completion(.failure(error))
+            } else {
+                completion(.success(path))
+            }
+        }
+    }
+
+    static func downloadDataFromStorage(
+        path: String,
+        maxSize: Int64 = 50 * 1024 * 1024,
+        completion: @escaping (Result<Data, Error>) -> Void
+    ) {
+        Storage.storage().reference().child(path).getData(maxSize: maxSize) { data, error in
+            if let error {
+                completion(.failure(error))
+            } else if let data {
+                completion(.success(data))
+            } else {
+                let error = NSError(
+                    domain: "ReportStore",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: "File data was empty."]
+                )
+                completion(.failure(error))
+            }
+        }
+    }
+
+    /// Synchronous legacy resolver. It only works for PDFs already on this device
+    /// or older reports that still have pdfBase64 in Firestore.
     static func resolvedPDFURL(for report: ReportEntry) -> URL? {
         let localURL = localPDFURL(for: report.barcodeId)
         if FileManager.default.fileExists(atPath: localURL.path) {
@@ -111,6 +150,39 @@ struct ReportStore {
         }
     }
 
+    /// New resolver. It first checks the local file, then Firebase Storage,
+    /// then legacy Firestore base64.
+    static func resolvePDFURL(for report: ReportEntry, completion: @escaping (URL?) -> Void) {
+        let localURL = localPDFURL(for: report.barcodeId)
+        if FileManager.default.fileExists(atPath: localURL.path) {
+            completion(localURL)
+            return
+        }
+
+        if let pdfStoragePath = report.pdfStoragePath, !pdfStoragePath.isEmpty {
+            downloadDataFromStorage(path: pdfStoragePath) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let data):
+                        do {
+                            try data.write(to: localURL, options: [.atomic])
+                            completion(localURL)
+                        } catch {
+                            print("Failed to save downloaded PDF locally: \(error.localizedDescription)")
+                            completion(nil)
+                        }
+                    case .failure(let error):
+                        print("Failed to download PDF from Firebase Storage: \(error.localizedDescription)")
+                        completion(nil)
+                    }
+                }
+            }
+            return
+        }
+
+        completion(resolvedPDFURL(for: report))
+    }
+
     static func saveReport(
         reportNo: String,
         plate: String,
@@ -118,7 +190,8 @@ struct ReportStore {
         generatedBy: String,
         detectionCount: Int,
         numericBarcodeId: String,
-        pdfURL: URL? = nil
+        pdfURL: URL? = nil,
+        completion: ((Error?) -> Void)? = nil
     ) {
         var data: [String: Any] = [
             "reportNo": reportNo,
@@ -127,25 +200,51 @@ struct ReportStore {
             "carType": carType,
             "generatedBy": generatedBy,
             "detectionCount": detectionCount,
-            "createdAt": FieldValue.serverTimestamp()
+            "createdAt": FieldValue.serverTimestamp(),
+            "pdfStoredInFirestore": false
         ]
 
-        if let pdfURL {
-            let localURL = copyPDFToLocalStore(from: pdfURL, barcodeId: numericBarcodeId)
-            data["pdfFileName"] = localURL?.lastPathComponent ?? "\(numericBarcodeId).pdf"
-
-            if let pdfData = try? Data(contentsOf: pdfURL), pdfData.count <= maxFirestorePDFBytes {
-                data["pdfBase64"] = pdfData.base64EncodedString()
-                data["pdfStoredInFirestore"] = true
-            } else {
-                data["pdfStoredInFirestore"] = false
-                data["pdfStorageNote"] = "PDF was larger than the safe Firestore document limit and was stored locally on the generating device."
-            }
+        guard let pdfURL else {
+            Firestore.firestore()
+                .collection("reports")
+                .document(numericBarcodeId)
+                .setData(data, merge: true) { completion?($0) }
+            return
         }
 
-        Firestore.firestore()
-            .collection("reports")
-            .document(numericBarcodeId)
-            .setData(data, merge: true)
+        let localURL = copyPDFToLocalStore(from: pdfURL, barcodeId: numericBarcodeId)
+        let fileName = localURL?.lastPathComponent ?? "\(numericBarcodeId).pdf"
+        let storagePath = "reports/\(numericBarcodeId)/\(fileName)"
+
+        data["pdfFileName"] = fileName
+        data["pdfStoragePath"] = storagePath
+
+        guard let pdfData = try? Data(contentsOf: pdfURL) else {
+            data["pdfUploadError"] = "Could not read generated PDF data before upload."
+            Firestore.firestore()
+                .collection("reports")
+                .document(numericBarcodeId)
+                .setData(data, merge: true) { completion?($0) }
+            return
+        }
+
+        uploadDataToStorage(pdfData, path: storagePath, contentType: "application/pdf") { result in
+            var finalData = data
+
+            switch result {
+            case .success(let path):
+                finalData["pdfStoragePath"] = path
+                finalData["pdfStoredInStorage"] = true
+                finalData["pdfUploadError"] = FieldValue.delete()
+            case .failure(let error):
+                finalData["pdfStoredInStorage"] = false
+                finalData["pdfUploadError"] = error.localizedDescription
+            }
+
+            Firestore.firestore()
+                .collection("reports")
+                .document(numericBarcodeId)
+                .setData(finalData, merge: true) { completion?($0) }
+        }
     }
 }
