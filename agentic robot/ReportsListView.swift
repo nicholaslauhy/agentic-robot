@@ -165,7 +165,7 @@ struct ReportsListView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(filteredDocs) { doc in
-                                ReportRowCard(report: doc.entry, accent: selectedCategory.accentColor)
+                                ReportRowCard(report: doc.entry, category: selectedCategory, accent: selectedCategory.accentColor)
                                     .onTapGesture { selectedDoc = doc }
                             }
                         }
@@ -279,6 +279,7 @@ struct ReportsListView: View {
 // MARK: - Report Row Card
 private struct ReportRowCard: View {
     let report: ReportEntry
+    let category: ReportCategory
     let accent: Color
 
     private var generatedByText: String {
@@ -301,8 +302,10 @@ private struct ReportRowCard: View {
                 Text(report.reportNo).font(.caption.weight(.semibold)).foregroundColor(accent)
                 HStack(spacing: 6) {
                     Text(report.carType)
-                    Text("·")
-                    Text("\(report.detectionCount) case\(report.detectionCount == 1 ? "" : "s")")
+                    if category != .fuel {
+                        Text("·")
+                        Text("\(report.detectionCount) case\(report.detectionCount == 1 ? "" : "s")")
+                    }
                 }
                 .font(.caption).foregroundColor(.secondary)
             }
@@ -465,7 +468,7 @@ struct SecComDetailSheet: View {
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Vehicle Type",   value: doc.entry.carType)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Mileage",        value: (d["mileage"] as? String ?? "-") + " km")
+                            DetailRow(label: "Mileage",        value: kilometreValue(d["mileage"] as? String))
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Purpose",        value: d["purpose"] as? String ?? "-")
                         }
@@ -500,23 +503,22 @@ struct SecComDetailSheet: View {
                         // Damage images
                         if !damageImages.isEmpty {
                             sectionCard(title: "New Damage Detected", icon: "camera.fill", accent: accent) {
-                                ScrollView(.horizontal, showsIndicators: false) {
-                                    HStack(spacing: 12) {
-                                        ForEach(damageImages.indices, id: \.self) { idx in
-                                            Image(uiImage: damageImages[idx])
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 132, height: 132)
-                                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 12)
-                                                        .stroke(accent.opacity(0.18), lineWidth: 1)
-                                                )
-                                        }
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
+                                    ForEach(damageImages.indices, id: \.self) { idx in
+                                        Image(uiImage: damageImages[idx])
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 120, height: 120)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .stroke(accent.opacity(0.18), lineWidth: 1)
+                                            )
                                     }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 10)
                             }
                         }
                         Spacer().frame(height: 10)
@@ -580,17 +582,12 @@ struct FuelDetailSheet: View {
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Vehicle Type",    value: doc.entry.carType)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Odometer",        value: (d["odometer"] as? String ?? "-") + " km")
+                            DetailRow(label: "Odometer",        value: kilometreValue(d["odometer"] as? String))
                         }
 
                         // Mastercard
                         sectionCard(title: "Mastercard Usage", icon: "creditcard.fill", accent: accent) {
-                            StatusDetailRow(
-                                label: "Mastercard Used",
-                                value: usedMastercard ? "Yes" : "No",
-                                systemImage: usedMastercard ? "checkmark.circle.fill" : "xmark.circle.fill",
-                                tint: usedMastercard ? accent : .secondary
-                            )
+                            DetailRow(label: "Mastercard Used", value: usedMastercard ? "Yes" : "No")
                         }
 
                         // Receipt
@@ -678,6 +675,16 @@ private func barcodeBlock(_ id: String, accent: Color) -> some View {
     .padding(.horizontal)
 }
 
+
+private func kilometreValue(_ raw: String?) -> String {
+    let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed != "-" else { return "-" }
+    if trimmed.localizedCaseInsensitiveContains("km") {
+        return trimmed
+    }
+    return "\(trimmed) km"
+}
+
 // MARK: - Status Rows (shared)
 private struct StatusDetailRow: View {
     let label: String
@@ -716,11 +723,13 @@ private struct ChecklistStatusRow: View {
     let isChecked: Bool
     let accent: Color
 
+    private var statusColor: Color { isChecked ? accent : .red }
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+            Image(systemName: isChecked ? "checkmark.circle.fill" : "xmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(isChecked ? accent : .secondary)
+                .foregroundColor(statusColor)
                 .frame(width: 22, alignment: .center)
 
             Text(title)
@@ -729,12 +738,12 @@ private struct ChecklistStatusRow: View {
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text(isChecked ? "Checked" : "Unchecked")
+            Text(isChecked ? "Checked" : "Missing")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(isChecked ? accent : .secondary)
+                .foregroundColor(statusColor)
                 .padding(.horizontal, 9)
                 .padding(.vertical, 5)
-                .background((isChecked ? accent : Color.secondary).opacity(0.10))
+                .background(statusColor.opacity(0.10))
                 .clipShape(Capsule())
         }
         .padding(.horizontal, 16)

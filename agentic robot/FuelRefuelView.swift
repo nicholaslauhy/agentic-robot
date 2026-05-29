@@ -1,10 +1,13 @@
 import SwiftUI
+import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
 import FirebaseFirestore
 import FirebaseAuth
 
 struct FuelRefuelView: View {
+
+    var onReportGenerated: () -> Void = {}
 
     @EnvironmentObject var auth: AuthViewModel
     @Environment(\.dismiss) private var dismiss
@@ -38,6 +41,8 @@ struct FuelRefuelView: View {
     @State private var submitError: String? = nil
     @State private var submitSuccess = false
     @State private var showValidationError = false
+    @State private var showReviewSheet = false
+    @State private var showGenerateConfirmation = false
 
     private var effectiveVehicleNumber: String {
         useOtherVehicle ? otherPlate.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -126,8 +131,8 @@ struct FuelRefuelView: View {
                         }
 
                         Divider()
-                        formRow(label: "Odometer (km)") {
-                            TextField("Reading", text: $odometer)
+                        formRow(label: "Odometer") {
+                            TextField("Numbers only, e.g. 12345", text: $odometer)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                         }
@@ -196,16 +201,11 @@ struct FuelRefuelView: View {
                     }
 
                     Button {
-                        submitForm()
+                        validateAndShowReview()
                     } label: {
-                        if isSubmitting {
-                            ProgressView().tint(.white)
-                                .frame(maxWidth: .infinity).padding()
-                        } else {
-                            Text("Submit Refuel Report")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity).padding()
-                        }
+                        Text("Review Refuel Details")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity).padding()
                     }
                     .background(HTXTheme.fuelOrange)
                     .foregroundColor(.white)
@@ -262,10 +262,36 @@ struct FuelRefuelView: View {
                 url.stopAccessingSecurityScopedResource()
             }
         }
-        .alert("Report Submitted", isPresented: $submitSuccess) {
-            Button("Done") { dismiss() }
+        .onChange(of: odometer) { _, newValue in
+            let digitsOnly = newValue.filter { $0.isNumber }
+            if digitsOnly != newValue {
+                odometer = digitsOnly
+            }
+        }
+        .sheet(isPresented: $showReviewSheet) {
+            FuelRefuelReviewSheet(
+                driverName: driverName.trimmingCharacters(in: .whitespacesAndNewlines),
+                refuelDate: dateString,
+                refuelTime: timeString,
+                vehicleNumber: effectiveVehicleNumber,
+                vehicleType: effectiveCarType,
+                odometer: cleanOdometer,
+                usedMastercard: usedMastercard ?? false,
+                hasReceipt: receiptImage != nil,
+                isSubmitting: isSubmitting,
+                onGenerate: { showGenerateConfirmation = true }
+            )
+            .presentationDetents([.large])
+        }
+        .confirmationDialog(
+            "Generate this refuel report?",
+            isPresented: $showGenerateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Generate Report") { submitForm() }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The fuel refuel report has been saved successfully.")
+            Text("Please confirm that the details are correct before generating the report.")
         }
     }
 
@@ -317,6 +343,64 @@ struct FuelRefuelView: View {
         .buttonStyle(.plain)
     }
 
+    private var cleanOdometer: String {
+        odometer.filter { $0.isNumber }
+    }
+
+    private func validateAndShowReview() {
+        showValidationError = false
+        submitError = nil
+        odometer = cleanOdometer
+
+        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let vehicleNumber = effectiveVehicleNumber
+
+        guard !name.isEmpty,
+              !vehicleNumber.isEmpty,
+              !cleanOdometer.isEmpty,
+              usedMastercard != nil
+        else {
+            showValidationError = true
+            return
+        }
+
+        showReviewSheet = true
+    }
+
+    private func receiptBase64ForFirestore(from image: UIImage) -> String? {
+        // Firestore has a field-size limit of about 1 MB. Base64 is larger than the image data,
+        // so keep the encoded string comfortably below that limit.
+        let maxBase64Length = 900_000
+        let targetLongestSides: [CGFloat] = [1200, 1000, 800, 650, 500, 380]
+        let compressionQualities: [CGFloat] = [0.65, 0.55, 0.45, 0.35, 0.25, 0.18, 0.12]
+
+        for longestSide in targetLongestSides {
+            let resized = resizedImage(image, longestSide: longestSide)
+            for quality in compressionQualities {
+                guard let data = resized.jpegData(compressionQuality: quality) else { continue }
+                let base64 = data.base64EncodedString()
+                if base64.count <= maxBase64Length {
+                    return base64
+                }
+            }
+        }
+        return nil
+    }
+
+    private func resizedImage(_ image: UIImage, longestSide: CGFloat) -> UIImage {
+        let size = image.size
+        let currentLongestSide = max(size.width, size.height)
+        guard currentLongestSide > longestSide else { return image }
+
+        let scale = longestSide / currentLongestSide
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+
+        return renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+
     // MARK: - Submit
 
     private func submitForm() {
@@ -328,7 +412,7 @@ struct FuelRefuelView: View {
 
         guard !name.isEmpty,
               !vehicleNumber.isEmpty,
-              !odometer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !cleanOdometer.isEmpty,
               usedMastercard != nil
         else {
             showValidationError = true
@@ -349,16 +433,20 @@ struct FuelRefuelView: View {
             "refuelTime":       timeString,
             "vehicleNumber":    vehicleNumber,
             "carType":          effectiveCarType,
-            "odometer":         odometer.trimmingCharacters(in: .whitespacesAndNewlines),
+            "odometer":         cleanOdometer,
             "usedMastercard":   usedMastercard ?? false,
             "generatedBy":      Auth.auth().currentUser?.email ?? "Unknown",
             "detectionCount":   0,
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
-        if let receiptImage,
-           let receiptData = receiptImage.jpegData(compressionQuality: 0.7) {
-            data["receiptBase64"] = receiptData.base64EncodedString()
+        if let receiptImage {
+            guard let receiptBase64 = receiptBase64ForFirestore(from: receiptImage) else {
+                isSubmitting = false
+                submitError = "Receipt image is too large. Please retake it or choose a smaller image."
+                return
+            }
+            data["receiptBase64"] = receiptBase64
         }
 
         Firestore.firestore()
@@ -370,10 +458,117 @@ struct FuelRefuelView: View {
                     if let error {
                         submitError = "Failed to save: \(error.localizedDescription)"
                     } else {
-                        submitSuccess = true
+                        showReviewSheet = false
+                        onReportGenerated()
                     }
                 }
             }
+    }
+}
+
+
+// MARK: - Fuel Refuel Review Sheet
+
+private struct FuelRefuelReviewSheet: View {
+    let driverName: String
+    let refuelDate: String
+    let refuelTime: String
+    let vehicleNumber: String
+    let vehicleType: String
+    let odometer: String
+    let usedMastercard: Bool
+    let hasReceipt: Bool
+    let isSubmitting: Bool
+    let onGenerate: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SubtleHTXBackground().ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        reviewCard(title: "Driver Information", icon: "person.fill") {
+                            reviewRow("Name", driverName)
+                        }
+
+                        reviewCard(title: "Refuel Details", icon: "fuelpump.fill") {
+                            reviewRow("Date of Refuel", refuelDate)
+                            reviewRow("Time of Refuel", refuelTime)
+                            reviewRow("Vehicle Number", vehicleNumber)
+                            reviewRow("Vehicle Type", vehicleType)
+                            reviewRow("Odometer", "\(odometer) km")
+                        }
+
+                        reviewCard(title: "Mastercard Usage", icon: "creditcard.fill") {
+                            reviewRow("Mastercard Used", usedMastercard ? "Yes" : "No")
+                        }
+
+                        reviewCard(title: "Fuel Receipt", icon: "doc.text.fill") {
+                            reviewRow("Receipt Attached", hasReceipt ? "Yes" : "No")
+                        }
+
+                        Button {
+                            onGenerate()
+                        } label: {
+                            if isSubmitting {
+                                ProgressView().tint(.white)
+                                    .frame(maxWidth: .infinity).padding()
+                            } else {
+                                Text("Generate Report")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity).padding()
+                            }
+                        }
+                        .background(HTXTheme.fuelOrange)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .disabled(isSubmitting)
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                    }
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle("Confirm Refuel Report")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") { dismiss() }
+                        .fontWeight(.semibold)
+                        .foregroundColor(HTXTheme.fuelOrange)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reviewCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundColor(HTXTheme.fuelOrange)
+            content()
+        }
+        .padding(16)
+        .subtleHTXCard()
+        .padding(.horizontal)
+    }
+
+    private func reviewRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 130, alignment: .leading)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(.vertical, 4)
     }
 }
 

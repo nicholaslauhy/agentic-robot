@@ -67,6 +67,8 @@ enum VehicleEquipment: String, CaseIterable, Identifiable {
 
 struct SecComPreDrivingChecklistView: View {
 
+    var onReportGenerated: () -> Void = {}
+
     @EnvironmentObject var auth: AuthViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -107,6 +109,8 @@ struct SecComPreDrivingChecklistView: View {
     @State private var isSubmitting = false
     @State private var submitError: String? = nil
     @State private var submitSuccess = false
+    @State private var showReviewSheet = false
+    @State private var showGenerateConfirmation = false
 
     // Validation
     @State private var showValidationError = false
@@ -212,7 +216,7 @@ struct SecComPreDrivingChecklistView: View {
 
                         Divider()
                         formRow(label: "Mileage") {
-                            TextField("km", text: $mileage)
+                            TextField("Numbers only, e.g. 12345", text: $mileage)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                         }
@@ -340,18 +344,12 @@ struct SecComPreDrivingChecklistView: View {
 
                     // Submit
                     Button {
-                        submitForm()
+                        validateAndShowReview()
                     } label: {
-                        if isSubmitting {
-                            ProgressView().tint(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                        } else {
-                            Text("Submit Checklist")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                        }
+                        Text("Review Checklist Details")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
                     }
                     .background(HTXTheme.primaryPurple)
                     .foregroundColor(.white)
@@ -411,11 +409,40 @@ struct SecComPreDrivingChecklistView: View {
                 }
             }
         }
-        // Success alert
-        .alert("Checklist Submitted", isPresented: $submitSuccess) {
-            Button("Done") { dismiss() }
+        .onChange(of: mileage) { _, newValue in
+            let digitsOnly = newValue.filter { $0.isNumber }
+            if digitsOnly != newValue {
+                mileage = digitsOnly
+            }
+        }
+        .sheet(isPresented: $showReviewSheet) {
+            SecComChecklistReviewSheet(
+                date: dateString,
+                time: timeString,
+                driverName: driverName.trimmingCharacters(in: .whitespacesAndNewlines),
+                workContact: workContact.trimmingCharacters(in: .whitespacesAndNewlines),
+                vehicleNumber: effectivePlate,
+                vehicleType: effectiveCarType,
+                mileage: cleanMileage,
+                purpose: purpose.trimmingCharacters(in: .whitespacesAndNewlines),
+                selectedEquipment: selectedEquipment,
+                bodyworkAllInOrder: bodyworkAllInOrder,
+                bodyworkDetails: bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines),
+                damageImageCount: damageImages.count,
+                isSubmitting: isSubmitting,
+                onGenerate: { showGenerateConfirmation = true }
+            )
+            .presentationDetents([.large])
+        }
+        .confirmationDialog(
+            "Generate this checklist report?",
+            isPresented: $showGenerateConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Generate Report") { submitForm() }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("The pre-driving checklist has been saved successfully.")
+            Text("Please confirm that the details are correct before generating the report.")
         }
     }
 
@@ -489,6 +516,30 @@ struct SecComPreDrivingChecklistView: View {
         .buttonStyle(.plain)
     }
 
+    private var cleanMileage: String {
+        mileage.filter { $0.isNumber }
+    }
+
+    private func validateAndShowReview() {
+        showValidationError = false
+        submitError = nil
+        mileage = cleanMileage
+
+        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !name.isEmpty, !contact.isEmpty,
+              !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
+              !cleanMileage.isEmpty,
+              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            showValidationError = true
+            return
+        }
+
+        showReviewSheet = true
+    }
+
     // MARK: - Submit
 
     private func submitForm() {
@@ -500,7 +551,7 @@ struct SecComPreDrivingChecklistView: View {
 
         guard !name.isEmpty, !contact.isEmpty,
               !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
-              !mileage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !cleanMileage.isEmpty,
               !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             showValidationError = true
@@ -522,7 +573,7 @@ struct SecComPreDrivingChecklistView: View {
             "workContact":      contact,
             "plate":            effectivePlate,
             "carType":          effectiveCarType,
-            "mileage":          mileage.trimmingCharacters(in: .whitespacesAndNewlines),
+            "mileage":          cleanMileage,
             "purpose":          purpose.trimmingCharacters(in: .whitespacesAndNewlines),
             "equipment":        selectedEquipment.map { $0.rawValue },
             "bodyworkAllInOrder": bodyworkAllInOrder,
@@ -548,10 +599,144 @@ struct SecComPreDrivingChecklistView: View {
                     if let error {
                         submitError = "Failed to save: \(error.localizedDescription)"
                     } else {
-                        submitSuccess = true
+                        showReviewSheet = false
+                        onReportGenerated()
                     }
                 }
             }
+    }
+}
+
+
+// MARK: - SecCom Review Sheet
+
+private struct SecComChecklistReviewSheet: View {
+    let date: String
+    let time: String
+    let driverName: String
+    let workContact: String
+    let vehicleNumber: String
+    let vehicleType: String
+    let mileage: String
+    let purpose: String
+    let selectedEquipment: Set<VehicleEquipment>
+    let bodyworkAllInOrder: Bool
+    let bodyworkDetails: String
+    let damageImageCount: Int
+    let isSubmitting: Bool
+    let onGenerate: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SubtleHTXBackground().ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 16) {
+                        reviewCard(title: "Basic Information", icon: "info.circle.fill") {
+                            reviewRow("Date", date)
+                            reviewRow("Time", time)
+                            reviewRow("Driver Name", driverName)
+                            reviewRow("Work Contact", workContact)
+                        }
+
+                        reviewCard(title: "Vehicle", icon: "car.fill") {
+                            reviewRow("Vehicle Number", vehicleNumber)
+                            reviewRow("Vehicle Type", vehicleType)
+                            reviewRow("Mileage", "\(mileage) km")
+                            reviewRow("Purpose", purpose)
+                        }
+
+                        reviewCard(title: "Checks & Equipment", icon: "checklist") {
+                            ForEach(VehicleEquipment.allCases) { item in
+                                let checked = selectedEquipment.contains(item)
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: checked ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                        .foregroundColor(checked ? HTXTheme.primaryPurple : .red)
+                                        .frame(width: 22)
+                                    Text(item.rawValue)
+                                        .font(.subheadline)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text(checked ? "Checked" : "Missing")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundColor(checked ? HTXTheme.primaryPurple : .red)
+                                }
+                                .padding(.vertical, 6)
+                            }
+                        }
+
+                        reviewCard(title: "Body Work Defects / Others", icon: "wrench.and.screwdriver.fill") {
+                            reviewRow("Status", bodyworkAllInOrder ? "All in Order" : "Others")
+                            if !bodyworkAllInOrder {
+                                reviewRow("Details", bodyworkDetails.isEmpty ? "-" : bodyworkDetails)
+                            }
+                        }
+
+                        reviewCard(title: "New Damage Detected", icon: "camera.fill") {
+                            reviewRow("Images Attached", "\(damageImageCount)")
+                        }
+
+                        Button {
+                            onGenerate()
+                        } label: {
+                            if isSubmitting {
+                                ProgressView().tint(.white)
+                                    .frame(maxWidth: .infinity).padding()
+                            } else {
+                                Text("Generate Report")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity).padding()
+                            }
+                        }
+                        .background(HTXTheme.primaryPurple)
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .disabled(isSubmitting)
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
+                    }
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle("Confirm Checklist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") { dismiss() }
+                        .fontWeight(.semibold)
+                        .foregroundColor(HTXTheme.primaryPurple)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reviewCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundColor(HTXTheme.primaryPurple)
+            content()
+        }
+        .padding(16)
+        .subtleHTXCard()
+        .padding(.horizontal)
+    }
+
+    private func reviewRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .frame(width: 120, alignment: .leading)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(.vertical, 4)
     }
 }
 

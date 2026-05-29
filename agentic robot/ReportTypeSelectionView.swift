@@ -44,6 +44,7 @@ enum ReportType: String, CaseIterable, Identifiable {
 struct ReportTypeSelectionView: View {
 
     @EnvironmentObject var auth: AuthViewModel
+    @Environment(\.dismiss) private var dismiss
 
     @State private var navigateToNP299     = false
     @State private var navigateToSecCom    = false
@@ -94,11 +95,21 @@ struct ReportTypeSelectionView: View {
         }
         // SecCom checklist
         .navigationDestination(isPresented: $navigateToSecCom) {
-            SecComPreDrivingChecklistView()
+            SecComPreDrivingChecklistView {
+                navigateToSecCom = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    dismiss()
+                }
+            }
         }
         // Fuel refuel
         .navigationDestination(isPresented: $navigateToFuel) {
-            FuelRefuelView()
+            FuelRefuelView {
+                navigateToFuel = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    dismiss()
+                }
+            }
         }
     }
 }
