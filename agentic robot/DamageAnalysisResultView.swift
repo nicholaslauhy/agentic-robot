@@ -1791,7 +1791,7 @@ struct PoliceReportStageOneView: View {
     }
 
     private func isValidSingaporePhone(_ value: String) -> Bool {
-        let regex = "^[89]\\d{7}$"
+        let regex = "^[689]\\d{7}$"
         return NSPredicate(format: "SELF MATCHES %@", regex)
             .evaluate(with: value)
     }
