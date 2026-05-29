@@ -11,7 +11,6 @@ struct FuelRefuelView: View {
 
     // Fields
     @State private var driverName: String = ""
-    @State private var licensePlate: String = ""
     @State private var refuelDate: Date = Date()
     @State private var refuelTime: Date = Date()
     @State private var vehicleNumber: String = ""
@@ -40,7 +39,7 @@ struct FuelRefuelView: View {
     @State private var submitSuccess = false
     @State private var showValidationError = false
 
-    private var effectivePlate: String {
+    private var effectiveVehicleNumber: String {
         useOtherVehicle ? otherPlate.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                         : selectedPlate
     }
@@ -73,13 +72,6 @@ struct FuelRefuelView: View {
                             TextField("Full name", text: $driverName)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
-                        }
-                        Divider()
-                        formRow(label: "Licence Plate") {
-                            TextField("e.g. SBA1234A", text: $licensePlate)
-                                .textInputAutocapitalization(.characters)
-                                .autocorrectionDisabled()
-                                .multilineTextAlignment(.trailing)
                         }
                     }
 
@@ -119,14 +111,14 @@ struct FuelRefuelView: View {
 
                         if useOtherVehicle {
                             Divider()
-                            formRow(label: "Car Plate") {
-                                TextField("e.g. SBA1234A", text: $otherPlate)
+                            formRow(label: "Vehicle Number") {
+                                TextField("e.g. QX909B", text: $otherPlate)
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
                             }
                             Divider()
-                            formRow(label: "Car Type") {
+                            formRow(label: "Vehicle Type") {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
@@ -332,10 +324,10 @@ struct FuelRefuelView: View {
         submitError = nil
 
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let plate = licensePlate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let vehicleNumber = effectiveVehicleNumber
 
-        guard !name.isEmpty, !plate.isEmpty,
-              !effectivePlate.isEmpty,
+        guard !name.isEmpty,
+              !vehicleNumber.isEmpty,
               !odometer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               usedMastercard != nil
         else {
@@ -346,17 +338,16 @@ struct FuelRefuelView: View {
         isSubmitting = true
 
         let barcodeId = ReportStore.makeNumericBarcodeId()
-        let reportNo  = "FUEL/\(dateString.replacingOccurrences(of: "/", with: ""))/\(effectivePlate)"
+        let reportNo  = "FUEL/\(dateString.replacingOccurrences(of: "/", with: ""))/\(vehicleNumber)"
 
         var data: [String: Any] = [
             "reportType":       "fuel_refuel",
             "reportNo":         reportNo,
             "barcodeId":        barcodeId,
             "driverName":       name,
-            "plate":            plate,
             "refuelDate":       dateString,
             "refuelTime":       timeString,
-            "vehicleNumber":    effectivePlate,
+            "vehicleNumber":    vehicleNumber,
             "carType":          effectiveCarType,
             "odometer":         odometer.trimmingCharacters(in: .whitespacesAndNewlines),
             "usedMastercard":   usedMastercard ?? false,

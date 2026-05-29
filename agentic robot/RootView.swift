@@ -9,8 +9,13 @@ struct RootView: View {
     var body: some View {
         Group {
             if auth.user != nil {
-                NavigationStack {
-                    HomeView()
+                if auth.isLoadingRole || auth.role == nil {
+                    ProgressView("Loading account…")
+                        .tint(HTXTheme.primaryPurple)
+                } else {
+                    NavigationStack {
+                        HomeView()
+                    }
                 }
             } else {
                 // No Register flow here — admins add members from within the app

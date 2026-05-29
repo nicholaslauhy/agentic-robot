@@ -66,7 +66,7 @@ struct HomeView: View {
                 .padding(.horizontal)
 
                 // MARK: - Action Buttons
-                if showButtons {
+                if showButtons && !auth.isLoadingRole {
                     VStack(spacing: 14) {
 
                         // Admin only: Add Member

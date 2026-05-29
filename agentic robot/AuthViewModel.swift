@@ -7,7 +7,8 @@ import UIKit
 class AuthViewModel: ObservableObject {
 
     @Published var user: FirebaseAuth.User?
-    @Published var role: String? // "admin" or "member"
+    @Published var role: String?           // "admin" or "member"
+    @Published var isLoadingRole: Bool = false   // ← NEW: true while Firestore fetch is in flight
     @Published var errorMessage: String?
     @Published var didShowIntroAnimation = false
 
@@ -22,7 +23,6 @@ class AuthViewModel: ObservableObject {
         self.role = nil
 
         self.authStateListener = Auth.auth().addStateDidChangeListener { [weak self] _, user in
-
             DispatchQueue.main.async {
                 self?.user = user
             }
@@ -30,7 +30,6 @@ class AuthViewModel: ObservableObject {
     }
 
     deinit {
-
         if let authStateListener = authStateListener {
             Auth.auth().removeStateDidChangeListener(authStateListener)
         }
@@ -40,6 +39,8 @@ class AuthViewModel: ObservableObject {
 
     func fetchRole(for uid: String, completion: @escaping () -> Void) {
 
+        isLoadingRole = true   // ← signal that role is not yet confirmed
+
         Firestore.firestore()
             .collection("users")
             .document(uid)
@@ -47,39 +48,45 @@ class AuthViewModel: ObservableObject {
 
                 DispatchQueue.main.async {
 
-                    guard let data = snapshot?.data() else {
+                    guard let self else { completion(); return }
 
-                        self?.role = nil
+                    defer { self.isLoadingRole = false }   // ← always clear the flag
+
+                    guard let data = snapshot?.data() else {
+                        self.role = nil
                         completion()
                         return
                     }
 
                     let active = data["active"] as? Bool ?? false
-                    let role = data["role"] as? String ?? "member"
+                    let role = Self.normalizedRole(from: data["role"] as? String)
 
-                    // BLOCK inactive users
+                    // Block inactive users
                     if active == false {
-
-                        do {
-                            try Auth.auth().signOut()
-                        } catch { }
-
-                        self?.user = nil
-                        self?.role = nil
-                        self?.errorMessage = "Your account has been deactivated."
-
+                        try? Auth.auth().signOut()
+                        self.user = nil
+                        self.role = nil
+                        self.errorMessage = "Your account has been deactivated."
                         completion()
                         return
                     }
 
-                    self?.role = role
+                    self.role = role
                     completion()
                 }
             }
     }
 
+    // @Published role drives this — SwiftUI will re-render any view
+    // reading isAdmin whenever role changes.
     var isAdmin: Bool {
-        role == "admin"
+        Self.normalizedRole(from: role) == "admin"
+    }
+
+    private static func normalizedRole(from rawRole: String?) -> String {
+        rawRole?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? "member"
     }
 
     // MARK: - Error Mapping
@@ -87,35 +94,21 @@ class AuthViewModel: ObservableObject {
     private func mapAuthError(_ error: Error?) -> String {
 
         let nsError = error as NSError?
-
         let defaultMessage = "Something went wrong. Please try again!"
-
-        guard let code = nsError?.code else {
-            return defaultMessage
-        }
+        guard let code = nsError?.code else { return defaultMessage }
 
         switch code {
-
         case AuthErrorCode.wrongPassword.rawValue,
              AuthErrorCode.invalidCredential.rawValue,
              AuthErrorCode.userNotFound.rawValue:
-
             return "Incorrect username/password. Please try again!"
-
         case AuthErrorCode.emailAlreadyInUse.rawValue:
-
             return "This email is already in use."
-
         case AuthErrorCode.weakPassword.rawValue:
-
             return "Password should be at least 6 characters."
-
         case AuthErrorCode.invalidEmail.rawValue:
-
             return "Please enter a valid email address."
-
         default:
-
             return defaultMessage
         }
     }
@@ -123,7 +116,6 @@ class AuthViewModel: ObservableObject {
     // MARK: - Haptics
 
     private func triggerErrorHaptic() {
-
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.error)
     }
@@ -140,43 +132,28 @@ class AuthViewModel: ObservableObject {
 
             DispatchQueue.main.async {
 
-                // Firebase login failed
                 if let error = error {
-
                     self.errorMessage = self.mapAuthError(error)
                     self.triggerErrorHaptic()
-
                     completion(false)
-
                     return
                 }
 
-                // Missing user
                 guard let user = result?.user else {
-
                     self.errorMessage = "Could not retrieve user account."
                     self.triggerErrorHaptic()
-
                     completion(false)
-
                     return
                 }
 
-                // Temporarily store user
                 self.user = user
 
-                // Fetch Firestore role + active state
                 self.fetchRole(for: user.uid) {
-
-                    // User got signed out because inactive
                     guard Auth.auth().currentUser != nil else {
-
                         self.triggerErrorHaptic()
                         completion(false)
-
                         return
                     }
-
                     self.errorMessage = nil
                     completion(true)
                 }
@@ -200,36 +177,28 @@ class AuthViewModel: ObservableObject {
                         .collection("users")
                         .document(newUser.uid)
                         .setData([
-                            "role": "member",
-                            "email": email,
+                            "role":   "member",
+                            "email":  email,
                             "active": true
                         ]) { _ in
 
                             do {
-
                                 try Auth.auth().signOut()
-
                             } catch {
-
                                 self.errorMessage = "Failed to sign out after registration."
-
                                 completion(false)
-
                                 return
                             }
 
                             self.user = nil
                             self.role = nil
                             self.errorMessage = nil
-
                             completion(true)
                         }
 
                 } else {
-
                     self.errorMessage = self.mapAuthError(error)
                     self.triggerErrorHaptic()
-
                     completion(false)
                 }
             }
@@ -239,11 +208,10 @@ class AuthViewModel: ObservableObject {
     // MARK: - Logout
 
     func logout() {
-
         try? Auth.auth().signOut()
-
         user = nil
         role = nil
+        isLoadingRole = false
         errorMessage = nil
         didShowIntroAnimation = false
     }
