@@ -1929,7 +1929,7 @@ struct PoliceReportStageOneView: View {
                         }
 
                         if !isPhoneValid {
-                            validationText("Must be 8 digits starting with 8 or 9.")
+                            validationText("Must be 8 digits starting with 6, 8, or 9.")
                         }
                     }
 
