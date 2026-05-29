@@ -1,30 +1,76 @@
-//
-//  ReportsListView.swift
-//  agentic robot
-//
-//  Created by q2 on 23/5/26.
-//
-
 import SwiftUI
 import FirebaseFirestore
+
+// MARK: - Report Category Enum
+enum ReportCategory: String, CaseIterable, Identifiable {
+    case np299    = "NP299"
+    case secCom   = "SecCom"
+    case fuel     = "Fuel"
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .np299:  return "doc.text.magnifyingglass"
+        case .secCom: return "checklist"
+        case .fuel:   return "fuelpump.fill"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .np299:  return HTXTheme.primaryPurple
+        case .secCom: return Color(red: 0.08, green: 0.50, blue: 0.30)
+        case .fuel:   return HTXTheme.fuelOrange
+        }
+    }
+
+    var firestoreCollection: String {
+        switch self {
+        case .np299:  return "reports"
+        case .secCom: return "seccom_checklists"
+        case .fuel:   return "fuel_refuel_reports"
+        }
+    }
+
+    var emptyLabel: String {
+        switch self {
+        case .np299:  return "No police reports yet."
+        case .secCom: return "No pre-driving checklists yet."
+        case .fuel:   return "No fuel refuel reports yet."
+        }
+    }
+}
 
 // MARK: - Reports List View
 struct ReportsListView: View {
 
-    @State private var reports: [ReportEntry] = []
+    @State private var selectedCategory: ReportCategory = .np299
+
+    // Per-category state
+    @State private var np299Reports:  [ReportEntry] = []
+    @State private var secComReports: [ReportEntry] = []
+    @State private var fuelReports:   [ReportEntry] = []
+
     @State private var isLoading = false
     @State private var errorMessage: String? = nil
     @State private var searchText = ""
+
     @State private var selectedReport: ReportEntry? = nil
     @State private var selectedPDFURL: URL? = nil
 
-    // Filtered list based on search
-    var filteredReports: [ReportEntry] {
-        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return reports
+    // Active list for current tab
+    private var activeReports: [ReportEntry] {
+        switch selectedCategory {
+        case .np299:  return np299Reports
+        case .secCom: return secComReports
+        case .fuel:   return fuelReports
         }
-        let query = searchText.lowercased()
-        return reports.filter {
+    }
+
+    private var filteredReports: [ReportEntry] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if query.isEmpty { return activeReports }
+        return activeReports.filter {
             $0.plate.lowercased().contains(query) ||
             $0.reportNo.lowercased().contains(query) ||
             $0.carType.lowercased().contains(query) ||
@@ -35,89 +81,78 @@ struct ReportsListView: View {
 
     var body: some View {
         ZStack {
-            SubtleHTXBackground()
-                .ignoresSafeArea()
+            SubtleHTXBackground().ignoresSafeArea()
 
             VStack(spacing: 0) {
 
+                // MARK: Category Tabs
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 10) {
+                        ForEach(ReportCategory.allCases) { cat in
+                            categoryTab(cat)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 10)
+                }
+
                 // MARK: Search Bar
                 HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-
+                    Image(systemName: "magnifyingglass").foregroundColor(.secondary)
                     TextField("Search by plate, officer, report no…", text: $searchText)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
-
                     if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
                         }
                     }
                 }
                 .padding(12)
                 .background(Color(.systemBackground).opacity(0.9))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(HTXTheme.primaryPurple.opacity(0.25), lineWidth: 1)
-                )
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selectedCategory.accentColor.opacity(0.25), lineWidth: 1))
                 .padding(.horizontal)
-                .padding(.top, 12)
                 .padding(.bottom, 8)
 
                 // MARK: Content
                 if isLoading {
                     Spacer()
-                    ProgressView("Loading reports…")
-                        .tint(HTXTheme.primaryPurple)
+                    ProgressView("Loading reports…").tint(selectedCategory.accentColor)
                     Spacer()
-
                 } else if let errorMessage {
                     Spacer()
                     VStack(spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.largeTitle)
-                            .foregroundColor(.orange)
-                        Text(errorMessage)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                        Button("Retry") { fetchReports() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(HTXTheme.primaryPurple)
+                        Image(systemName: "exclamationmark.triangle.fill").font(.largeTitle).foregroundColor(.orange)
+                        Text(errorMessage).multilineTextAlignment(.center).foregroundColor(.secondary)
+                        Button("Retry") { fetchAll() }.buttonStyle(.borderedProminent).tint(selectedCategory.accentColor)
                     }
                     .padding()
                     Spacer()
-
                 } else if filteredReports.isEmpty {
                     Spacer()
                     VStack(spacing: 12) {
                         Image(systemName: searchText.isEmpty ? "folder.badge.questionmark" : "magnifyingglass")
                             .font(.system(size: 44))
-                            .foregroundColor(HTXTheme.primaryPurple.opacity(0.5))
-                        Text(searchText.isEmpty ? "No reports yet." : "No reports match \"\(searchText)\".")
+                            .foregroundColor(selectedCategory.accentColor.opacity(0.5))
+                        Text(searchText.isEmpty
+                             ? selectedCategory.emptyLabel
+                             : "No reports match \"\(searchText)\".")
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
                     .padding()
                     Spacer()
-
                 } else {
-                    // MARK: Report count badge
                     HStack {
                         Text("\(filteredReports.count) report\(filteredReports.count == 1 ? "" : "s")")
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.secondary)
                         Spacer()
-                        Button {
-                            fetchReports()
-                        } label: {
+                        Button { fetchAll() } label: {
                             Image(systemName: "arrow.clockwise")
                                 .font(.subheadline)
-                                .foregroundColor(HTXTheme.primaryPurple)
+                                .foregroundColor(selectedCategory.accentColor)
                         }
                     }
                     .padding(.horizontal)
@@ -126,10 +161,8 @@ struct ReportsListView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(filteredReports) { report in
-                                ReportRowCard(report: report)
-                                    .onTapGesture {
-                                        selectedReport = report
-                                    }
+                                ReportRowCard(report: report, accent: selectedCategory.accentColor)
+                                    .onTapGesture { selectedReport = report }
                             }
                         }
                         .padding(.horizontal)
@@ -140,14 +173,13 @@ struct ReportsListView: View {
         }
         .navigationTitle("Existing Reports")
         .navigationBarTitleDisplayMode(.inline)
-        .tint(HTXTheme.primaryPurple)
-        .onAppear { fetchReports() }
+        .tint(selectedCategory.accentColor)
+        .onAppear { fetchAll() }
+        .onChange(of: selectedCategory) { _, _ in searchText = "" }
         .sheet(item: $selectedReport) { report in
             ReportDetailSheet(report: report) { url in
                 selectedReport = nil
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    selectedPDFURL = url
-                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { selectedPDFURL = url }
             }
         }
         .sheet(item: $selectedPDFURL) { url in
@@ -155,24 +187,81 @@ struct ReportsListView: View {
         }
     }
 
-    // MARK: - Fetch from Firestore
-    private func fetchReports() {
+    // MARK: - Category Tab Button
+    @ViewBuilder
+    private func categoryTab(_ cat: ReportCategory) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3)) { selectedCategory = cat }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: cat.icon)
+                    .font(.subheadline)
+                Text(cat.rawValue)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(
+                selectedCategory == cat
+                ? cat.accentColor
+                : Color(.secondarySystemBackground)
+            )
+            .foregroundColor(selectedCategory == cat ? .white : .secondary)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule().stroke(
+                    selectedCategory == cat ? cat.accentColor : HTXTheme.softPurpleBorder,
+                    lineWidth: 1.5
+                )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Fetch All Collections
+
+    private func fetchAll() {
         isLoading = true
         errorMessage = nil
 
+        let group = DispatchGroup()
+
+        group.enter()
+        fetchCollection("reports") { entries in
+            np299Reports = entries
+            group.leave()
+        }
+
+        group.enter()
+        fetchCollection("seccom_checklists") { entries in
+            secComReports = entries
+            group.leave()
+        }
+
+        group.enter()
+        fetchCollection("fuel_refuel_reports") { entries in
+            fuelReports = entries
+            group.leave()
+        }
+
+        group.notify(queue: .main) {
+            isLoading = false
+        }
+    }
+
+    private func fetchCollection(_ collection: String, completion: @escaping ([ReportEntry]) -> Void) {
         Firestore.firestore()
-            .collection("reports")
+            .collection(collection)
             .order(by: "createdAt", descending: true)
             .getDocuments { snapshot, error in
                 DispatchQueue.main.async {
-                    isLoading = false
-
                     if let error {
                         self.errorMessage = error.localizedDescription
+                        completion([])
                         return
                     }
 
-                    self.reports = (snapshot?.documents ?? []).compactMap { doc in
+                    let entries = (snapshot?.documents ?? []).compactMap { doc -> ReportEntry? in
                         let data = doc.data()
                         guard
                             let reportNo = data["reportNo"] as? String,
@@ -180,7 +269,6 @@ struct ReportsListView: View {
                         else { return nil }
 
                         let createdAt = (data["createdAt"] as? Timestamp)?.dateValue()
-
                         return ReportEntry(
                             id:             doc.documentID,
                             reportNo:       reportNo,
@@ -190,10 +278,11 @@ struct ReportsListView: View {
                             detectionCount: data["detectionCount"] as? Int    ?? 0,
                             createdAt:      createdAt,
                             barcodeId:      data["barcodeId"]      as? String ?? doc.documentID,
-                            pdfFileName:   data["pdfFileName"]   as? String,
-                            pdfBase64:     data["pdfBase64"]     as? String
+                            pdfFileName:    data["pdfFileName"]    as? String,
+                            pdfBase64:      data["pdfBase64"]      as? String
                         )
                     }
+                    completion(entries)
                 }
             }
     }
@@ -202,6 +291,7 @@ struct ReportsListView: View {
 // MARK: - Report Row Card
 private struct ReportRowCard: View {
     let report: ReportEntry
+    let accent: Color
 
     private var generatedByText: String {
         let trimmed = report.generatedBy.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -210,24 +300,15 @@ private struct ReportRowCard: View {
 
     var body: some View {
         HStack(spacing: 14) {
-
-            // Left colour strip + icon
             VStack {
                 Image(systemName: "doc.text.fill")
                     .font(.title3)
                     .foregroundColor(.white)
             }
             .frame(width: 44, height: 44)
-            .background(
-                LinearGradient(
-                    colors: [HTXTheme.primaryPurple, HTXTheme.secondaryPurple],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .background(LinearGradient(colors: [accent, accent.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing))
             .clipShape(RoundedRectangle(cornerRadius: 11))
 
-            // Centre: plate + report info
             VStack(alignment: .leading, spacing: 4) {
                 Text(report.plate)
                     .font(.headline)
@@ -235,7 +316,7 @@ private struct ReportRowCard: View {
 
                 Text(report.reportNo)
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(HTXTheme.primaryPurple)
+                    .foregroundColor(accent)
 
                 HStack(spacing: 6) {
                     Text(report.carType)
@@ -248,24 +329,19 @@ private struct ReportRowCard: View {
 
             Spacer()
 
-            // Right: date + chevron
             VStack(alignment: .trailing, spacing: 4) {
                 Text(report.shortDate)
                     .font(.caption2)
                     .foregroundColor(.secondary)
-
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(HTXTheme.primaryPurple.opacity(0.6))
+                    .foregroundColor(accent.opacity(0.6))
             }
         }
         .padding(14)
         .background(Color(.systemBackground).opacity(0.92))
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(HTXTheme.primaryPurple.opacity(0.12), lineWidth: 1)
-        )
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
     }
 }
@@ -285,26 +361,21 @@ struct ReportDetailSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                SubtleHTXBackground()
-                    .ignoresSafeArea()
+                SubtleHTXBackground().ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 20) {
 
-                        // Header card
                         VStack(spacing: 6) {
                             Image(systemName: "doc.text.fill")
                                 .font(.system(size: 40))
                                 .foregroundColor(HTXTheme.primaryPurple)
-
                             Text(report.plate)
                                 .font(.largeTitle.weight(.black))
                                 .foregroundColor(.primary)
-
                             Text(report.reportNo)
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(HTXTheme.primaryPurple)
-
                             Label("Generated by \(generatedByText)", systemImage: "person.fill")
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.secondary)
@@ -316,34 +387,28 @@ struct ReportDetailSheet: View {
                         .clipShape(RoundedRectangle(cornerRadius: 18))
                         .padding(.horizontal)
 
-                        // Details card
                         VStack(spacing: 0) {
-                            DetailRow(label: "Report No.",    value: report.reportNo)
+                            DetailRow(label: "Report No.",   value: report.reportNo)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Plate",         value: report.plate)
+                            DetailRow(label: "Plate",        value: report.plate)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Vehicle Type",  value: report.carType)
+                            DetailRow(label: "Vehicle Type", value: report.carType)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Damage Cases",  value: "\(report.detectionCount)")
+                            DetailRow(label: "Damage Cases", value: "\(report.detectionCount)")
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Generated By",  value: generatedByText)
+                            DetailRow(label: "Generated By", value: generatedByText)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Date & Time",   value: report.dateString)
+                            DetailRow(label: "Date & Time",  value: report.dateString)
                         }
                         .background(Color(.systemBackground).opacity(0.9))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16)
-                                .stroke(HTXTheme.primaryPurple.opacity(0.12), lineWidth: 1)
-                        )
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(HTXTheme.primaryPurple.opacity(0.12), lineWidth: 1))
                         .padding(.horizontal)
 
-                        // Barcode ID card
                         VStack(spacing: 8) {
                             Text("Barcode ID")
                                 .font(.caption.weight(.semibold))
                                 .foregroundColor(.secondary)
-
                             Text(report.barcodeId)
                                 .font(.system(.title2, design: .monospaced).weight(.bold))
                                 .foregroundColor(HTXTheme.primaryPurple)
@@ -353,10 +418,7 @@ struct ReportDetailSheet: View {
                         .padding()
                         .background(HTXTheme.primaryPurple.opacity(0.07))
                         .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(HTXTheme.primaryPurple.opacity(0.2), lineWidth: 1)
-                        )
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(HTXTheme.primaryPurple.opacity(0.2), lineWidth: 1))
                         .padding(.horizontal)
 
                         if let pdfErrorMessage {
@@ -369,7 +431,7 @@ struct ReportDetailSheet: View {
 
                         Button {
                             guard let url = ReportStore.resolvedPDFURL(for: report) else {
-                                pdfErrorMessage = "This report record exists, but the PDF file is not available. Generate it again with the updated app so the PDF can be saved."
+                                pdfErrorMessage = "This report record exists, but the PDF file is not available. Generate it again so the PDF can be saved."
                                 return
                             }
                             pdfErrorMessage = nil
@@ -417,12 +479,10 @@ private struct DetailRow: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .frame(width: 120, alignment: .leading)
-
             Text(value)
                 .font(.subheadline.weight(.semibold))
                 .foregroundColor(.primary)
                 .multilineTextAlignment(.leading)
-
             Spacer()
         }
         .padding(.horizontal, 16)

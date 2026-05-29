@@ -86,7 +86,7 @@ struct HomeView: View {
 
                         // Everyone: Report Generation
                         NavigationLink {
-                            LoggedInView()
+                            ReportTypeSelectionView()
                         } label: {
                             HomeActionRow(
                                 icon: "doc.text.magnifyingglass",

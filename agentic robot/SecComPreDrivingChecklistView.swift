@@ -1,0 +1,649 @@
+//
+//  SecComPreDrivingChecklistView.swift
+//  agentic robot
+//
+//  Created by q2 on 29/5/26.
+//
+
+import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
+import FirebaseFirestore
+import FirebaseAuth
+
+// MARK: - Vehicle Catalogue
+
+struct VehicleGroup: Identifiable {
+    let id = UUID()
+    let groupName: String
+    let plates: [String]
+    var carTypeName: String { groupName }
+}
+
+let secComVehicleGroups: [VehicleGroup] = [
+    VehicleGroup(groupName: "Volvo XC 90",        plates: ["QX909B","QX910X"]),
+    VehicleGroup(groupName: "Volvo S80",           plates: ["QX200L","QX443L"]),
+    VehicleGroup(groupName: "Hyundai Saloon",      plates: ["QX970Y","QX971U"]),
+    VehicleGroup(groupName: "Chevrolet Saloon",    plates: ["QX1349K","QX1350E"]),
+    VehicleGroup(groupName: "AV Saloon",           plates: ["QX1895A","QX1896Y","QX1902M"]),
+    VehicleGroup(groupName: "Pajero SUV",          plates: ["QX5000P","QX5002J","QX5003G","QX5145E"]),
+    VehicleGroup(groupName: "Marked Car",          plates: ["QX314S","QX5223M"]),
+    VehicleGroup(groupName: "Marked Van",          plates: ["PD377C","GBB9298P"]),
+    VehicleGroup(groupName: "CAU",                 plates: ["TP221H","TP222E","TP223C","TP224A","TP225Y"]),
+    VehicleGroup(groupName: "No Category",         plates: ["TP465X","TP466T","TP468M","TP470E","TP471C","QX2095K"]),
+    VehicleGroup(groupName: "Land Cruiser 4.6GX",  plates: [
+        "QX1967B","QX1968Z","QX1970R","QX1972K","QX1973H","QX1974E","QX1975C","QX1976A",
+        "QX1978U","QX1980L","QX1982G","QX1985Z","QX2013Y","QX2016P","QX2017L","QX2018J",
+        "QX2019G","QX2031U","QX2034L"
+    ]),
+    VehicleGroup(groupName: "Transporter",         plates: [
+        "YQ9184H","YQ9194D","YQ9271P","YQ9340Z","YQ9346H","YQ9366A","YQ9403B","YQ9464A","YQ9479H"
+    ]),
+]
+
+// MARK: - Equipment & Checks
+
+enum VehicleEquipment: String, CaseIterable, Identifiable {
+    case shellFuelCard     = "Shell Fuel Card"
+    case mobileRadio       = "Mobile Radio Set"
+    case fireExtinguisher  = "Fire Extinguisher"
+    case firstAidKit       = "First Aid Kit"
+    case siren             = "Siren"
+    case strobeLight       = "Strobe Light"
+    case flipboardSign     = "Flip Board Sign"
+    case inCarCamera       = "In-Car Camera"
+    case iuUnit            = "IU Unit"
+    case engineOil         = "Engine Oil"
+    case radiatorWater     = "Radiator Water"
+    case brakeFluid        = "Brake Fluid"
+    case batteryWater      = "Battery Water"
+    case tyreCondition     = "Tyre Condition"
+    case fuelFillerCap     = "Fuel Filler Cap"
+    case others            = "Others"
+    var id: String { rawValue }
+}
+
+// MARK: - Main Form View
+
+struct SecComPreDrivingChecklistView: View {
+
+    @EnvironmentObject var auth: AuthViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    // Basic fields
+    @State private var date: Date = Date()
+    @State private var time: Date = Date()
+    @State private var driverName: String = ""
+    @State private var workContact: String = ""
+
+    // Vehicle picker
+    @State private var useOtherVehicle: Bool = false
+    @State private var selectedGroup: VehicleGroup? = nil
+    @State private var selectedPlate: String = ""
+    @State private var otherPlate: String = ""
+    @State private var otherCarType: String = ""
+    @State private var showVehiclePicker = false
+
+    // Mileage & purpose
+    @State private var mileage: String = ""
+    @State private var purpose: String = ""
+
+    // Equipment
+    @State private var selectedEquipment: Set<VehicleEquipment> = []
+
+    // Bodywork
+    @State private var bodyworkAllInOrder: Bool = true
+    @State private var bodyworkOtherDetail: String = ""
+
+    // Damage images
+    @State private var damageImages: [UIImage] = []
+    @State private var showDamageImageOptions = false
+    @State private var showDamagePicker = false
+    @State private var showDamageCamera = false
+    @State private var showDamageFileImporter = false
+    @State private var selectedDamagePhotoItem: PhotosPickerItem?
+
+    // Submission
+    @State private var isSubmitting = false
+    @State private var submitError: String? = nil
+    @State private var submitSuccess = false
+
+    // Validation
+    @State private var showValidationError = false
+
+    private var effectivePlate: String {
+        useOtherVehicle ? otherPlate.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                       : selectedPlate
+    }
+
+    private var effectiveCarType: String {
+        useOtherVehicle ? otherCarType.trimmingCharacters(in: .whitespacesAndNewlines)
+                       : (selectedGroup?.groupName ?? "")
+    }
+
+    private var dateString: String {
+        let f = DateFormatter(); f.dateFormat = "dd/MM/yyyy"
+        return f.string(from: date)
+    }
+
+    private var timeString: String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
+        return f.string(from: time)
+    }
+
+    var body: some View {
+        ZStack {
+            SubtleHTXBackground()
+
+            ScrollView {
+                VStack(spacing: 20) {
+
+                    sectionCard(title: "Basic Information", icon: "info.circle.fill") {
+                        formRow(label: "Date") {
+                            DatePicker("", selection: $date, displayedComponents: .date)
+                                .labelsHidden()
+                                .tint(HTXTheme.primaryPurple)
+                        }
+                        Divider()
+                        formRow(label: "Time") {
+                            DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
+                                .labelsHidden()
+                                .tint(HTXTheme.primaryPurple)
+                        }
+                        Divider()
+                        formRow(label: "Driver Name") {
+                            TextField("Full name", text: $driverName)
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                        }
+                        Divider()
+                        formRow(label: "Work Contact") {
+                            TextField("Contact number", text: $workContact)
+                                .keyboardType(.phonePad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+
+                    sectionCard(title: "Vehicle", icon: "car.fill") {
+                        // Dropdown trigger
+                        Button {
+                            showVehiclePicker = true
+                        } label: {
+                            HStack {
+                                Text("Vehicle Number")
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Text(useOtherVehicle ? "Other" : (selectedPlate.isEmpty ? "Select…" : selectedPlate))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(selectedPlate.isEmpty && !useOtherVehicle ? .secondary : HTXTheme.primaryPurple)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+
+                        if let grp = selectedGroup, !useOtherVehicle {
+                            Divider()
+                            formRow(label: "Vehicle Type") {
+                                Text(grp.groupName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        if useOtherVehicle {
+                            Divider()
+                            formRow(label: "Car Plate") {
+                                TextField("e.g. SBA1234A", text: $otherPlate)
+                                    .textInputAutocapitalization(.characters)
+                                    .autocorrectionDisabled()
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            Divider()
+                            formRow(label: "Car Type") {
+                                TextField("e.g. Toyota Camry", text: $otherCarType)
+                                    .autocorrectionDisabled()
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+
+                        Divider()
+                        formRow(label: "Mileage") {
+                            TextField("km", text: $mileage)
+                                .keyboardType(.numberPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        Divider()
+                        formRow(label: "Purpose") {
+                            TextField("Reason for trip", text: $purpose)
+                                .multilineTextAlignment(.trailing)
+                                .autocorrectionDisabled()
+                        }
+                    }
+
+                    // Equipment checklist
+                    sectionCard(title: "Checks & Equipment in Vehicle", icon: "checklist") {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 0) {
+                            ForEach(VehicleEquipment.allCases) { item in
+                                equipmentToggle(item)
+                            }
+                        }
+                    }
+
+                    // Bodywork
+                    sectionCard(title: "Body Work Defects / Others", icon: "wrench.and.screwdriver.fill") {
+                        HStack(spacing: 12) {
+                            bodyworkOption(label: "All in Order", selected: bodyworkAllInOrder) {
+                                bodyworkAllInOrder = true
+                            }
+                            bodyworkOption(label: "Others", selected: !bodyworkAllInOrder) {
+                                bodyworkAllInOrder = false
+                            }
+                        }
+                        .padding(.bottom, 4)
+
+                        if !bodyworkAllInOrder {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Details")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                                TextEditor(text: $bodyworkOtherDetail)
+                                    .frame(minHeight: 80)
+                                    .padding(8)
+                                    .background(Color(.systemBackground))
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(HTXTheme.primaryPurple.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .padding(.top, 6)
+                        }
+                    }
+
+                    // Damage photos (optional)
+                    sectionCard(title: "New Damage Detected (Optional)", icon: "camera.fill") {
+                        if damageImages.isEmpty {
+                            Button {
+                                showDamageImageOptions = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus.circle.fill")
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                    Text("Add Photo")
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(HTXTheme.primaryPurple.opacity(0.07))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 10) {
+                                    ForEach(damageImages.indices, id: \.self) { idx in
+                                        ZStack(alignment: .topTrailing) {
+                                            Image(uiImage: damageImages[idx])
+                                                .resizable()
+                                                .scaledToFill()
+                                                .frame(width: 90, height: 90)
+                                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                            Button {
+                                                damageImages.remove(at: idx)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .foregroundColor(.red)
+                                                    .background(Color.white.clipShape(Circle()))
+                                            }
+                                            .offset(x: 6, y: -6)
+                                        }
+                                    }
+                                    Button {
+                                        showDamageImageOptions = true
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.title2)
+                                            .foregroundColor(HTXTheme.primaryPurple)
+                                            .frame(width: 90, height: 90)
+                                            .background(HTXTheme.primaryPurple.opacity(0.08))
+                                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                        }
+                    }
+
+                    // Validation error
+                    if showValidationError {
+                        Text("Please fill in all required fields and select a vehicle.")
+                            .font(.footnote)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+
+                    if let submitError {
+                        Text(submitError)
+                            .font(.footnote)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+
+                    // Submit
+                    Button {
+                        submitForm()
+                    } label: {
+                        if isSubmitting {
+                            ProgressView().tint(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                        } else {
+                            Text("Submit Checklist")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                        }
+                    }
+                    .background(HTXTheme.primaryPurple)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal)
+                    .disabled(isSubmitting)
+                    .padding(.bottom, 30)
+                }
+                .padding(.top, 8)
+            }
+        }
+        .navigationTitle("Pre-Driving Checklist")
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(HTXTheme.primaryPurple)
+        // Vehicle picker sheet
+        .sheet(isPresented: $showVehiclePicker) {
+            VehiclePickerSheet(
+                selectedGroup: $selectedGroup,
+                selectedPlate: $selectedPlate,
+                useOther: $useOtherVehicle
+            )
+        }
+        // Damage image options
+        .confirmationDialog("Add Damage Photo", isPresented: $showDamageImageOptions, titleVisibility: .visible) {
+            Button("Take Photo") { showDamageCamera = true }
+            Button("Choose from Library") { showDamagePicker = true }
+            Button("Upload JPG/PNG File") { showDamageFileImporter = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showDamageCamera) {
+            ImagePicker(sourceType: .camera) { img in damageImages.append(img) }
+        }
+        .photosPicker(isPresented: $showDamagePicker, selection: $selectedDamagePhotoItem, matching: .images)
+        .onChange(of: selectedDamagePhotoItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let img = UIImage(data: data) {
+                    await MainActor.run { damageImages.append(img) }
+                }
+                await MainActor.run { selectedDamagePhotoItem = nil }
+            }
+        }
+        .fileImporter(
+            isPresented: $showDamageFileImporter,
+            allowedContentTypes: [.jpeg, .png],
+            allowsMultipleSelection: true
+        ) { result in
+            if case .success(let urls) = result {
+                for url in urls {
+                    if url.startAccessingSecurityScopedResource(),
+                       let data = try? Data(contentsOf: url),
+                       let img = UIImage(data: data) {
+                        damageImages.append(img)
+                    }
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+        }
+        // Success alert
+        .alert("Checklist Submitted", isPresented: $submitSuccess) {
+            Button("Done") { dismiss() }
+        } message: {
+            Text("The pre-driving checklist has been saved successfully.")
+        }
+    }
+
+    // MARK: - Helpers
+
+    @ViewBuilder
+    private func sectionCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+                .foregroundColor(HTXTheme.primaryPurple)
+            content()
+        }
+        .padding(16)
+        .subtleHTXCard()
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func formRow<Trailing: View>(label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            Spacer()
+            trailing()
+                .font(.subheadline)
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func equipmentToggle(_ item: VehicleEquipment) -> some View {
+        Button {
+            if selectedEquipment.contains(item) {
+                selectedEquipment.remove(item)
+            } else {
+                selectedEquipment.insert(item)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selectedEquipment.contains(item) ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(selectedEquipment.contains(item) ? HTXTheme.primaryPurple : .secondary)
+                Text(item.rawValue)
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+                    .multilineTextAlignment(.leading)
+                Spacer()
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func bodyworkOption(label: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(selected ? HTXTheme.primaryPurple : Color(.secondarySystemBackground))
+                .foregroundColor(selected ? .white : .primary)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(selected ? HTXTheme.primaryPurple : HTXTheme.softPurpleBorder, lineWidth: 1.5)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Submit
+
+    private func submitForm() {
+        showValidationError = false
+        submitError = nil
+
+        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !name.isEmpty, !contact.isEmpty,
+              !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
+              !mileage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            showValidationError = true
+            return
+        }
+
+        isSubmitting = true
+
+        let barcodeId = ReportStore.makeNumericBarcodeId()
+        let reportNo  = "SECCOM/\(dateString.replacingOccurrences(of: "/", with: ""))/\(effectivePlate)"
+
+        var data: [String: Any] = [
+            "reportType":       "seccom_checklist",
+            "reportNo":         reportNo,
+            "barcodeId":        barcodeId,
+            "date":             dateString,
+            "time":             timeString,
+            "driverName":       name,
+            "workContact":      contact,
+            "plate":            effectivePlate,
+            "carType":          effectiveCarType,
+            "mileage":          mileage.trimmingCharacters(in: .whitespacesAndNewlines),
+            "purpose":          purpose.trimmingCharacters(in: .whitespacesAndNewlines),
+            "equipment":        selectedEquipment.map { $0.rawValue },
+            "bodyworkAllInOrder": bodyworkAllInOrder,
+            "bodyworkDetails":  bodyworkAllInOrder ? "" : bodyworkOtherDetail,
+            "generatedBy":      Auth.auth().currentUser?.email ?? "Unknown",
+            "detectionCount":   damageImages.count,
+            "createdAt":        FieldValue.serverTimestamp()
+        ]
+
+        // Encode damage images as base64 (capped at 5 for Firestore size limit)
+        let cappedImages = Array(damageImages.prefix(5))
+        let base64Images = cappedImages.compactMap { $0.jpegData(compressionQuality: 0.6)?.base64EncodedString() }
+        if !base64Images.isEmpty {
+            data["damageImagesBase64"] = base64Images
+        }
+
+        Firestore.firestore()
+            .collection("seccom_checklists")
+            .document(barcodeId)
+            .setData(data, merge: true) { error in
+                DispatchQueue.main.async {
+                    isSubmitting = false
+                    if let error {
+                        submitError = "Failed to save: \(error.localizedDescription)"
+                    } else {
+                        submitSuccess = true
+                    }
+                }
+            }
+    }
+}
+
+// MARK: - Vehicle Picker Sheet
+
+struct VehiclePickerSheet: View {
+    @Binding var selectedGroup: VehicleGroup?
+    @Binding var selectedPlate: String
+    @Binding var useOther: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var expandedGroup: UUID? = nil
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(secComVehicleGroups) { group in
+                    Section {
+                        if expandedGroup == group.id {
+                            ForEach(group.plates, id: \.self) { plate in
+                                Button {
+                                    selectedGroup = group
+                                    selectedPlate = plate
+                                    useOther = false
+                                    dismiss()
+                                } label: {
+                                    HStack {
+                                        Text(plate)
+                                            .font(.system(.body, design: .monospaced).weight(.semibold))
+                                            .foregroundColor(.primary)
+                                        Spacer()
+                                        if selectedPlate == plate && !useOther {
+                                            Image(systemName: "checkmark")
+                                                .foregroundColor(HTXTheme.primaryPurple)
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    } header: {
+                        Button {
+                            withAnimation {
+                                expandedGroup = (expandedGroup == group.id) ? nil : group.id
+                            }
+                        } label: {
+                            HStack {
+                                Text(group.groupName)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(HTXTheme.primaryPurple)
+                                Spacer()
+                                Image(systemName: expandedGroup == group.id ? "chevron.up" : "chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                // Other option
+                Section {
+                    Button {
+                        useOther = true
+                        selectedPlate = ""
+                        selectedGroup = nil
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Text("Other (enter manually)")
+                                .foregroundColor(.primary)
+                            Spacer()
+                            if useOther {
+                                Image(systemName: "checkmark")
+                                    .foregroundColor(HTXTheme.primaryPurple)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("Select Vehicle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(HTXTheme.primaryPurple)
+                }
+            }
+            .tint(HTXTheme.primaryPurple)
+        }
+    }
+}

@@ -30,7 +30,7 @@ struct LoggedInView: View {
     // MARK: - API Call
     func sendToANPRServer(image: UIImage) {
 
-        guard let url = URL(string: "http://10.10.9.103:8000/detect") else { return }
+        guard let url = URL(string: "http://192.168.86.216:8000/detect") else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
