@@ -2,34 +2,48 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
+import FirebaseFirestore
 
 struct LoggedInView: View {
 
     @EnvironmentObject var auth: AuthViewModel
 
+    // ── Licence-plate photo flow (existing) ────────────────────────────────
     @State private var selectedImage: UIImage?
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var plateResult: String = ""
 
     @State private var showCamera = false
     @State private var showImagePicker = false
-
-    @State private var navigateToResultPage = false
     @State private var showFileImporter = false
 
+    // ── IU barcode flow (new) ───────────────────────────────────────────────
+    @State private var showIUBarcodeScanner = false
+    @State private var iuManualCode: String = ""
+    @State private var showIUManualEntry = false
+    @State private var isLookingUpIU = false
+
+    // ── Shared ──────────────────────────────────────────────────────────────
+    @State private var navigateToResultPage = false
     @State private var displayedText = ""
     @State private var didRunTypewriter = false
     @State private var isSubmitting = false
-
     @State private var showButtons = false
     @State private var localErrorMessage: String? = nil
 
+    /// Which input mode is selected
+    @State private var inputMode: InputMode = .licencePlate
+
+    private enum InputMode {
+        case licencePlate
+        case iuBarcode
+    }
+
     private let fullText =
-        "Okay, now I will need the licence plate. Please upload a photo of the car plate."
+        "Okay, I need to identify the vehicle. Scan the IU barcode or photograph the licence plate."
 
-    // MARK: - API Call
+    // MARK: - ANPR API Call (unchanged)
     func sendToANPRServer(image: UIImage) {
-
         guard let url = URL(string: "http://192.168.86.216:8000/detect") else { return }
 
         var request = URLRequest(url: url)
@@ -64,7 +78,6 @@ struct LoggedInView: View {
             let trimmed = rawPlate.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard trimmed != "[]" && !trimmed.isEmpty else {
-
                 DispatchQueue.main.async {
                     self.isSubmitting = false
                     self.localErrorMessage = "No licence plate detected. Please try a clearer photo."
@@ -89,15 +102,57 @@ struct LoggedInView: View {
         }.resume()
     }
 
+    // MARK: - IU Barcode Firestore Lookup (new)
+    func lookupIUBarcode(_ rawCode: String) {
+        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isNumber }
+        guard !code.isEmpty else {
+            localErrorMessage = "Please enter or scan a valid IU barcode number."
+            return
+        }
+
+        isLookingUpIU = true
+        localErrorMessage = nil
+
+        Firestore.firestore()
+            .collection("iu_barcodes")
+            .document(code)
+            .getDocument { snapshot, error in
+                DispatchQueue.main.async {
+                    self.isLookingUpIU = false
+
+                    if let error {
+                        self.localErrorMessage = "IU lookup failed: \(error.localizedDescription)"
+                        return
+                    }
+
+                    guard
+                        let data = snapshot?.data(), !data.isEmpty,
+                        let plate = data["plate"] as? String, !plate.isEmpty
+                    else {
+                        self.localErrorMessage = "No vehicle found for IU barcode \(code). Make sure it has been registered."
+                        return
+                    }
+
+                    guard (data["isActive"] as? Bool) != false else {
+                        self.localErrorMessage = "This IU barcode has been deactivated. Please contact your administrator."
+                        return
+                    }
+
+                    self.plateResult = plate.uppercased()
+                    self.navigateToResultPage = true
+                }
+            }
+    }
+
     // MARK: - UI
     var body: some View {
 
         ZStack {
             SubtleHTXBackground()
 
-            VStack(spacing: 25) {
+            VStack(spacing: 20) {
 
-                Spacer().frame(height: 72)
+                Spacer().frame(height: 52)
 
                 Text(displayedText)
                     .font(.headline.weight(.semibold))
@@ -105,68 +160,40 @@ struct LoggedInView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
-                if let selectedImage = selectedImage {
-
-                    Image(uiImage: selectedImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 300)
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-
-                    HStack(spacing: 20) {
-
-                        Button("Choose Another Photo") {
-                            self.selectedImage = nil
-                            self.localErrorMessage = nil
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("Confirm") {
-                            guard !isSubmitting else { return }
-                            isSubmitting = true
-                            sendToANPRServer(image: selectedImage)
-                        }
-                        .disabled(isSubmitting)
-                        .buttonStyle(.borderedProminent)
-                        .tint(HTXTheme.primaryPurple)
+                // ── Mode picker ──────────────────────────────────────────
+                if showButtons {
+                    Picker("Identification method", selection: $inputMode) {
+                        Label("IU Barcode", systemImage: "barcode.viewfinder")
+                            .tag(InputMode.iuBarcode)
+                        Label("Licence Plate", systemImage: "camera.fill")
+                            .tag(InputMode.licencePlate)
                     }
-
-                } else {
-
-                    VStack(spacing: 15) {
-
-                        Button("Take Photo") {
-                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                                showCamera = true
-                                localErrorMessage = nil
-                            } else {
-                                localErrorMessage = "Camera is not available on this device."
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(HTXTheme.primaryPurple)
-
-                        PhotosPicker(
-                            selection: $selectedPhotoItem,
-                            matching: .images
-                        ) {
-                            Text("Choose From Library")
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button("Upload JPG/PNG File") {
-                            showFileImporter = true
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(HTXTheme.primaryPurple)
-                    }
-                    .padding(20)
-                    .subtleHTXCard()
+                    .pickerStyle(.segmented)
                     .padding(.horizontal)
-                    .opacity(showButtons ? 1 : 0)
+                    .onChange(of: inputMode) { _, _ in
+                        // Clear state when switching modes
+                        localErrorMessage = nil
+                        selectedImage = nil
+                        iuManualCode = ""
+                        showIUManualEntry = false
+                    }
                 }
 
+                // ── IU Barcode panel ─────────────────────────────────────
+                if inputMode == .iuBarcode && showButtons {
+                    iuBarcodePanel
+                }
+
+                // ── Licence Plate panel ──────────────────────────────────
+                if inputMode == .licencePlate && showButtons {
+                    if let selectedImage = selectedImage {
+                        platePanelWithImage(selectedImage)
+                    } else {
+                        platePanelButtons
+                    }
+                }
+
+                // ── Error message ────────────────────────────────────────
                 if let localErrorMessage = localErrorMessage {
                     Text(localErrorMessage)
                         .foregroundColor(.red)
@@ -178,8 +205,8 @@ struct LoggedInView: View {
                 Spacer()
             }
 
-            // MARK: - LOADING OVERLAY
-            if isSubmitting {
+            // MARK: - Loading overlay
+            if isSubmitting || isLookingUpIU {
                 Color.black.opacity(0.4)
                     .ignoresSafeArea()
 
@@ -187,7 +214,7 @@ struct LoggedInView: View {
                     ProgressView()
                         .scaleEffect(1.3)
 
-                    Text("Processing image...")
+                    Text(isLookingUpIU ? "Looking up IU barcode…" : "Processing image…")
                         .font(.headline)
                         .foregroundColor(.white)
                 }
@@ -208,7 +235,7 @@ struct LoggedInView: View {
 
         .padding(.top)
 
-        // MARK: - TYPEWRITER (run once)
+        // MARK: - Typewriter (runs once)
         .onAppear {
             guard !didRunTypewriter else { return }
             didRunTypewriter = true
@@ -232,7 +259,7 @@ struct LoggedInView: View {
             }
         }
 
-        // MARK: - CAMERA
+        // MARK: - Camera (licence plate)
         .fullScreenCover(isPresented: $showCamera) {
             PlateCameraImagePicker { image in
                 self.selectedImage = image
@@ -241,7 +268,21 @@ struct LoggedInView: View {
             .ignoresSafeArea()
         }
 
-        // MARK: - PHOTO PICKER
+        // MARK: - IU Barcode scanner
+        .fullScreenCover(isPresented: $showIUBarcodeScanner) {
+            IUBarcodeScannerSheet(
+                onScan: { code in
+                    showIUBarcodeScanner = false
+                    iuManualCode = code
+                    lookupIUBarcode(code)
+                },
+                onCancel: {
+                    showIUBarcodeScanner = false
+                }
+            )
+        }
+
+        // MARK: - Photo picker
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem = newItem else { return }
 
@@ -257,8 +298,7 @@ struct LoggedInView: View {
             }
         }
 
-
-        // MARK: - FILE IMPORTER
+        // MARK: - File importer
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: [.jpeg, .png],
@@ -284,7 +324,6 @@ struct LoggedInView: View {
                         localErrorMessage = "The selected file could not be opened as a JPG/PNG image."
                         return
                     }
-
                     selectedImage = uiImage
                     localErrorMessage = nil
                 } catch {
@@ -296,7 +335,7 @@ struct LoggedInView: View {
             }
         }
 
-        // MARK: - NAVIGATION
+        // MARK: - Navigation
         .navigationDestination(isPresented: $navigateToResultPage) {
             CarPlateResultView(plate: plateResult) {
                 auth.logout()
@@ -304,12 +343,292 @@ struct LoggedInView: View {
             .environmentObject(auth)
         }
     }
+
+    // MARK: - IU Barcode sub-views
+
+    @ViewBuilder
+    private var iuBarcodePanel: some View {
+        VStack(spacing: 14) {
+
+            // Camera scan button
+            Button {
+                localErrorMessage = nil
+                iuManualCode = ""
+                showIUBarcodeScanner = true
+            } label: {
+                HStack {
+                    Image(systemName: "barcode.viewfinder")
+                    Text("Scan IU Barcode")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(HTXTheme.primaryPurple)
+                .foregroundColor(.white)
+                .cornerRadius(14)
+                .padding(.horizontal)
+            }
+            .disabled(isLookingUpIU)
+
+            // Manual entry toggle
+            Button {
+                withAnimation(.spring(response: 0.35)) {
+                    showIUManualEntry.toggle()
+                    if !showIUManualEntry { iuManualCode = "" }
+                    localErrorMessage = nil
+                }
+            } label: {
+                HStack {
+                    Image(systemName: showIUManualEntry ? "xmark" : "keyboard")
+                    Text(showIUManualEntry ? "Cancel Manual Entry" : "Type Barcode Manually")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .cornerRadius(12)
+                .padding(.horizontal)
+            }
+            .disabled(isLookingUpIU)
+
+            if showIUManualEntry {
+                HStack(spacing: 10) {
+                    TextField("Enter barcode number", text: $iuManualCode)
+                        .keyboardType(.numberPad)
+                        .padding(12)
+                        .background(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .frame(maxWidth: .infinity)
+
+                    Button {
+                        lookupIUBarcode(iuManualCode)
+                    } label: {
+                        Text("Search")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(HTXTheme.primaryPurple)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .disabled(isLookingUpIU || iuManualCode.isEmpty)
+                    .opacity((isLookingUpIU || iuManualCode.isEmpty) ? 0.55 : 1)
+                }
+                .padding(.horizontal)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .padding(20)
+        .subtleHTXCard()
+        .padding(.horizontal)
+    }
+
+    // MARK: - Licence Plate sub-views
+    @ViewBuilder
+    private func platePanelWithImage(_ image: UIImage) -> some View {
+        VStack(spacing: 14) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 260)
+                .cornerRadius(12)
+
+            HStack(spacing: 10) {
+                Button {
+                    self.selectedImage = nil
+                    self.localErrorMessage = nil
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("Retake")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color(.secondarySystemBackground))
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .cornerRadius(12)
+                }
+
+                Button {
+                    guard !isSubmitting else { return }
+                    isSubmitting = true
+                    sendToANPRServer(image: image)
+                } label: {
+                    HStack {
+                        Image(systemName: "checkmark")
+                        Text("Confirm")
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(HTXTheme.primaryPurple)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+                }
+                .disabled(isSubmitting)
+                .opacity(isSubmitting ? 0.55 : 1)
+            }
+        }
+        .padding(20)
+        .subtleHTXCard()
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private var platePanelButtons: some View {
+        VStack(spacing: 14) {
+
+            // Primary: Take Photo
+            Button {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    showCamera = true
+                    localErrorMessage = nil
+                } else {
+                    localErrorMessage = "Camera is not available on this device."
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "camera.fill")
+                    Text("Take Photo of Plate")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(HTXTheme.primaryPurple)
+                .foregroundColor(.white)
+                .cornerRadius(14)
+            }
+
+            // Secondary: Choose from Library
+            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                HStack {
+                    Image(systemName: "photo.on.rectangle")
+                    Text("Choose From Library")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .cornerRadius(12)
+            }
+
+            // Tertiary: Upload file
+            Button {
+                showFileImporter = true
+            } label: {
+                HStack {
+                    Image(systemName: "doc.badge.plus")
+                    Text("Upload JPG / PNG File")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .cornerRadius(12)
+            }
+        }
+        .padding(20)
+        .subtleHTXCard()
+        .padding(.horizontal)
+        .opacity(showButtons ? 1 : 0)
+    }
+}
+
+// MARK: - IU Barcode Scanner Sheet
+
+/// Full-screen barcode scanner used exclusively for IU card scanning.
+/// Reuses the existing BarcodeScannerRepresentable / BarcodeScannerViewController
+/// from ReportScannerView — no new AVFoundation code needed.
+struct IUBarcodeScannerSheet: View {
+
+    var onScan: (String) -> Void
+    var onCancel: () -> Void
+
+    @State private var isFrozen = false
+    @State private var restartToken = UUID()
+    @State private var errorMessage: String? = nil
+
+    var body: some View {
+        ZStack {
+            // Camera layer
+            BarcodeScannerRepresentable(
+                isFrozen: isFrozen,
+                restartToken: restartToken,
+                onScan: { raw in
+                    let code = raw.trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isNumber }
+                    guard !code.isEmpty else {
+                        errorMessage = "Barcode detected but no numeric value found. Try again."
+                        return
+                    }
+                    isFrozen = true
+                    onScan(code)
+                },
+                onPermissionDenied: {
+                    errorMessage = "Camera access is required to scan barcodes. Enable it in Settings."
+                }
+            )
+            .ignoresSafeArea()
+
+            // Scan guide
+            VStack {
+                Spacer()
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color.white.opacity(0.25), lineWidth: 1)
+                        .frame(width: 280, height: 120)
+
+                    Text("Point at the IU card barcode")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .shadow(radius: 2)
+                        .offset(y: 74)
+                }
+
+                Spacer()
+                Spacer()
+            }
+
+            // Error + Cancel bar at bottom
+            VStack {
+                Spacer()
+
+                if let errorMessage {
+                    Text(errorMessage)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(12)
+                        .background(Color.red.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                }
+
+                Button {
+                    onCancel()
+                } label: {
+                    Text("Cancel")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(Color.white.opacity(0.15))
+                        .clipShape(Capsule())
+                        .padding(.horizontal)
+                }
+                .padding(.bottom, 40)
+            }
+        }
+    }
 }
 
 
-// MARK: - Plate Camera Picker
-// Same camera style as ScratchScanView, but without the vehicle silhouette overlay.
-// Includes torch button, pinch-to-zoom, zoom label, shutter, and cancel.
+// MARK: - Plate Camera Picker (unchanged from original)
 
 struct PlateCameraImagePicker: View {
     var onPick: (UIImage) -> Void
@@ -483,8 +802,6 @@ final class PlateCameraViewController: UIViewController {
         updateCameraRotationAngles()
     }
 
-    // Uses UIWindowScene.effectiveGeometry.interfaceOrientation instead of the deprecated
-    // UIWindowScene.interfaceOrientation.
     private var currentInterfaceOrientation: UIInterfaceOrientation {
         if let orientation = view.window?.windowScene?.effectiveGeometry.interfaceOrientation,
            orientation != .unknown {
