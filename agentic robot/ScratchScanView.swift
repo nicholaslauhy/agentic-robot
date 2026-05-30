@@ -20,6 +20,14 @@ let scanAngles: [ScanAngle] = [
     ScanAngle(id: 3, label: "Right Side", instruction: "Stand on the right side of the vehicle", iconName: "arrow.right.square"),
 ]
 
+private struct AngleFailureContext: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let expectedIndex: Int
+    let result: GeminiAngleService.AngleValidationResult
+    let isReplacement: Bool
+}
+
 // MARK: - Main View
 
 struct ScratchScanView: View {
@@ -41,6 +49,8 @@ struct ScratchScanView: View {
     @State private var showCompletionScreen: Bool
     @State private var localErrorMessage: String? = nil
     @State private var isSubmittingAnalysis = false
+    @State private var isValidatingImage = false
+    @State private var angleFailureContext: AngleFailureContext? = nil
 
     // Replace flow — single source of truth
     @State private var replacingIndex: Int? = nil
@@ -124,24 +134,32 @@ struct ScratchScanView: View {
         }
         .overlay {
             if isSubmittingAnalysis {
-                ZStack {
-                    Color.black.opacity(0.25).ignoresSafeArea()
-
-                    VStack(spacing: 14) {
-                        ProgressView()
-                            .scaleEffect(1.3)
-
-                        Text("Analyzing your pictures for any dents or scratches...")
-                            .font(.headline)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                BlockingLoadingOverlay(
+                    title: "Analyzing damage…",
+                    message: "Checking your pictures for dents, scratches, and visible damage."
+                )
+            } else if isValidatingImage {
+                BlockingLoadingOverlay(
+                    title: "Processing image…",
+                    message: "Checking whether this photo matches the required vehicle angle."
+                )
+            }
+        }
+        .overlay {
+            if let failure = angleFailureContext {
+                AngleFailurePopup(
+                    expected: expectedAngleWord(for: failure.expectedIndex),
+                    detected: failure.result.detectedAngle.rawValue,
+                    confidence: failure.result.confidence,
+                    reason: failure.result.reason,
+                    onRetake: {
+                        angleFailureContext = nil
+                        selectedPhotoItem = nil
+                    },
+                    onOverride: {
+                        overrideFailedAngle()
                     }
-                    .padding(24)
-                    .background(Color(.systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .shadow(radius: 10)
-                    .padding(.horizontal, 28)
-                }
+                )
             }
         }
 
@@ -154,13 +172,13 @@ struct ScratchScanView: View {
                 carType: carType,
                 angleId: currentAngleIndex
             ) { image in
+                // CameraOverlayImagePicker already validates the captured photo before
+                // calling onPick. Do not validate again here, because a second Gemini
+                // call can disagree with the first one and falsely reject a correct photo.
                 let index = currentAngleIndex
-
-                validateAngle(image: image, expectedIndex: index) {
-                    capturedImages[index] = image
-                    showCamera = false
-                    advanceOrComplete()
-                }
+                capturedImages[index] = image
+                showCamera = false
+                advanceOrComplete()
             }
             .ignoresSafeArea()
         }
@@ -208,16 +226,15 @@ struct ScratchScanView: View {
                 carType: carType,
                 angleId: replacingIndex ?? currentAngleIndex
             ) { image in
+                // CameraOverlayImagePicker already validates replacement camera shots too.
                 guard let idx = replacingIndex else {
                     showReplaceCamera = false
                     return
                 }
 
-                validateAngle(image: image, expectedIndex: idx) {
-                    capturedImages[idx] = image
-                    replacingIndex = nil
-                    showReplaceCamera = false
-                }
+                capturedImages[idx] = image
+                replacingIndex = nil
+                showReplaceCamera = false
             }
             .ignoresSafeArea()
         }
@@ -230,10 +247,10 @@ struct ScratchScanView: View {
                     return
                 }
 
-                validateAngle(image: image, expectedIndex: idx) {
+                showReplaceLibrary = false
+                validateAngle(image: image, expectedIndex: idx, isReplacement: true) {
                     capturedImages[idx] = image
                     replacingIndex = nil
-                    showReplaceLibrary = false
                 }
             }
         }
@@ -257,29 +274,55 @@ struct ScratchScanView: View {
     private func validateAngle(
         image: UIImage,
         expectedIndex: Int,
+        isReplacement: Bool = false,
         onSuccess: @escaping () -> Void
     ) {
         let expectedWord = expectedAngleWord(for: expectedIndex)
-        let expectedAngle = GeminiAngleService.DetectedAngle(rawValue: expectedWord)
+        localErrorMessage = nil
+        angleFailureContext = nil
+        isValidatingImage = true
 
-        GeminiAngleService.detectAngle(image: image) { detected in
-            if detected == expectedAngle {
+        guard let expectedAngle = GeminiAngleService.DetectedAngle(rawValue: expectedWord) else {
+            isValidatingImage = false
+            localErrorMessage = "Could not determine expected angle. Please try again."
+            selectedPhotoItem = nil
+            return
+        }
+
+        GeminiAngleService.validateExpectedAngle(image: image, expectedAngle: expectedAngle) { result in
+            isValidatingImage = false
+            selectedPhotoItem = nil
+
+            if result.isAccepted {
                 localErrorMessage = nil
                 onSuccess()
                 return
             }
 
-            if detected == .unknown {
-                // Do not block the user when Gemini cannot confidently classify the image.
-                // This prevents valid photos from being falsely rejected.
-                // Known wrong angles are still blocked below.
-                localErrorMessage = "Could not confidently verify the angle, so the photo was accepted. Please double-check that this is the \(expectedWord) view."
-                onSuccess()
-                return
-            }
+            angleFailureContext = AngleFailureContext(
+                image: image,
+                expectedIndex: expectedIndex,
+                result: result,
+                isReplacement: isReplacement
+            )
+        }
+    }
 
-            localErrorMessage = "Wrong angle. Expected \(expectedWord), but detected \(detected.rawValue). Please upload the correct view."
-            selectedPhotoItem = nil
+    private func overrideFailedAngle() {
+        guard let failure = angleFailureContext else { return }
+
+        capturedImages[failure.expectedIndex] = failure.image
+        localErrorMessage = nil
+        selectedPhotoItem = nil
+        angleFailureContext = nil
+
+        if failure.isReplacement {
+            replacingIndex = nil
+            showReplaceSheet = false
+            showReplaceCamera = false
+            showReplaceLibrary = false
+        } else {
+            advanceOrComplete()
         }
     }
 
@@ -337,9 +380,6 @@ struct ScratchScanView: View {
             if let err = localErrorMessage {
                 Text(err).foregroundColor(.red).font(.footnote)
                     .multilineTextAlignment(.center).padding(.horizontal)
-                    .onAppear {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { localErrorMessage = nil }
-                    }
             }
 
             Spacer()
@@ -466,6 +506,135 @@ struct ScratchScanView: View {
     }
 }
 
+
+// MARK: - Processing / Failure UI
+
+private struct BlockingLoadingOverlay: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35).ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                ProgressView()
+                    .scaleEffect(1.35)
+
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 4)
+            }
+            .padding(24)
+            .frame(maxWidth: 340)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .shadow(radius: 14)
+            .padding(.horizontal, 28)
+        }
+    }
+}
+
+private struct AngleFailurePopup: View {
+    let expected: String
+    let detected: String
+    let confidence: Double
+    let reason: String
+    let onRetake: () -> Void
+    let onOverride: () -> Void
+
+    private var cleanedReason: String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "The image could not be confidently matched to the required angle." : trimmed
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.45).ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 42, weight: .semibold))
+                    .foregroundColor(.orange)
+
+                Text("Angle Check Failed")
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    failureRow(title: "Expected", value: expected)
+                    failureRow(title: "Detected", value: detected)
+                    failureRow(title: "Confidence", value: "\(Int((confidence * 100).rounded()))%")
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reason")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                        Text(cleanedReason)
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(14)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                Text("You can override this if the photo is still usable for damage analysis.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 10) {
+                    Button(action: onRetake) {
+                        Text("Retake / Choose Another")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(HTXTheme.primaryPurple)
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+
+                    Button(action: onOverride) {
+                        Text("Override and Use Image Anyway")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color(.secondarySystemBackground))
+                            .foregroundColor(HTXTheme.primaryPurple)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: 380)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(radius: 18)
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private func failureRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(.primary)
+        }
+    }
+}
+
 // MARK: - Camera with Vehicle Silhouette Overlay
 
 struct CameraOverlayImagePicker: View {
@@ -560,6 +729,7 @@ final class MagnifierCameraViewController: UIViewController {
 
     // Angle verification overlay (shown after shutter)
     private var verifyingOverlay: UIView?
+    private var pendingOverrideImage: UIImage?
 
     // Keep shutter ref so we can enable/disable it
     private var shutterButton: UIButton?
@@ -845,7 +1015,7 @@ final class MagnifierCameraViewController: UIViewController {
         spinner.startAnimating()
 
         let label = UILabel()
-        label.text = "Checking angle…"
+        label.text = "Processing image…"
         label.textColor = .white
         label.font = .systemFont(ofSize: 17, weight: .semibold)
 
@@ -864,33 +1034,40 @@ final class MagnifierCameraViewController: UIViewController {
 
     private func showAngleError(detected: GeminiAngleService.DetectedAngle,
                                 expected: String,
-                                capturedImage: UIImage) {
+                                capturedImage: UIImage,
+                                reason: String,
+                                confidence: Double,
+                                debugSummary: String) {
         verifyingOverlay?.removeFromSuperview()
         verifyingOverlay = nil
+        pendingOverrideImage = capturedImage
 
-        // Build the card
         let overlay = UIView(frame: view.bounds)
         overlay.backgroundColor = UIColor.black.withAlphaComponent(0.72)
 
         let card = UIView()
-        card.backgroundColor    = .systemBackground
+        card.backgroundColor = .systemBackground
         card.layer.cornerRadius = 20
         card.translatesAutoresizingMaskIntoConstraints = false
 
         let iconLabel = UILabel()
-        iconLabel.text      = "⚠️"
-        iconLabel.font      = .systemFont(ofSize: 40)
+        iconLabel.text = "⚠️"
+        iconLabel.font = .systemFont(ofSize: 40)
         iconLabel.textAlignment = .center
 
         let titleLabel = UILabel()
-        titleLabel.text      = "Wrong Angle"
-        titleLabel.font      = .systemFont(ofSize: 20, weight: .bold)
-        titleLabel.textColor = .systemRed
+        titleLabel.text = "Angle Check Failed"
+        titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
+        titleLabel.textColor = .systemOrange
         titleLabel.textAlignment = .center
 
+        let cleanedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "The image could not be confidently matched to the required angle."
+            : reason
+
         let detailLabel = UILabel()
-        detailLabel.text      = "This looks like the \(detected.rawValue).\nExpected: \(expected).\nPlease retake from the correct position."
-        detailLabel.font      = .systemFont(ofSize: 15)
+        detailLabel.text = "Expected: \(expected)\nDetected: \(detected.rawValue)\nConfidence: \(Int((confidence * 100).rounded()))%\n\nReason:\n\(cleanedReason)\n\nYou can override this if the photo is still usable for damage analysis."
+        detailLabel.font = .systemFont(ofSize: 14)
         detailLabel.textColor = .secondaryLabel
         detailLabel.textAlignment = .center
         detailLabel.numberOfLines = 0
@@ -898,15 +1075,29 @@ final class MagnifierCameraViewController: UIViewController {
         let retakeBtn = UIButton(type: .system)
         retakeBtn.setTitle("Retake Photo", for: .normal)
         retakeBtn.setTitleColor(.white, for: .normal)
-        retakeBtn.backgroundColor    = UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1)
+        retakeBtn.backgroundColor = UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1)
         retakeBtn.layer.cornerRadius = 12
-        retakeBtn.titleLabel?.font   = .systemFont(ofSize: 17, weight: .semibold)
+        retakeBtn.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
         retakeBtn.translatesAutoresizingMaskIntoConstraints = false
         retakeBtn.addTarget(self, action: #selector(retakeTapped), for: .touchUpInside)
 
-        let stack = UIStackView(arrangedSubviews: [iconLabel, titleLabel, detailLabel, retakeBtn])
-        stack.axis      = .vertical
-        stack.spacing   = 12
+        let overrideBtn = UIButton(type: .system)
+        overrideBtn.setTitle("Override and Use Anyway", for: .normal)
+        overrideBtn.setTitleColor(UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1), for: .normal)
+        overrideBtn.backgroundColor = .secondarySystemBackground
+        overrideBtn.layer.cornerRadius = 12
+        overrideBtn.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        overrideBtn.translatesAutoresizingMaskIntoConstraints = false
+        overrideBtn.addTarget(self, action: #selector(overrideAngleTapped), for: .touchUpInside)
+
+        let buttonStack = UIStackView(arrangedSubviews: [retakeBtn, overrideBtn])
+        buttonStack.axis = .vertical
+        buttonStack.spacing = 10
+        buttonStack.alignment = .fill
+
+        let stack = UIStackView(arrangedSubviews: [iconLabel, titleLabel, detailLabel, buttonStack])
+        stack.axis = .vertical
+        stack.spacing = 12
         stack.alignment = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -917,7 +1108,7 @@ final class MagnifierCameraViewController: UIViewController {
         NSLayoutConstraint.activate([
             card.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
             card.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
-            card.widthAnchor.constraint(equalToConstant: 300),
+            card.widthAnchor.constraint(equalToConstant: 330),
 
             stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 24),
             stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 20),
@@ -925,7 +1116,12 @@ final class MagnifierCameraViewController: UIViewController {
             stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -24),
 
             retakeBtn.heightAnchor.constraint(equalToConstant: 48),
+            overrideBtn.heightAnchor.constraint(equalToConstant: 48),
         ])
+
+        print("\n========== GEMINI ANGLE FAILURE DETAILS ==========")
+        print(debugSummary)
+        print("===============================================\n")
 
         verifyingOverlay = overlay
     }
@@ -933,8 +1129,22 @@ final class MagnifierCameraViewController: UIViewController {
     @objc private func retakeTapped() {
         verifyingOverlay?.removeFromSuperview()
         verifyingOverlay = nil
+        pendingOverrideImage = nil
         isCapturing = false
         // Session is still running — officer just shoots again
+    }
+
+    @objc private func overrideAngleTapped() {
+        guard let image = pendingOverrideImage else {
+            retakeTapped()
+            return
+        }
+
+        verifyingOverlay?.removeFromSuperview()
+        verifyingOverlay = nil
+        pendingOverrideImage = nil
+        onPick?(image)
+        dismiss(animated: true)
     }
 
     // MARK: – Gestures
@@ -1034,21 +1244,31 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
         default:           expectedWord = label   // "Front" or "Rear"
         }
 
-        GeminiAngleService.detectAngle(image: image) { [weak self] detected in
+        guard let expectedAngle = GeminiAngleService.DetectedAngle(rawValue: expectedWord) else {
+            showAngleError(detected: .unknown,
+                           expected: expectedWord,
+                           capturedImage: image,
+                           reason: "Could not map expected angle to Gemini enum.",
+                           confidence: 0.0,
+                           debugSummary: "Could not map expected angle to Gemini enum.")
+            return
+        }
+
+        GeminiAngleService.validateExpectedAngle(image: image, expectedAngle: expectedAngle) { [weak self] result in
             guard let self else { return }
 
-            let expectedAngle = GeminiAngleService.DetectedAngle(rawValue: expectedWord)
-            let isCorrect = detected == expectedAngle || detected == .unknown
-
-            if isCorrect {
+            if result.isAccepted {
                 self.verifyingOverlay?.removeFromSuperview()
                 self.verifyingOverlay = nil
                 self.onPick?(image)
                 self.dismiss(animated: true)
             } else {
-                self.showAngleError(detected: detected,
+                self.showAngleError(detected: result.detectedAngle,
                                     expected: expectedWord,
-                                    capturedImage: image)
+                                    capturedImage: image,
+                                    reason: result.reason,
+                                    confidence: result.confidence,
+                                    debugSummary: result.debugSummary)
             }
         }
     }

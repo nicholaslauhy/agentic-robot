@@ -424,7 +424,7 @@ struct FuelRefuelView: View {
         let barcodeId = ReportStore.makeNumericBarcodeId()
         let reportNo  = "FUEL/\(dateString.replacingOccurrences(of: "/", with: ""))/\(vehicleNumber)"
 
-        var data: [String: Any] = [
+        let data: [String: Any] = [
             "reportType":       "fuel_refuel",
             "reportNo":         reportNo,
             "barcodeId":        barcodeId,

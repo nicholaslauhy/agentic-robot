@@ -563,7 +563,7 @@ struct SecComPreDrivingChecklistView: View {
         let barcodeId = ReportStore.makeNumericBarcodeId()
         let reportNo  = "SECCOM/\(dateString.replacingOccurrences(of: "/", with: ""))/\(effectivePlate)"
 
-        var data: [String: Any] = [
+        let data: [String: Any] = [
             "reportType":       "seccom_checklist",
             "reportNo":         reportNo,
             "barcodeId":        barcodeId,
