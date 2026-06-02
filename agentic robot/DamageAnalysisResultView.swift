@@ -741,7 +741,7 @@ private struct DamageSummaryReviewBeforeReportView: View {
                             Text("\(carType.rawValue) · \(plate)")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
-                            Text("Yellow = existing benchmark damage. Orange = new damage that will be included in the report.")
+                            Text("Yellow = new damage. Existing benchmark damage is colour-coded by damage type.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
@@ -749,11 +749,7 @@ private struct DamageSummaryReviewBeforeReportView: View {
                         }
                         .padding(.top, 20)
 
-                        HStack(spacing: 14) {
-                            SummaryLegendDot(color: .yellow, text: "Existing")
-                            SummaryLegendDot(color: .orange, text: "New")
-                            Spacer(minLength: 0)
-                        }
+                        SummaryDamageLegendView()
                         .padding(.horizontal)
 
                         if allDetections.isEmpty {
@@ -793,7 +789,7 @@ private struct DamageSummaryReviewBeforeReportView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Report will include new damage only")
                                     .font(.headline)
-                                Text("Existing benchmark scratches/dents are displayed above in yellow for reference, but they will not be added into the final NP299 report.")
+                                Text("Existing benchmark scratches/dents are displayed above with damage-type colours for reference, but they will not be added into the final NP299 report. New damage is shown in yellow and will be included in the report.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
 
@@ -885,6 +881,77 @@ private struct SummaryLegendDot: View {
                 .font(.caption.bold())
                 .foregroundColor(.secondary)
         }
+    }
+}
+
+
+private struct SummaryDamageLegendView: View {
+    private let legendItems: [(Color, String)] = [
+        (.yellow, "New damage"),
+        (summaryExistingDamageColor(for: "scratch"), "Existing scratch"),
+        (summaryExistingDamageColor(for: "dent"), "Existing dent"),
+        (summaryExistingDamageColor(for: "crack"), "Existing crack"),
+        (summaryExistingDamageColor(for: "deformation"), "Existing deformation"),
+        (summaryExistingDamageColor(for: "broken glass"), "Existing broken glass"),
+        (summaryExistingDamageColor(for: "paint chip"), "Existing paint chip"),
+        (summaryExistingDamageColor(for: "rust"), "Existing rust"),
+        (summaryExistingDamageColor(for: "other"), "Existing other"),
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], alignment: .leading, spacing: 8) {
+            ForEach(Array(legendItems.enumerated()), id: \.offset) { _, item in
+                SummaryLegendDot(color: item.0, text: item.1)
+            }
+        }
+    }
+}
+
+private func summaryDamageName(_ detection: MutableDamageDetection) -> String {
+    canonicalSummaryDamageName(detection.damageType)
+}
+
+private func summaryColor(for detection: MutableDamageDetection, isNew: Bool) -> Color {
+    if isNew {
+        return .yellow
+    }
+    return summaryExistingDamageColor(for: detection.damageType)
+}
+
+private func canonicalSummaryDamageName(_ rawValue: String) -> String {
+    let value = rawValue
+        .lowercased()
+        .replacingOccurrences(of: "_", with: " ")
+        .replacingOccurrences(of: "-", with: " ")
+
+    if value.contains("scratch") { return "Scratch" }
+    if value.contains("dent") { return "Dent" }
+    if value.contains("crack") { return "Crack" }
+    if value.contains("deform") { return "Deformation" }
+    if value.contains("glass") || value.contains("broken") { return "Broken Glass" }
+    if value.contains("paint") || value.contains("chip") { return "Paint Chip" }
+    if value.contains("rust") { return "Rust" }
+    return "Other"
+}
+
+private func summaryExistingDamageColor(for rawValue: String) -> Color {
+    switch canonicalSummaryDamageName(rawValue) {
+    case "Scratch":
+        return .blue
+    case "Dent":
+        return .purple
+    case "Crack":
+        return .red
+    case "Deformation":
+        return .brown
+    case "Broken Glass":
+        return .cyan
+    case "Paint Chip":
+        return .pink
+    case "Rust":
+        return .orange
+    default:
+        return .gray
     }
 }
 
@@ -990,22 +1057,26 @@ private struct SummaryAngleDetailView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 12) {
-                            HStack(spacing: 14) {
-                                SummaryLegendDot(color: .yellow, text: "Existing benchmark")
-                                SummaryLegendDot(color: .orange, text: "New damage")
-                                Spacer()
-                            }
+                            SummaryDamageLegendView()
 
                             if existingDetections.isEmpty && newDetections.isEmpty {
                                 Text("No damage regions for this angle.")
                                     .font(.subheadline)
                                     .foregroundColor(.secondary)
                             } else {
-                                ForEach(existingDetections) { det in
-                                    SummaryDamageRow(detection: det, color: .yellow, prefix: "Existing")
+                                ForEach(Array(existingDetections.enumerated()), id: \.element.id) { idx, det in
+                                    SummaryDamageRow(
+                                        detection: det,
+                                        color: summaryColor(for: det, isNew: false),
+                                        label: "E\(idx + 1): \(summaryDamageName(det))"
+                                    )
                                 }
-                                ForEach(newDetections) { det in
-                                    SummaryDamageRow(detection: det, color: .orange, prefix: "New")
+                                ForEach(Array(newDetections.enumerated()), id: \.element.id) { idx, det in
+                                    SummaryDamageRow(
+                                        detection: det,
+                                        color: summaryColor(for: det, isNew: true),
+                                        label: "N\(idx + 1): \(summaryDamageName(det))"
+                                    )
                                 }
                             }
                         }
@@ -1032,7 +1103,7 @@ private struct SummaryAngleDetailView: View {
 private struct SummaryDamageRow: View {
     @ObservedObject var detection: MutableDamageDetection
     let color: Color
-    let prefix: String
+    let label: String
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1040,7 +1111,7 @@ private struct SummaryDamageRow: View {
                 .fill(color)
                 .frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(prefix): \(detection.damageType.capitalized)")
+                Text(label)
                     .font(.subheadline.bold())
                     .foregroundColor(.primary)
                 Text(detection.angleName)
@@ -1075,8 +1146,8 @@ private struct MultiDamageOverlayImageView: View {
                     if let box = screenBox(for: det, imageRect: imageRect) {
                         DamageSummaryBoxOverlay(
                             rect: box,
-                            color: .yellow,
-                            label: showBadges ? "E\(idx + 1)" : nil,
+                            color: summaryColor(for: det, isNew: false),
+                            label: showBadges ? "E\(idx + 1): \(summaryDamageName(det))" : nil,
                             lineWidth: lineWidth,
                             badgeSize: badgeSize
                         )
@@ -1087,8 +1158,8 @@ private struct MultiDamageOverlayImageView: View {
                     if let box = screenBox(for: det, imageRect: imageRect) {
                         DamageSummaryBoxOverlay(
                             rect: box,
-                            color: .orange,
-                            label: showBadges ? "N\(idx + 1)" : nil,
+                            color: summaryColor(for: det, isNew: true),
+                            label: showBadges ? "N\(idx + 1): \(summaryDamageName(det))" : nil,
                             lineWidth: lineWidth,
                             badgeSize: badgeSize
                         )
