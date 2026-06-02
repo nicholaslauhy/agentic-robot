@@ -57,6 +57,7 @@ struct ScratchScanView: View {
     @State private var showReplaceSheet = false
     @State private var showReplaceCamera = false
     @State private var showReplaceLibrary = false
+    @State private var showCropEditor = false
     @State private var replaceImage: UIImage? = nil
 
     private var capturedCount: Int { capturedImages.compactMap { $0 }.count }
@@ -217,6 +218,11 @@ struct ScratchScanView: View {
             Button("Choose from Library") {
                 showReplaceLibrary = true
             }
+            if let idx = replacingIndex, capturedImages[idx] != nil {
+                Button("Crop Current Image") {
+                    showCropEditor = true
+                }
+            }
             Button("Cancel", role: .cancel) { replacingIndex = nil }
         }
 
@@ -251,6 +257,39 @@ struct ScratchScanView: View {
                 validateAngle(image: image, expectedIndex: idx, isReplacement: true) {
                     capturedImages[idx] = image
                     replacingIndex = nil
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showCropEditor) {
+            if let idx = replacingIndex, let image = capturedImages[idx] {
+                VehicleCropEditorView(
+                    image: image,
+                    title: "Crop \(scanAngles[idx].label) Photo",
+                    accentColor: HTXTheme.primaryPurple,
+                    onCancel: {
+                        showCropEditor = false
+                    },
+                    onSave: { croppedImage in
+                        capturedImages[idx] = croppedImage
+                        showCropEditor = false
+                        showReplaceSheet = false
+                        replacingIndex = nil
+                    }
+                )
+            } else {
+                NavigationStack {
+                    VStack(spacing: 14) {
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No image available to crop.")
+                            .foregroundColor(.secondary)
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showCropEditor = false }
+                        }
+                    }
                 }
             }
         }
@@ -462,7 +501,7 @@ struct ScratchScanView: View {
                 .padding(.top, 8)
 
                 Text(allCaptured
-                    ? "Tap any photo to replace it, then submit."
+                    ? "Tap any photo to replace it, choose another photo, or crop it before submitting."
                     : "All 4 angles are required before submitting. Tap a slot to add the missing photo.")
                     .font(.subheadline).foregroundColor(allCaptured ? .secondary : .orange)
                     .multilineTextAlignment(.center).padding(.horizontal)
@@ -632,6 +671,240 @@ private struct AngleFailurePopup: View {
                 .font(.subheadline.bold())
                 .foregroundColor(.primary)
         }
+    }
+}
+
+
+// MARK: - Vehicle Crop Editor
+
+private struct VehicleCropEditorView: View {
+    let image: UIImage
+    let title: String
+    let accentColor: Color
+    var onCancel: () -> Void
+    var onSave: (UIImage) -> Void
+
+    @State private var cropRect: CGRect? = nil
+    @State private var currentDrag: CGRect? = nil
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { geo in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        Text("Drag on the image to select the area you want to keep. The cropped image below will replace the current photo sent for analysis.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+
+                        cropCanvas(containerSize: geo.size)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: max(460, geo.size.height * 0.72))
+                            .background(Color.black.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(.horizontal)
+
+                        HStack(spacing: 10) {
+                            if cropRect != nil {
+                                Label("Crop area selected", systemImage: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            } else {
+                                Label("No crop selected yet", systemImage: "crop")
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            if cropRect != nil {
+                                Button("Reset") { cropRect = nil }
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        .font(.caption)
+                        .padding(.horizontal)
+
+                        if let preview = croppedPreviewImage {
+                            VStack(spacing: 10) {
+                                Label("Updated Image Preview", systemImage: "photo.fill")
+                                    .font(.subheadline.bold())
+
+                                Image(uiImage: preview)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity)
+                                    .frame(maxHeight: 260)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .stroke(accentColor.opacity(0.35), lineWidth: 1)
+                                    )
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.horizontal)
+                            .padding(.bottom, 24)
+                        }
+                    }
+                    .padding(.top, 14)
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Use Crop") {
+                        onSave(croppedPreviewImage ?? scratchNormalizedImage(image))
+                    }
+                    .bold()
+                    .disabled(cropRect == nil)
+                }
+            }
+        }
+    }
+
+    private func cropCanvas(containerSize: CGSize) -> some View {
+        GeometryReader { canvasGeo in
+            let imageRect = fittedImageRect(imageSize: image.size, containerSize: canvasGeo.size)
+
+            ZStack(alignment: .topLeading) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: canvasGeo.size.width, height: canvasGeo.size.height)
+
+                if let rect = currentDrag ?? cropRect.map({ denorm($0, imageRect: imageRect) }) {
+                    Color.black.opacity(0.28)
+                        .mask(
+                            Rectangle()
+                                .overlay(
+                                    Rectangle()
+                                        .frame(width: rect.width, height: rect.height)
+                                        .position(x: rect.midX, y: rect.midY)
+                                        .blendMode(.destinationOut)
+                                )
+                        )
+                        .compositingGroup()
+                        .allowsHitTesting(false)
+
+                    Rectangle()
+                        .stroke(accentColor, lineWidth: 2.5)
+                        .frame(width: rect.width, height: rect.height)
+                        .offset(x: rect.minX, y: rect.minY)
+                        .allowsHitTesting(false)
+                }
+            }
+            .contentShape(Rectangle().path(in: imageRect))
+            .gesture(
+                DragGesture(minimumDistance: 4, coordinateSpace: .local)
+                    .onChanged { value in
+                        currentDrag = clampedRect(from: value.startLocation, to: value.location, within: imageRect)
+                    }
+                    .onEnded { value in
+                        let rect = clampedRect(from: value.startLocation, to: value.location, within: imageRect)
+                        cropRect = normalize(rect, imageRect: imageRect)
+                        currentDrag = nil
+                    }
+            )
+        }
+    }
+
+    private var croppedPreviewImage: UIImage? {
+        guard let cropRect else { return nil }
+        return cropImage(image, normalizedCropRect: cropRect)
+    }
+
+    private func fittedImageRect(imageSize: CGSize, containerSize: CGSize) -> CGRect {
+        let imageAspect = imageSize.width / imageSize.height
+        let containerAspect = containerSize.width / containerSize.height
+
+        let fittedWidth: CGFloat
+        let fittedHeight: CGFloat
+
+        if imageAspect > containerAspect {
+            fittedWidth = containerSize.width
+            fittedHeight = containerSize.width / imageAspect
+        } else {
+            fittedHeight = containerSize.height
+            fittedWidth = containerSize.height * imageAspect
+        }
+
+        return CGRect(
+            x: (containerSize.width - fittedWidth) / 2,
+            y: (containerSize.height - fittedHeight) / 2,
+            width: fittedWidth,
+            height: fittedHeight
+        )
+    }
+
+    private func clampedRect(from start: CGPoint, to end: CGPoint, within bounds: CGRect) -> CGRect {
+        func clamp(_ point: CGPoint) -> CGPoint {
+            CGPoint(
+                x: min(max(point.x, bounds.minX), bounds.maxX),
+                y: min(max(point.y, bounds.minY), bounds.maxY)
+            )
+        }
+
+        let s = clamp(start)
+        let e = clamp(end)
+
+        return CGRect(
+            x: min(s.x, e.x),
+            y: min(s.y, e.y),
+            width: abs(e.x - s.x),
+            height: abs(e.y - s.y)
+        )
+    }
+
+    private func normalize(_ rect: CGRect, imageRect: CGRect) -> CGRect {
+        CGRect(
+            x: (rect.minX - imageRect.minX) / imageRect.width,
+            y: (rect.minY - imageRect.minY) / imageRect.height,
+            width: rect.width / imageRect.width,
+            height: rect.height / imageRect.height
+        )
+    }
+
+    private func denorm(_ rect: CGRect, imageRect: CGRect) -> CGRect {
+        CGRect(
+            x: imageRect.minX + rect.minX * imageRect.width,
+            y: imageRect.minY + rect.minY * imageRect.height,
+            width: rect.width * imageRect.width,
+            height: rect.height * imageRect.height
+        )
+    }
+
+    private func cropImage(_ image: UIImage, normalizedCropRect rect: CGRect) -> UIImage {
+        let normalized = scratchNormalizedImage(image)
+        guard let cgImage = normalized.cgImage else { return normalized }
+
+        let safeX = max(0, min(1, rect.minX))
+        let safeY = max(0, min(1, rect.minY))
+        let safeW = max(0.01, min(1 - safeX, rect.width))
+        let safeH = max(0.01, min(1 - safeY, rect.height))
+
+        let crop = CGRect(
+            x: safeX * CGFloat(cgImage.width),
+            y: safeY * CGFloat(cgImage.height),
+            width: safeW * CGFloat(cgImage.width),
+            height: safeH * CGFloat(cgImage.height)
+        ).integral
+
+        guard let cropped = cgImage.cropping(to: crop) else { return normalized }
+        return UIImage(cgImage: cropped, scale: 1, orientation: .up)
+    }
+}
+
+private func scratchNormalizedImage(_ image: UIImage) -> UIImage {
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+
+    let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+    return renderer.image { _ in
+        image.draw(in: CGRect(origin: .zero, size: image.size))
     }
 }
 

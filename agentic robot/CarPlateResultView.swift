@@ -259,7 +259,7 @@ struct CarPlateResultView: View {
                 ProgressView()
                     .scaleEffect(1.3)
 
-                Text("Analyzing your pictures for any dents or scratches...")
+                Text("Analyzing your pictures for new and existing dents or scratches...")
                     .font(.headline)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
@@ -295,7 +295,7 @@ struct CarPlateResultView: View {
 
         Task {
             do {
-                let results = try await damageAnalysisService.analyze(images: images)
+                let results = try await damageAnalysisService.analyzeForPlate(plate: editablePlate, images: images)
                 
                 await MainActor.run {
                     print("Damage analysis succeeded")

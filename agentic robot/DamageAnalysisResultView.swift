@@ -17,6 +17,18 @@ extension UIApplication {
             for: nil
         )
     }
+
+    /// Replacement for `UIScreen.main.bounds`, which is deprecated in newer iOS SDKs.
+    /// Uses the active key window size instead, which is what this editor actually needs.
+    var htxActiveWindowBounds: CGRect {
+        connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }?
+            .windows
+            .first { $0.isKeyWindow }?
+            .bounds
+        ?? CGRect(x: 0, y: 0, width: 390, height: 844)
+    }
 }
 
 // MARK: - Navigation Helper
@@ -67,6 +79,16 @@ class MutableDamageDetection: ObservableObject, Identifiable {
     @Published var cleanContextImage: UIImage?
     /// Normalized bounding box rect (0–1) drawn by the user, overlaid on cleanContextImage.
     @Published var normalizedBBox: CGRect?
+    /// Original-image pixel-space box returned by backend. Used when saving the benchmark.
+    @Published var x1: Int?
+    @Published var y1: Int?
+    @Published var x2: Int?
+    @Published var y2: Int?
+    /// Original backend image dimensions for coordinate scaling.
+    @Published var imageWidth: Int?
+    @Published var imageHeight: Int?
+    /// True when this case came from the stored benchmark/baseline.
+    @Published var isBaseline: Bool
 
     // ── VLM fields ──
     @Published var isVerifiedDamage: Bool
@@ -86,7 +108,35 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         self.cropImage             = detection.cropImage
         self.contextImage          = detection.contextImage
         self.cleanContextImage     = detection.cleanContextImage
-        self.normalizedBBox        = nil
+        self.x1                    = detection.x1
+        self.y1                    = detection.y1
+        self.x2                    = detection.x2
+        self.y2                    = detection.y2
+        self.imageWidth            = detection.imageWidth
+        self.imageHeight           = detection.imageHeight
+
+        // Backend x1/y1/x2/y2 are pixel coordinates in the ORIGINAL image.
+        // cleanContextImage/contextImage are downscaled for display, so do not
+        // divide by the displayed UIImage size. Use backend imageWidth/imageHeight
+        // when available, then fall back to the image size for manually-created cases.
+        if let x1 = detection.x1, let y1 = detection.y1, let x2 = detection.x2, let y2 = detection.y2 {
+            let sourceWidth = CGFloat(detection.imageWidth ?? Int((detection.cleanContextImage ?? detection.contextImage)?.size.width ?? 0))
+            let sourceHeight = CGFloat(detection.imageHeight ?? Int((detection.cleanContextImage ?? detection.contextImage)?.size.height ?? 0))
+
+            if sourceWidth > 0, sourceHeight > 0 {
+                self.normalizedBBox = CGRect(
+                    x: max(0, min(1, CGFloat(x1) / sourceWidth)),
+                    y: max(0, min(1, CGFloat(y1) / sourceHeight)),
+                    width: max(0.001, min(1, CGFloat(max(1, x2 - x1)) / sourceWidth)),
+                    height: max(0.001, min(1, CGFloat(max(1, y2 - y1)) / sourceHeight))
+                )
+            } else {
+                self.normalizedBBox = nil
+            }
+        } else {
+            self.normalizedBBox = nil
+        }
+        self.isBaseline            = detection.isBaseline ?? false
         self.isVerifiedDamage      = detection.isVerifiedDamage
         self.vlmDamageType         = detection.vlmDamageType
         self.severity              = detection.severity
@@ -106,6 +156,7 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         contextImage: UIImage?,
         cleanContextImage: UIImage?,
         normalizedBBox: CGRect?,
+        isBaseline: Bool = false,
         explanation: String = ""
     ) {
         self.id                    = UUID()
@@ -117,6 +168,14 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         self.contextImage          = contextImage
         self.cleanContextImage     = cleanContextImage
         self.normalizedBBox        = normalizedBBox
+        self.x1                    = nil
+        self.y1                    = nil
+        self.x2                    = nil
+        self.y2                    = nil
+        let baseImage              = cleanContextImage ?? contextImage ?? cropImage
+        self.imageWidth            = baseImage.map { Int($0.size.width) }
+        self.imageHeight           = baseImage.map { Int($0.size.height) }
+        self.isBaseline            = isBaseline
         self.isVerifiedDamage      = true
         self.vlmDamageType         = damageType
         self.severity              = ""
@@ -153,6 +212,14 @@ struct DamageAnalysisResultView: View {
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
     // For "Add Case", the user picks which of the 4 slots they want.
     let scanImages: [UIImage]   // front, back, left, right  (may have fewer)
+
+    private var newDamageDetections: [MutableDamageDetection] {
+        mutableDetections.filter { !$0.isBaseline }
+    }
+
+    private var existingDamageDetections: [MutableDamageDetection] {
+        mutableDetections.filter { $0.isBaseline }
+    }
 
     init(
         plate: String,
@@ -241,24 +308,41 @@ struct DamageAnalysisResultView: View {
                     .padding(.top, 60)
 
                 } else {
-                    Text("Found \(mutableDetections.count) possible damage area\(mutableDetections.count == 1 ? "" : "s"). Tap a card for detail or swipe left to delete.")
+                    Text("Review the newly identified damage first. Existing benchmark damage is shown below in a separate section.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
 
-                    LazyVStack(spacing: 20) {
-                        ForEach(mutableDetections) { detection in
-                            DamageDetectionCard(
-                                detection: detection,
-                                accentColor: HTXTheme.primaryPurple,
-                                onEdit: { detectionToEdit = detection },
-                                onDelete: { remove(detection) }
-                            )
-                            .onTapGesture { selectedDetection = detection }
-                        }
-                    }
-                    .padding(.horizontal)
+                    DamageSectionView(
+                        title: "New dents and scratches",
+                        subtitle: newDamageDetections.isEmpty
+                            ? "No new damage was identified against the current benchmark."
+                            : "These are the new regions found in this scan.",
+                        iconName: "sparkles",
+                        detections: newDamageDetections,
+                        emptySystemImage: "checkmark.seal.fill",
+                        emptyText: "No new damage found",
+                        accentColor: HTXTheme.primaryPurple,
+                        selectedDetection: $selectedDetection,
+                        detectionToEdit: $detectionToEdit,
+                        onDelete: remove
+                    )
+
+                    DamageSectionView(
+                        title: "Existing benchmark damage",
+                        subtitle: existingDamageDetections.isEmpty
+                            ? "No previous benchmark damage was returned for this plate. If you expected old cases here, regenerate one report after applying this fix so the benchmark is saved."
+                            : "These scratches and dents were already recorded for this vehicle.",
+                        iconName: "clock.arrow.circlepath",
+                        detections: existingDamageDetections,
+                        emptySystemImage: "tray",
+                        emptyText: "No existing benchmark damage saved yet",
+                        accentColor: .gray,
+                        selectedDetection: $selectedDetection,
+                        detectionToEdit: $detectionToEdit,
+                        onDelete: remove
+                    )
                 }
 
                 // ── Next: collect police-report details ─────────────────────────
@@ -323,16 +407,19 @@ struct DamageAnalysisResultView: View {
                 accentColor: HTXTheme.primaryPurple
             )
         }
-        // ── Edit bounding-box sheet ───────────────────────────────────────────
-        .sheet(item: $detectionToEdit) { detection in
+        // ── Edit bounding-box screen ──────────────────────────────────────────
+        // Full-screen is required here. A normal .sheet makes the wide vehicle
+        // image too small, so drawing boxes becomes inaccurate/frustrating.
+        .fullScreenCover(item: $detectionToEdit) { detection in
             BoundingBoxEditorSheet(
                 detection: detection,
                 accentColor: HTXTheme.primaryPurple,
                 scanImage: detection.angleIndex < scanImages.count ? scanImages[detection.angleIndex] : nil
             )
         }
-        // ── Add Case sheet ────────────────────────────────────────────────────
-        .sheet(isPresented: $showAddCase) {
+        // ── Add Case screen ───────────────────────────────────────────────────
+        // Same reason: drawing must happen on a full-screen canvas, not a small sheet.
+        .fullScreenCover(isPresented: $showAddCase) {
             AddCaseSheet(
                 scanImages: scanImages,
                 accentColor: HTXTheme.primaryPurple
@@ -367,6 +454,80 @@ struct DamageAnalysisResultView: View {
     }
 }
 
+
+// MARK: - Damage Sections
+
+private struct DamageSectionView: View {
+    let title: String
+    let subtitle: String
+    let iconName: String
+    let detections: [MutableDamageDetection]
+    let emptySystemImage: String
+    let emptyText: String
+    let accentColor: Color
+    @Binding var selectedDetection: MutableDamageDetection?
+    @Binding var detectionToEdit: MutableDamageDetection?
+    var onDelete: (MutableDamageDetection) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: iconName)
+                    .foregroundColor(accentColor)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+                Text("\(detections.count)")
+                    .font(.caption.bold())
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(accentColor.opacity(0.12))
+                    .foregroundColor(accentColor)
+                    .clipShape(Capsule())
+            }
+
+            Text(subtitle)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if detections.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: emptySystemImage)
+                        .font(.title2)
+                        .foregroundColor(.green)
+                    Text(emptyText)
+                        .font(.subheadline.bold())
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(Color(.secondarySystemBackground).opacity(0.75))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            } else {
+                LazyVStack(spacing: 16) {
+                    ForEach(detections) { detection in
+                        DamageDetectionCard(
+                            detection: detection,
+                            accentColor: accentColor,
+                            onEdit: { detectionToEdit = detection },
+                            onDelete: { onDelete(detection) }
+                        )
+                        .onTapGesture { selectedDetection = detection }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(HTXTheme.softPurpleCard.opacity(accentColor == .gray ? 0.55 : 1.0))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(accentColor.opacity(0.18), lineWidth: 1)
+        )
+        .padding(.horizontal)
+    }
+}
+
 // MARK: - Card
 
 struct DamageDetectionCard: View {
@@ -378,7 +539,18 @@ struct DamageDetectionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Group {
-                if let cropImage = detection.cropImage {
+                // Show the full vehicle location with the exact orange region,
+                // instead of only showing the close-up crop. This makes both
+                // new damage and existing benchmark damage visually traceable.
+                if let locationImage = detection.cleanContextImage ?? detection.contextImage {
+                    BoundingBoxOverlayView(
+                        image: locationImage,
+                        normalizedBBox: .constant(detection.normalizedBBox),
+                        accentColor: accentColor,
+                        isInteractive: false
+                    )
+                    .frame(maxWidth: .infinity)
+                } else if let cropImage = detection.cropImage {
                     Image(uiImage: cropImage)
                         .resizable()
                         .scaledToFit()
@@ -401,6 +573,9 @@ struct DamageDetectionCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(detection.damageType.capitalized).font(.headline).foregroundColor(HTXTheme.primaryPurple)
                     Text(detection.angleName).font(.subheadline).foregroundColor(.secondary)
+                    Text(detection.isBaseline ? "Existing benchmark" : "New damage")
+                        .font(.caption.bold())
+                        .foregroundColor(detection.isBaseline ? .gray : accentColor)
                 }
                 Spacer()
                 HStack(spacing: 8) {
@@ -488,7 +663,14 @@ struct DamageDetailSheet: View {
                         Label("Damage close-up", systemImage: "magnifyingglass")
                             .font(.headline).padding(.horizontal)
 
-                        if let cropImage = detection.cropImage {
+                        if let bbox = detection.normalizedBBox,
+                           let baseImage = detection.cleanContextImage ?? detection.contextImage {
+                            Image(uiImage: renderAnnotatedCrop(image: baseImage, bbox: bbox, padding: 0.45))
+                                .resizable().scaledToFit().frame(maxWidth: .infinity)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.7), lineWidth: 1.5))
+                                .padding(.horizontal)
+                        } else if let cropImage = detection.cropImage {
                             Image(uiImage: cropImage)
                                 .resizable().scaledToFit().frame(maxWidth: .infinity)
                                 .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -767,21 +949,31 @@ struct BoundingBoxEditorSheet: View {
                                 accentColor: .orange,
                                 isInteractive: true
                             )
+                            .frame(maxWidth: .infinity)
+                            .frame(height: max(430, UIApplication.shared.htxActiveWindowBounds.height * 0.65))
+                            .background(Color.black.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                             .padding(.horizontal)
 
                             if let bbox = pendingBBox {
-                                VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .center, spacing: 10) {
                                     Label("Close-up Preview", systemImage: "magnifyingglass")
                                         .font(.subheadline.bold())
-                                        .padding(.horizontal)
 
                                     Image(uiImage: renderCrop(image: img, bbox: bbox))
                                         .resizable()
                                         .scaledToFit()
+                                        .frame(maxWidth: .infinity)
+                                        .frame(maxHeight: 190)
                                         .clipShape(RoundedRectangle(cornerRadius: 14))
-                                        .padding(.horizontal)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 14)
+                                                .stroke(accentColor.opacity(0.35), lineWidth: 1)
+                                        )
                                 }
-                                .padding(.top, 6)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.horizontal)
+                                .padding(.top, 10)
 
                                 Text("Boundary drawn. Draw again to replace it.")
                                     .font(.caption)
@@ -812,13 +1004,20 @@ struct BoundingBoxEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         guard let bbox = pendingBBox, let baseImg = canvasImage else { return }
+
+                        // Keep the saved preview images lightweight.
+                        // If we store full-resolution camera images for every manual case,
+                        // iOS can run out of render memory after several cases and the next
+                        // annotated preview may appear as a blank white image.
+                        let previewImg = resizedImageForPreview(baseImg)
+
                         detection.normalizedBBox  = bbox
-                        // contextImage = full car photo with orange box burned in
-                        detection.contextImage    = renderContext(image: baseImg, bbox: bbox)
-                        // cleanContextImage = full car photo with no annotations (for future edits)
-                        detection.cleanContextImage = normalizedImage(baseImg)
-                        // cropImage = padded crop from the full photo
-                        detection.cropImage       = renderAnnotatedCrop(image: baseImg, bbox: bbox)
+                        // contextImage = full car photo preview with orange box burned in
+                        detection.contextImage    = renderContext(image: previewImg, bbox: bbox)
+                        // cleanContextImage = full car photo preview with no annotations (for future edits)
+                        detection.cleanContextImage = normalizedImage(previewImg)
+                        // cropImage = padded crop from the preview photo
+                        detection.cropImage       = renderAnnotatedCrop(image: previewImg, bbox: bbox)
 
                         // If the user changed the damage type, update explanation to match.
                         if pendingDamageType != detection.damageType {
@@ -892,14 +1091,19 @@ struct AddCaseSheet: View {
                         Button("Add Case") {
                             let angleName  = angleNames[selectedAngleIndex]
                             let explanation = "\(selectedDamageType.capitalized) detected on the \(angleName)."
+                            let previewImage = selectedImage.map { resizedImageForPreview($0) }
+
                             let detection  = MutableDamageDetection(
                                 angleIndex:        selectedAngleIndex,
                                 angleName:         angleName,
                                 damageType:        selectedDamageType,
                                 confidence:        1.0,
-                                cropImage:         croppedImage(),
-                                contextImage:      selectedImage.map { renderContext(image: $0, bbox: normalizedBBox) },
-                                cleanContextImage: selectedImage.map { normalizedImage($0) },
+                                cropImage:         previewImage.flatMap { img in
+                                    guard let bbox = normalizedBBox else { return normalizedImage(img) }
+                                    return renderAnnotatedCrop(image: img, bbox: bbox)
+                                },
+                                contextImage:      previewImage.map { renderContext(image: $0, bbox: normalizedBBox) },
+                                cleanContextImage: previewImage.map { normalizedImage($0) },
                                 normalizedBBox:    normalizedBBox,
                                 explanation:       explanation
                             )
@@ -907,6 +1111,7 @@ struct AddCaseSheet: View {
                             dismiss()
                         }
                         .bold()
+                        .disabled(normalizedBBox == nil)
                     }
                 }
             }
@@ -1014,50 +1219,79 @@ struct AddCaseSheet: View {
 
     // ── Step 1: Draw bounding box ─────────────────────────────────────────────
     private var drawStep: some View {
-        VStack(spacing: 12) {
-            Text("Drag on the image to draw the orange boundary around the damage.")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            if let img = selectedImage {
-                BoundingBoxOverlayView(
-                    image: img,
-                    normalizedBBox: $normalizedBBox,
-                    accentColor: .orange,
-                    isInteractive: true
-                )
-                .padding(.horizontal)
-
-                if let bbox = normalizedBBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Close-up Preview", systemImage: "magnifyingglass")
-                            .font(.subheadline.bold())
-                            .padding(.horizontal)
-
-                        Image(uiImage: renderCrop(image: img, bbox: bbox))
-                            .resizable()
-                            .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
-                            .padding(.horizontal)
-                    }
-                    .padding(.top, 8)
-
-                    Text("Boundary set. Drag again to adjust.")
-                        .font(.caption)
+        GeometryReader { geo in
+            ScrollView {
+                VStack(spacing: 12) {
+                    Text("Drag on the vehicle photo to draw the orange boundary around the damage.")
+                        .font(.subheadline)
                         .foregroundColor(.secondary)
-                } else {
-                    Text("No boundary drawn yet — you can still add the case without one.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal)
-                }
-            }
 
-            Spacer()
+                    if let img = selectedImage {
+                        // Bigger full-screen canvas. The close-up preview stays below it,
+                        // so users can scroll down after drawing instead of losing canvas space.
+                        BoundingBoxOverlayView(
+                            image: img,
+                            normalizedBBox: $normalizedBBox,
+                            accentColor: .orange,
+                            isInteractive: true
+                        )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: max(430, geo.size.height * 0.72))
+                        .background(Color.black.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .padding(.horizontal)
+
+                        HStack(spacing: 10) {
+                            if normalizedBBox != nil {
+                                Label("Boundary set. Drag again to replace it.", systemImage: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            } else {
+                                Label("No boundary drawn yet.", systemImage: "exclamationmark.circle")
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            if normalizedBBox != nil {
+                                Button("Clear") { normalizedBBox = nil }
+                                    .foregroundColor(.red)
+                            }
+                        }
+                        .font(.caption)
+                        .padding(.horizontal)
+
+                        if let bbox = normalizedBBox {
+                            VStack(alignment: .center, spacing: 10) {
+                                Label("Close-up Preview", systemImage: "magnifyingglass")
+                                    .font(.caption.bold())
+
+                                Image(uiImage: renderCrop(image: img, bbox: bbox))
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: .infinity)
+                                    .frame(maxHeight: 190)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(accentColor.opacity(0.35), lineWidth: 1)
+                                    )
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                        }
+                    } else {
+                        Text("No image available for this angle.")
+                            .foregroundColor(.secondary)
+                            .padding()
+                    }
+                }
+                .padding(.top, 10)
+                .padding(.bottom, 28)
+            }
         }
-        .padding(.top)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1069,13 +1303,44 @@ struct AddCaseSheet: View {
     }
 }
 
+/// Downscales large camera images before saving annotated previews into each damage case.
+/// This prevents later manual cases from turning into a blank white image because of
+/// accumulated full-resolution UIImage memory. The normalized bbox still stays accurate
+/// because it is stored as 0–1 coordinates.
+private func resizedImageForPreview(_ image: UIImage, maxDimension: CGFloat = 1800) -> UIImage {
+    let normalized = normalizedImage(image)
+    let width = normalized.size.width
+    let height = normalized.size.height
+    let longestSide = max(width, height)
+
+    guard longestSide > maxDimension else { return normalized }
+
+    let scale = maxDimension / longestSide
+    let newSize = CGSize(width: width * scale, height: height * scale)
+
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+
+    let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+    return renderer.image { _ in
+        normalized.draw(in: CGRect(origin: .zero, size: newSize))
+    }
+}
+
 /// Renders the full image with an orange bounding box drawn on it.
 /// Used as contextImage — both for user-added cases and after the user edits a bbox.
 private func renderContext(image: UIImage, bbox: CGRect?) -> UIImage {
     // Normalize first so image.size and the drawn rect are in the same coordinate space
     let img = normalizedImage(image)
-    let renderer = UIGraphicsImageRenderer(size: img.size)
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+
+    let renderer = UIGraphicsImageRenderer(size: img.size, format: format)
     return renderer.image { _ in
+        UIColor.white.setFill()
+        UIBezierPath(rect: CGRect(origin: .zero, size: img.size)).fill()
         img.draw(at: .zero)
         guard let bbox else { return }
         let rect = CGRect(
@@ -2322,7 +2587,7 @@ struct PoliceReportStageTwoView: View {
             ReportWelcomeView(
                 plate: plate,
                 carType: carType,
-                detectionCount: detections.count,
+                detectionCount: detections.filter { !$0.isBaseline }.count,
                 pdfURL: url,
                 onLogout: {
                     pdfURL = nil
@@ -2446,7 +2711,15 @@ struct PoliceReportStageTwoView: View {
 
         let plate = plate
         let carTypeValue = carType.rawValue
-        let detections = detections
+
+        // Report must contain NEW damage only. Existing benchmark damage is shown
+        // in the app for reference, but it should not be printed into the NP299 PDF.
+        let reportDetections = detections.filter { !$0.isBaseline }
+
+        // Benchmark must contain BOTH existing benchmark damage + newly confirmed
+        // damage, so the next analysis compares against the fully updated car state.
+        let baselineAngles = makeBaselineBatchAngles(from: detections, scanImages: scanImages)
+
         let scanImages = scanImages
         let policeStation = policeStation
         let stageOne = stageOne
@@ -2460,11 +2733,21 @@ struct PoliceReportStageTwoView: View {
             : (!(signedInName ?? "").isEmpty ? signedInName! : (signedInEmail?.isEmpty == false ? signedInEmail! : "Not recorded"))
 
         Task(priority: .userInitiated) {
+            do {
+                try await DamageAnalysisService.shared.confirmBaselineBatch(
+                    plate: plate,
+                    angles: baselineAngles
+                )
+                print("Saved updated benchmark for \(plate).")
+            } catch {
+                print("Failed to save updated benchmark for \(plate):", error)
+            }
+
             let url = await Task(priority: .userInitiated) {
                 DamageReportGenerator.generatePDF(
                     plate: plate,
                     carType: carTypeValue,
-                    detections: detections,
+                    detections: reportDetections,
                     scanImages: scanImages,
                     policeStation: policeStation,
                     stageOne: stageOne,
@@ -2481,13 +2764,93 @@ struct PoliceReportStageTwoView: View {
                         plate: plate,
                         carType: carTypeValue,
                         generatedBy: generatedBy,
-                        detectionCount: detections.count,
+                        detectionCount: reportDetections.count,
                         numericBarcodeId: numericBarcodeId,
                         pdfURL: url
                     )
                 }
                 pdfURL = url
             }
+        }
+    }
+
+    private func makeBaselineBatchAngles(
+        from detections: [MutableDamageDetection],
+        scanImages: [UIImage]
+    ) -> [ConfirmBaselineBatchAngle] {
+        var grouped: [Int: [ConfirmBaselineRegion]] = [:]
+
+        for detection in detections {
+            guard let region = makeBaselineRegion(from: detection, scanImages: scanImages) else {
+                print("Skipping benchmark save for detection with no usable box:", detection.damageType, detection.angleName)
+                continue
+            }
+            grouped[detection.angleIndex, default: []].append(region)
+        }
+
+        return grouped.keys.sorted().map { angleIndex in
+            ConfirmBaselineBatchAngle(
+                angle_index: angleIndex,
+                angle_name: angleName(for: angleIndex),
+                regions: grouped[angleIndex] ?? []
+            )
+        }
+    }
+
+    private func makeBaselineRegion(
+        from detection: MutableDamageDetection,
+        scanImages: [UIImage]
+    ) -> ConfirmBaselineRegion? {
+        if let x1 = detection.x1, let y1 = detection.y1,
+           let x2 = detection.x2, let y2 = detection.y2,
+           x2 > x1, y2 > y1 {
+            return ConfirmBaselineRegion(
+                x1: x1,
+                y1: y1,
+                x2: x2,
+                y2: y2,
+                label: detection.damageType
+            )
+        }
+
+        guard let bbox = detection.normalizedBBox else { return nil }
+
+        let sourceImage: UIImage? = {
+            guard detection.angleIndex >= 0, detection.angleIndex < scanImages.count else {
+                return detection.cleanContextImage ?? detection.contextImage ?? detection.cropImage
+            }
+            return scanImages[detection.angleIndex]
+        }()
+
+        guard let image = sourceImage else { return nil }
+        let normalized = normalizedImage(image)
+        let width = normalized.size.width
+        let height = normalized.size.height
+        guard width > 0, height > 0 else { return nil }
+
+        let x1 = Int(max(0, min(width, bbox.minX * width)))
+        let y1 = Int(max(0, min(height, bbox.minY * height)))
+        let x2 = Int(max(0, min(width, bbox.maxX * width)))
+        let y2 = Int(max(0, min(height, bbox.maxY * height)))
+
+        guard x2 > x1, y2 > y1 else { return nil }
+
+        return ConfirmBaselineRegion(
+            x1: x1,
+            y1: y1,
+            x2: x2,
+            y2: y2,
+            label: detection.damageType
+        )
+    }
+
+    private func angleName(for index: Int) -> String {
+        switch index {
+        case 0: return "Front"
+        case 1: return "Rear"
+        case 2: return "Left Side"
+        case 3: return "Right Side"
+        default: return "Angle \(index)"
         }
     }
 }
