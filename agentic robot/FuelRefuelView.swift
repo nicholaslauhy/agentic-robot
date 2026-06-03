@@ -19,6 +19,7 @@ struct FuelRefuelView: View {
     @State private var vehicleNumber: String = ""
     @State private var odometer: String = ""
     @State private var usedMastercard: Bool? = nil
+    @State private var mastercardNumber: String = ""
 
     // Vehicle picker (reuse same groups)
     @State private var selectedGroup: VehicleGroup? = nil
@@ -144,6 +145,14 @@ struct FuelRefuelView: View {
                             mastercardOption(label: "Yes", value: true)
                             mastercardOption(label: "No",  value: false)
                         }
+                        if usedMastercard == true {
+                            Divider()
+                            formRow(label: "Mastercard Number") {
+                                TextField("16-digit card number", text: $mastercardNumber)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
                     }
 
                     // Receipt
@@ -185,7 +194,9 @@ struct FuelRefuelView: View {
                     }
 
                     if showValidationError {
-                        Text("Please fill in all required fields.")
+                        Text(usedMastercard == true && mastercardNumber.filter { $0.isNumber }.count != 16
+                            ? "Please enter a valid 16-digit Mastercard number."
+                            : "Please fill in all required fields.")
                             .font(.footnote)
                             .foregroundColor(.red)
                             .multilineTextAlignment(.center)
@@ -268,6 +279,12 @@ struct FuelRefuelView: View {
                 odometer = digitsOnly
             }
         }
+        .onChange(of: mastercardNumber) { _, newValue in
+            let digitsOnly = String(newValue.filter { $0.isNumber }.prefix(16))
+            if digitsOnly != newValue {
+                mastercardNumber = digitsOnly
+            }
+        }
         .sheet(isPresented: $showReviewSheet) {
             FuelRefuelReviewSheet(
                 driverName: driverName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -277,6 +294,7 @@ struct FuelRefuelView: View {
                 vehicleType: effectiveCarType,
                 odometer: cleanOdometer,
                 usedMastercard: usedMastercard ?? false,
+                mastercardNumber: mastercardNumber.filter { $0.isNumber },
                 hasReceipt: receiptImage != nil,
                 isSubmitting: isSubmitting,
                 onGenerate: { showGenerateConfirmation = true }
@@ -327,6 +345,7 @@ struct FuelRefuelView: View {
     private func mastercardOption(label: String, value: Bool) -> some View {
         Button {
             usedMastercard = value
+            if value == false { mastercardNumber = "" }
         } label: {
             Text(label)
                 .font(.subheadline.weight(.semibold))
@@ -355,10 +374,12 @@ struct FuelRefuelView: View {
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
         let vehicleNumber = effectiveVehicleNumber
 
+        let cardNumTrimmed = mastercardNumber.filter { $0.isNumber }
         guard !name.isEmpty,
               !vehicleNumber.isEmpty,
               !cleanOdometer.isEmpty,
-              usedMastercard != nil
+              usedMastercard != nil,
+              usedMastercard == false || cardNumTrimmed.count == 16
         else {
             showValidationError = true
             return
@@ -410,10 +431,12 @@ struct FuelRefuelView: View {
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
         let vehicleNumber = effectiveVehicleNumber
 
+        let cardNumTrimmed = mastercardNumber.filter { $0.isNumber }
         guard !name.isEmpty,
               !vehicleNumber.isEmpty,
               !cleanOdometer.isEmpty,
-              usedMastercard != nil
+              usedMastercard != nil,
+              usedMastercard == false || cardNumTrimmed.count == 16
         else {
             showValidationError = true
             return
@@ -435,6 +458,7 @@ struct FuelRefuelView: View {
             "carType":          effectiveCarType,
             "odometer":         cleanOdometer,
             "usedMastercard":   usedMastercard ?? false,
+            "mastercardNumber":  usedMastercard == true ? mastercardNumber.filter { $0.isNumber } : "",
             "generatedBy":      Auth.auth().currentUser?.email ?? "Unknown",
             "createdAt":        FieldValue.serverTimestamp()
         ]
@@ -496,6 +520,7 @@ private struct FuelRefuelReviewSheet: View {
     let vehicleType: String
     let odometer: String
     let usedMastercard: Bool
+    let mastercardNumber: String
     let hasReceipt: Bool
     let isSubmitting: Bool
     let onGenerate: () -> Void
@@ -522,6 +547,9 @@ private struct FuelRefuelReviewSheet: View {
 
                         reviewCard(title: "Mastercard Usage", icon: "creditcard.fill") {
                             reviewRow("Mastercard Used", usedMastercard ? "Yes" : "No")
+                            if usedMastercard {
+                                reviewRow("Card Number", mastercardNumber.isEmpty ? "-" : "**** **** **** " + String(mastercardNumber.suffix(4)))
+                            }
                         }
 
                         reviewCard(title: "Fuel Receipt", icon: "doc.text.fill") {

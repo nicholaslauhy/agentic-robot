@@ -327,7 +327,13 @@ struct SecComPreDrivingChecklistView: View {
 
                     // Validation error
                     if showValidationError {
-                        Text("Please fill in all required fields and select a vehicle.")
+                        Text(
+                            selectedEquipment.isEmpty
+                            ? "Please check at least one item in the equipment checklist."
+                            : (!bodyworkAllInOrder && bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            ? "Please describe the body work defect details."
+                            : "Please fill in all required fields and select a vehicle."
+                        )
                             .font(.footnote)
                             .foregroundColor(.red)
                             .multilineTextAlignment(.center)
@@ -531,7 +537,9 @@ struct SecComPreDrivingChecklistView: View {
         guard !name.isEmpty, !contact.isEmpty,
               !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
               !cleanMileage.isEmpty,
-              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !selectedEquipment.isEmpty,
+              bodyworkAllInOrder || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             showValidationError = true
             return
@@ -552,7 +560,9 @@ struct SecComPreDrivingChecklistView: View {
         guard !name.isEmpty, !contact.isEmpty,
               !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
               !cleanMileage.isEmpty,
-              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !selectedEquipment.isEmpty,
+              bodyworkAllInOrder || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             showValidationError = true
             return

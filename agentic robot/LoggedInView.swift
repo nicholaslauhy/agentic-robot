@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
+import Vision
 import FirebaseFirestore
 
 struct LoggedInView: View {
@@ -19,6 +20,8 @@ struct LoggedInView: View {
 
     // ── IU barcode flow (new) ───────────────────────────────────────────────
     @State private var showIUBarcodeScanner = false
+    @State private var showIUPhotoLibraryPicker = false
+    @State private var selectedIUPhotoItem: PhotosPickerItem? = nil
     @State private var iuManualCode: String = ""
     @State private var showIUManualEntry = false
     @State private var isLookingUpIU = false
@@ -282,6 +285,36 @@ struct LoggedInView: View {
             )
         }
 
+        // MARK: - IU Barcode photo library picker
+        .photosPicker(
+            isPresented: $showIUPhotoLibraryPicker,
+            selection: $selectedIUPhotoItem,
+            matching: .images
+        )
+        .onChange(of: selectedIUPhotoItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let uiImage = UIImage(data: data) {
+                    // Use Vision to detect a barcode in the chosen photo
+                    await MainActor.run { isLookingUpIU = true }
+                    if let code = await detectBarcodeInImage(uiImage) {
+                        await MainActor.run {
+                            iuManualCode = code
+                            isLookingUpIU = false
+                            lookupIUBarcode(code)
+                        }
+                    } else {
+                        await MainActor.run {
+                            isLookingUpIU = false
+                            localErrorMessage = "No barcode detected in the selected photo. Please try again or enter manually."
+                        }
+                    }
+                }
+                await MainActor.run { selectedIUPhotoItem = nil }
+            }
+        }
+
         // MARK: - Photo picker
         .onChange(of: selectedPhotoItem) { _, newItem in
             guard let newItem = newItem else { return }
@@ -366,6 +399,30 @@ struct LoggedInView: View {
                 .background(HTXTheme.primaryPurple)
                 .foregroundColor(.white)
                 .cornerRadius(14)
+                .padding(.horizontal)
+            }
+            .disabled(isLookingUpIU)
+
+            // Photo library button
+            Button {
+                localErrorMessage = nil
+                iuManualCode = ""
+                showIUPhotoLibraryPicker = true
+            } label: {
+                HStack {
+                    Image(systemName: "photo.on.rectangle")
+                    Text("Choose from Library")
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(HTXTheme.softPurpleBorder, lineWidth: 1.5)
+                )
                 .padding(.horizontal)
             }
             .disabled(isLookingUpIU)
@@ -541,6 +598,22 @@ struct LoggedInView: View {
 // MARK: - IU Barcode Scanner Sheet
 
 /// Full-screen barcode scanner used exclusively for IU card scanning.
+// MARK: - Vision barcode detection from image
+private func detectBarcodeInImage(_ image: UIImage) async -> String? {
+    guard let cgImage = image.cgImage else { return nil }
+    return await withCheckedContinuation { continuation in
+        let request = VNDetectBarcodesRequest { request, _ in
+            let result = (request.results as? [VNBarcodeObservation])?
+                .compactMap { $0.payloadStringValue }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isNumber } }
+                .first { !$0.isEmpty }
+            continuation.resume(returning: result)
+        }
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        try? handler.perform([request])
+    }
+}
+
 /// Reuses the existing BarcodeScannerRepresentable / BarcodeScannerViewController
 /// from ReportScannerView — no new AVFoundation code needed.
 struct IUBarcodeScannerSheet: View {
