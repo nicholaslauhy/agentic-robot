@@ -99,7 +99,6 @@ struct SecComPreDrivingChecklistView: View {
 
     // Damage images
     @State private var damageImages: [UIImage] = []
-    @State private var showDamageImageOptions = false
     @State private var showDamagePicker = false
     @State private var showDamageCamera = false
     @State private var showDamageFileImporter = false
@@ -272,9 +271,7 @@ struct SecComPreDrivingChecklistView: View {
                     // Damage photos (optional)
                     sectionCard(title: "New Damage Detected (Optional)", icon: "camera.fill") {
                         if damageImages.isEmpty {
-                            Button {
-                                showDamageImageOptions = true
-                            } label: {
+                            damagePhotoMenu {
                                 HStack {
                                     Image(systemName: "plus.circle.fill")
                                         .foregroundColor(HTXTheme.primaryPurple)
@@ -286,13 +283,6 @@ struct SecComPreDrivingChecklistView: View {
                                 .padding()
                                 .background(HTXTheme.primaryPurple.opacity(0.07))
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            .buttonStyle(.plain)
-                            .confirmationDialog("Add Damage Photo", isPresented: $showDamageImageOptions, titleVisibility: .visible) {
-                                Button("Take Photo") { showDamageCamera = true }
-                                Button("Choose from Library") { showDamagePicker = true }
-                                Button("Upload JPG/PNG File") { showDamageFileImporter = true }
-                                Button("Cancel", role: .cancel) {}
                             }
                         } else {
                             ScrollView(.horizontal, showsIndicators: false) {
@@ -314,22 +304,13 @@ struct SecComPreDrivingChecklistView: View {
                                             .offset(x: 6, y: -6)
                                         }
                                     }
-                                    Button {
-                                        showDamageImageOptions = true
-                                    } label: {
+                                    damagePhotoMenu {
                                         Image(systemName: "plus")
                                             .font(.title2)
                                             .foregroundColor(HTXTheme.primaryPurple)
                                             .frame(width: 90, height: 90)
                                             .background(HTXTheme.primaryPurple.opacity(0.08))
                                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .confirmationDialog("Add Damage Photo", isPresented: $showDamageImageOptions, titleVisibility: .visible) {
-                                        Button("Take Photo") { showDamageCamera = true }
-                                        Button("Choose from Library") { showDamagePicker = true }
-                                        Button("Upload JPG/PNG File") { showDamageFileImporter = true }
-                                        Button("Cancel", role: .cancel) {}
                                     }
                                 }
                                 .padding(.vertical, 4)
@@ -459,6 +440,32 @@ struct SecComPreDrivingChecklistView: View {
     }
 
     // MARK: - Helpers
+
+    @ViewBuilder
+    private func damagePhotoMenu<LabelContent: View>(@ViewBuilder label: () -> LabelContent) -> some View {
+        Menu {
+            Button {
+                showDamageCamera = true
+            } label: {
+                Label("Take Photo", systemImage: "camera.fill")
+            }
+
+            Button {
+                showDamagePicker = true
+            } label: {
+                Label("Choose from Library", systemImage: "photo.on.rectangle")
+            }
+
+            Button {
+                showDamageFileImporter = true
+            } label: {
+                Label("Upload JPG/PNG File", systemImage: "doc.badge.plus")
+            }
+        } label: {
+            label()
+        }
+        .buttonStyle(.plain)
+    }
 
     @ViewBuilder
     private func sectionCard<Content: View>(title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
