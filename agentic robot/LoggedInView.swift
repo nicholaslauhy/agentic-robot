@@ -25,6 +25,9 @@ struct LoggedInView: View {
     @State private var iuManualCode: String = ""
     @State private var showIUManualEntry = false
     @State private var isLookingUpIU = false
+    @State private var iuScannerIsFrozen = false
+    @State private var iuScannerMessage: String? = nil
+    @State private var iuScannerDetectedCode: String? = nil
 
     // ── Shared ──────────────────────────────────────────────────────────────
     @State private var navigateToResultPage = false
@@ -105,14 +108,112 @@ struct LoggedInView: View {
         }.resume()
     }
 
-    // MARK: - IU Barcode Firestore Lookup (new)
-    func lookupIUBarcode(_ rawCode: String) {
-        let code = rawCode.trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isNumber }
-        guard !code.isEmpty else {
-            localErrorMessage = "Please enter or scan a valid IU barcode number."
+    // MARK: - IU Barcode Firestore Lookup
+    private let iuBarcodeLength = 10
+
+    private func digitsOnly(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .filter { $0.isNumber }
+    }
+
+    private func validateIUBarcode(_ rawCode: String) -> String? {
+        let digits = digitsOnly(rawCode)
+
+        if let message = iuValidationMessage(for: digits) {
+            showIUManualEntry = false
+            iuManualCode = ""
+            localErrorMessage = message
+            return nil
+        }
+
+        return digits
+    }
+
+    private func iuValidationMessage(for digits: String) -> String? {
+        if digits.isEmpty {
+            return "No barcode number was detected. Please scan the 10-digit IU barcode again, choose from library, or type it manually."
+        }
+
+        if digits.count == 12 {
+            return "Detected a 12-digit barcode (\(digits)). This is probably a report barcode, not a 10-digit IU barcode. Please scan the IU barcode again."
+        }
+
+        if digits.count != iuBarcodeLength {
+            return "Detected \(digits.count) digits (\(digits)). IU barcodes must be exactly 10 digits. Please scan again or type the IU barcode manually."
+        }
+
+        return nil
+    }
+
+    private func resetIUScannerState() {
+        iuScannerIsFrozen = false
+        iuScannerMessage = nil
+        iuScannerDetectedCode = nil
+    }
+
+    private func handleIUScannerScan(_ rawCode: String) {
+        let digits = digitsOnly(rawCode)
+        iuScannerIsFrozen = true
+        iuScannerDetectedCode = digits
+        isLookingUpIU = false
+
+        if let message = iuValidationMessage(for: digits) {
+            iuScannerMessage = message
             return
         }
 
+        iuManualCode = digits
+        iuScannerMessage = "Detected IU barcode \(digits). Looking up vehicle…"
+        isLookingUpIU = true
+        localErrorMessage = nil
+
+        Firestore.firestore()
+            .collection("iu_barcodes")
+            .document(digits)
+            .getDocument { snapshot, error in
+                DispatchQueue.main.async {
+                    self.isLookingUpIU = false
+
+                    if let error {
+                        self.showIUManualEntry = true
+                        self.iuManualCode = digits
+                        self.iuScannerMessage = "IU lookup failed: \(error.localizedDescription). The camera is paused so it will not keep scanning. You can scan again or edit the number manually."
+                        return
+                    }
+
+                    guard
+                        let data = snapshot?.data(), !data.isEmpty,
+                        let plate = data["plate"] as? String, !plate.isEmpty
+                    else {
+                        self.showIUManualEntry = true
+                        self.iuManualCode = digits
+                        self.iuScannerMessage = "No vehicle found for IU barcode \(digits). The camera is paused so it will not keep scanning. Scan again or edit the 10-digit number manually."
+                        return
+                    }
+
+                    guard (data["isActive"] as? Bool) != false else {
+                        self.showIUManualEntry = true
+                        self.iuManualCode = digits
+                        self.iuScannerMessage = "This IU barcode has been deactivated. The camera is paused. Scan again or edit the number manually."
+                        return
+                    }
+
+                    self.plateResult = plate.uppercased()
+                    self.resetIUScannerState()
+                    self.showIUBarcodeScanner = false
+                    self.navigateToResultPage = true
+                }
+            }
+    }
+
+    func lookupIUBarcode(_ rawCode: String) {
+        guard let code = validateIUBarcode(rawCode) else {
+            isLookingUpIU = false
+            return
+        }
+
+        iuManualCode = code
+        showIUManualEntry = true
         isLookingUpIU = true
         localErrorMessage = nil
 
@@ -124,7 +225,9 @@ struct LoggedInView: View {
                     self.isLookingUpIU = false
 
                     if let error {
-                        self.localErrorMessage = "IU lookup failed: \(error.localizedDescription)"
+                        self.showIUManualEntry = true
+                        self.iuManualCode = code
+                        self.localErrorMessage = "IU lookup failed: \(error.localizedDescription). You can edit the 10-digit number below and search again."
                         return
                     }
 
@@ -132,12 +235,16 @@ struct LoggedInView: View {
                         let data = snapshot?.data(), !data.isEmpty,
                         let plate = data["plate"] as? String, !plate.isEmpty
                     else {
-                        self.localErrorMessage = "No vehicle found for IU barcode \(code). Make sure it has been registered."
+                        self.showIUManualEntry = true
+                        self.iuManualCode = code
+                        self.localErrorMessage = "No vehicle found for IU barcode \(code). Edit the 10-digit number below or scan again."
                         return
                     }
 
                     guard (data["isActive"] as? Bool) != false else {
-                        self.localErrorMessage = "This IU barcode has been deactivated. Please contact your administrator."
+                        self.showIUManualEntry = true
+                        self.iuManualCode = code
+                        self.localErrorMessage = "This IU barcode has been deactivated. Edit the number below or contact your administrator."
                         return
                     }
 
@@ -179,6 +286,7 @@ struct LoggedInView: View {
                         selectedImage = nil
                         iuManualCode = ""
                         showIUManualEntry = false
+                        resetIUScannerState()
                     }
                 }
 
@@ -274,13 +382,28 @@ struct LoggedInView: View {
         // MARK: - IU Barcode scanner
         .fullScreenCover(isPresented: $showIUBarcodeScanner) {
             IUBarcodeScannerSheet(
+                isFrozen: $iuScannerIsFrozen,
+                message: $iuScannerMessage,
+                detectedCode: $iuScannerDetectedCode,
+                isLookingUp: isLookingUpIU,
                 onScan: { code in
+                    handleIUScannerScan(code)
+                },
+                onScanAgain: {
+                    resetIUScannerState()
+                },
+                onEditNumber: { code in
+                    if let code, code.count == iuBarcodeLength {
+                        iuManualCode = code
+                    }
+                    showIUManualEntry = true
                     showIUBarcodeScanner = false
-                    iuManualCode = code
-                    lookupIUBarcode(code)
+                    localErrorMessage = "Edit the detected IU barcode number, then tap Search."
+                    resetIUScannerState()
                 },
                 onCancel: {
                     showIUBarcodeScanner = false
+                    resetIUScannerState()
                 }
             )
         }
@@ -300,7 +423,6 @@ struct LoggedInView: View {
                     await MainActor.run { isLookingUpIU = true }
                     if let code = await detectBarcodeInImage(uiImage) {
                         await MainActor.run {
-                            iuManualCode = code
                             isLookingUpIU = false
                             lookupIUBarcode(code)
                         }
@@ -387,6 +509,7 @@ struct LoggedInView: View {
             Button {
                 localErrorMessage = nil
                 iuManualCode = ""
+                resetIUScannerState()
                 showIUBarcodeScanner = true
             } label: {
                 HStack {
@@ -451,8 +574,12 @@ struct LoggedInView: View {
 
             if showIUManualEntry {
                 HStack(spacing: 10) {
-                    TextField("Enter barcode number", text: $iuManualCode)
+                    TextField("Enter 10-digit IU barcode", text: $iuManualCode)
                         .keyboardType(.numberPad)
+                        .onChange(of: iuManualCode) { _, newValue in
+                            let cleaned = digitsOnly(newValue)
+                            iuManualCode = String(cleaned.prefix(iuBarcodeLength))
+                        }
                         .padding(12)
                         .background(Color(.systemBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -469,8 +596,8 @@ struct LoggedInView: View {
                             .background(HTXTheme.primaryPurple)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
-                    .disabled(isLookingUpIU || iuManualCode.isEmpty)
-                    .opacity((isLookingUpIU || iuManualCode.isEmpty) ? 0.55 : 1)
+                    .disabled(isLookingUpIU || iuManualCode.count != iuBarcodeLength)
+                    .opacity((isLookingUpIU || iuManualCode.count != iuBarcodeLength) ? 0.55 : 1)
                 }
                 .padding(.horizontal)
                 .transition(.move(edge: .top).combined(with: .opacity))
@@ -609,6 +736,24 @@ private func detectBarcodeInImage(_ image: UIImage) async -> String? {
                 .first { !$0.isEmpty }
             continuation.resume(returning: result)
         }
+        request.symbologies = [
+            .code128,
+            .code39,
+            .code39Checksum,
+            .code39FullASCII,
+            .code39FullASCIIChecksum,
+            .code93,
+            .i2of5,
+            .i2of5Checksum,
+            .itf14,
+            .ean13,
+            .ean8,
+            .upce,
+            .qr,
+            .pdf417,
+            .aztec,
+            .dataMatrix
+        ]
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         try? handler.perform([request])
     }
@@ -618,35 +763,37 @@ private func detectBarcodeInImage(_ image: UIImage) async -> String? {
 /// from ReportScannerView — no new AVFoundation code needed.
 struct IUBarcodeScannerSheet: View {
 
+    @Binding var isFrozen: Bool
+    @Binding var message: String?
+    @Binding var detectedCode: String?
+
+    var isLookingUp: Bool
     var onScan: (String) -> Void
+    var onScanAgain: () -> Void
+    var onEditNumber: (String?) -> Void
     var onCancel: () -> Void
 
-    @State private var isFrozen = false
     @State private var restartToken = UUID()
-    @State private var errorMessage: String? = nil
 
     var body: some View {
         ZStack {
-            // Camera layer
             BarcodeScannerRepresentable(
                 isFrozen: isFrozen,
                 restartToken: restartToken,
                 onScan: { raw in
-                    let code = raw.trimmingCharacters(in: .whitespacesAndNewlines).filter { $0.isNumber }
-                    guard !code.isEmpty else {
-                        errorMessage = "Barcode detected but no numeric value found. Try again."
-                        return
-                    }
+                    guard !isFrozen else { return }
                     isFrozen = true
-                    onScan(code)
+                    onScan(raw)
                 },
                 onPermissionDenied: {
-                    errorMessage = "Camera access is required to scan barcodes. Enable it in Settings."
-                }
+                    isFrozen = true
+                    message = "Camera access is required to scan barcodes. Enable it in Settings."
+                },
+                scanWindowSize: CGSize(width: 300, height: 140),
+                scanFullFrame: true
             )
             .ignoresSafeArea()
 
-            // Scan guide
             VStack {
                 Spacer()
 
@@ -655,7 +802,7 @@ struct IUBarcodeScannerSheet: View {
                         .stroke(Color.white.opacity(0.25), lineWidth: 1)
                         .frame(width: 280, height: 120)
 
-                    Text("Point at the IU card barcode")
+                    Text("Scan the 10-digit IU barcode")
                         .font(.subheadline.weight(.semibold))
                         .foregroundColor(.white)
                         .shadow(radius: 2)
@@ -666,20 +813,58 @@ struct IUBarcodeScannerSheet: View {
                 Spacer()
             }
 
-            // Error + Cancel bar at bottom
             VStack {
                 Spacer()
 
-                if let errorMessage {
-                    Text(errorMessage)
-                        .font(.footnote.weight(.semibold))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-                        .padding(12)
-                        .background(Color.red.opacity(0.85))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
+                if let currentMessage = message {
+                    VStack(spacing: 12) {
+                        if isLookingUp {
+                            ProgressView()
+                                .tint(.white)
+                        }
+
+                        Text(currentMessage)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+
+                        if !isLookingUp {
+                            HStack(spacing: 10) {
+                                Button {
+                                    message = nil
+                                    detectedCode = nil
+                                    isFrozen = false
+                                    restartToken = UUID()
+                                    onScanAgain()
+                                } label: {
+                                    Label("Scan Again", systemImage: "barcode.viewfinder")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 11)
+                                        .background(Color.white.opacity(0.18))
+                                        .clipShape(Capsule())
+                                }
+
+                                Button {
+                                    onEditNumber(detectedCode)
+                                } label: {
+                                    Label("Edit Number", systemImage: "keyboard")
+                                        .font(.subheadline.weight(.bold))
+                                        .foregroundColor(.black)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 11)
+                                        .background(Color.white)
+                                        .clipShape(Capsule())
+                                }
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .background(Color.red.opacity(isLookingUp ? 0.65 : 0.88))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal)
+                    .padding(.bottom, 10)
                 }
 
                 Button {

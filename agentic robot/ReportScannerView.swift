@@ -81,20 +81,39 @@ struct ReportScannerView: View {
 
                 // Error banner
                 if let errorMessage, report == nil {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundColor(.red)
-                        Text(errorMessage)
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
-                        Spacer()
-                        Button {
-                            self.errorMessage = nil
-                            scannedCode = nil
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(.red)
+                            Text(errorMessage)
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button {
+                                prepareForReportRescan(clearError: true)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                            }
                         }
+
+                        Button {
+                            prepareForReportRescan(clearError: true)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "barcode.viewfinder")
+                                Text("Scan Again")
+                            }
+                            .font(.subheadline.weight(.bold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(HTXTheme.primaryPurple)
+                            .clipShape(Capsule())
+                        }
+                        .disabled(isBusy)
+                        .opacity(isBusy ? 0.55 : 1)
                     }
                     .padding(14)
                     .background(.ultraThinMaterial)
@@ -259,14 +278,14 @@ struct ReportScannerView: View {
                     isLoading = false
 
                     if let error {
-                        self.errorMessage = "Could not look up report: \(error.localizedDescription)"
-                        self.scannedCode = nil
+                        self.errorMessage = "Could not look up report: \(error.localizedDescription). Tap Scan Again to try another barcode."
+                        self.freezeReportScannerAfterError()
                         return
                     }
 
                     guard let data = snapshot?.data(), !data.isEmpty else {
-                        self.errorMessage = "No report found for barcode: \(cleanedCode)"
-                        self.scannedCode = nil
+                        self.errorMessage = "No report found for barcode: \(cleanedCode). Tap Scan Again to try another barcode."
+                        self.freezeReportScannerAfterError()
                         return
                     }
 
@@ -274,7 +293,8 @@ struct ReportScannerView: View {
                         let reportNo = data["reportNo"] as? String,
                         let plate    = data["plate"]    as? String
                     else {
-                        self.errorMessage = "Report data is incomplete."
+                        self.errorMessage = "Report data is incomplete. Tap Scan Again to try another barcode."
+                        self.freezeReportScannerAfterError()
                         return
                     }
 
@@ -399,6 +419,34 @@ struct ReportScannerView: View {
             }
             selectedPDFURL = url
         }
+    }
+
+
+    private func freezeReportScannerAfterError() {
+        // Keep the camera preview frozen behind the error card so the same
+        // bad barcode is not scanned repeatedly. The Scan Again button calls
+        // prepareForReportRescan(clearError: true), which unfreezes and restarts.
+        isCameraFrozen = true
+        report = nil
+        pdfErrorMessage = nil
+        selectedBarcodePhotoItem = nil
+        isReadingBarcodePhoto = false
+        showManualEntry = false
+    }
+
+    private func prepareForReportRescan(clearError: Bool) {
+        if clearError {
+            errorMessage = nil
+        }
+        scannedCode = nil
+        report = nil
+        pdfErrorMessage = nil
+        manualCode = ""
+        selectedBarcodePhotoItem = nil
+        isReadingBarcodePhoto = false
+        isCameraFrozen = false
+        showManualEntry = false
+        scannerRestartToken = UUID()
     }
 
     private func resetForAnotherLookup() {
@@ -595,23 +643,39 @@ struct BarcodeScannerRepresentable: UIViewControllerRepresentable {
     var restartToken: UUID
     var onScan: (String) -> Void
     var onPermissionDenied: () -> Void
+    /// Must match the SwiftUI guide rectangle drawn in the overlay.
+    var scanWindowSize: CGSize = CGSize(width: 260, height: 120)
+    /// IU barcodes are tiny 1D barcodes, so allow scanning the full camera frame.
+    /// Report barcodes keep this false so the scanner stays tied to the guide box.
+    var scanFullFrame: Bool = false
 
     func makeUIViewController(context: Context) -> BarcodeScannerViewController {
         let vc = BarcodeScannerViewController()
+        vc.scanWindowSize = scanWindowSize
+        vc.scanFullFrame = scanFullFrame
         vc.onScan = onScan
         vc.onPermissionDenied = onPermissionDenied
         return vc
     }
 
     func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {
+        uiViewController.scanWindowSize = scanWindowSize
+        uiViewController.scanFullFrame = scanFullFrame
+        uiViewController.updateScanWindow()
+
         if isFrozen {
-            // Stop scanning the moment a result is shown — prevents a second
-            // barcode being read while the result card is on screen.
             uiViewController.stopSession()
-        } else if context.coordinator.lastRestartToken != restartToken {
-            // Token was bumped by resetForAnotherLookup — restart the camera.
+            return
+        }
+
+        if context.coordinator.lastRestartToken != restartToken {
             context.coordinator.lastRestartToken = restartToken
             uiViewController.restartSession()
+        } else {
+            // Important for the initial camera presentation: if the view was
+            // created before permission/configuration completed, this makes sure
+            // the capture session actually starts once the view is ready.
+            uiViewController.startSessionIfNeeded()
         }
     }
 
@@ -623,13 +687,45 @@ struct BarcodeScannerRepresentable: UIViewControllerRepresentable {
     }
 }
 
-class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+final class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
 
     var onScan: ((String) -> Void)?
     var onPermissionDenied: (() -> Void)?
 
+    /// The visible scan-window size in points (matches the SwiftUI guide rectangle).
+    /// Set this before the view appears. Defaults to 260×120 (report scanner).
+    var scanWindowSize: CGSize = CGSize(width: 260, height: 120) {
+        didSet { updateScanWindow() }
+    }
+
+    /// When true, AVFoundation scans the whole frame instead of only the guide rectangle.
+    /// This is intentionally used for IU barcode scanning because IU labels are small,
+    /// tilted, and often behind glass.
+    var scanFullFrame: Bool = false {
+        didSet { updateScanWindow() }
+    }
+
     private let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "np299.barcode.session.queue")
+    private let metadataOutput = AVCaptureMetadataOutput()
+
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var captureDevice: AVCaptureDevice?
+    private var isConfigured = false
+    private var hasDeliveredScan = false
+
+    // Rotation coordinator (iOS 17+) — keeps preview upright when device rotates.
+    @available(iOS 17.0, *)
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator? {
+        get { _rotationCoordinator as? AVCaptureDevice.RotationCoordinator }
+        set { _rotationCoordinator = newValue }
+    }
+    private var _rotationCoordinator: AnyObject?
+    private var rotationObservation: NSKeyValueObservation?
+
+    // Lock scanner UI to portrait; the camera feed stays horizon-level via the coordinator.
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .portrait }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .portrait }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -637,10 +733,83 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
         checkPermissionAndSetup()
     }
 
+    deinit {
+        rotationObservation?.invalidate()
+        sessionQueue.async { [session] in
+            if session.isRunning {
+                session.stopRunning()
+            }
+        }
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         previewLayer?.frame = view.bounds
+        updatePreviewRotation()
+        updateScanWindow()
     }
+
+    /// Returns the guide rectangle in the view's coordinate space.
+    /// The SwiftUI overlay places the guide slightly above centre, so the scanner
+    /// uses the same approximate placement instead of assuming the exact middle.
+    private var scanWindowRect: CGRect {
+        let viewSize = view.bounds.size
+        guard viewSize.width > 0, viewSize.height > 0 else { return .zero }
+
+        let width = min(scanWindowSize.width, viewSize.width - 48)
+        let height = min(scanWindowSize.height, viewSize.height - 160)
+        let originX = (viewSize.width - width) / 2
+
+        // This matches the overlay that has one Spacer above and roughly two
+        // Spacers below. The clamp prevents the rect from moving under the notch
+        // or bottom controls on smaller devices.
+        let desiredMidY = viewSize.height * 0.38
+        let minY: CGFloat = view.safeAreaInsets.top + 80
+        let maxY: CGFloat = viewSize.height - view.safeAreaInsets.bottom - 180 - height
+        let originY = (desiredMidY - height / 2).clamped(to: minY...max(minY, maxY))
+
+        return CGRect(x: originX, y: originY, width: width, height: height)
+    }
+
+    // MARK: - Rotation
+
+    private func setupRotationCoordinator() {
+        guard #available(iOS 17.0, *),
+              let device = captureDevice,
+              let preview = previewLayer
+        else { return }
+
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: preview)
+        rotationCoordinator = coordinator
+
+        rotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.updatePreviewRotation()
+                self?.updateScanWindow()
+            }
+        }
+    }
+
+    private func updatePreviewRotation() {
+        guard #available(iOS 17.0, *), let coordinator = rotationCoordinator else {
+            if let connection = previewLayer?.connection,
+               connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+            return
+        }
+
+        let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+        if let connection = previewLayer?.connection,
+           connection.isVideoRotationAngleSupported(angle) {
+            connection.videoRotationAngle = angle
+        }
+    }
+
+    // MARK: - Permission + setup
 
     private func checkPermissionAndSetup() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -649,30 +818,68 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 DispatchQueue.main.async {
-                    if granted { self?.setupCamera() }
-                    else { self?.onPermissionDenied?() }
+                    granted ? self?.setupCamera() : self?.onPermissionDenied?()
                 }
             }
         default:
-            DispatchQueue.main.async { self.onPermissionDenied?() }
+            onPermissionDenied?()
         }
     }
 
     private func setupCamera() {
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device) else { return }
+        guard !isConfigured else {
+            startSessionIfNeeded()
+            return
+        }
+
+        guard
+            let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+            let input = try? AVCaptureDeviceInput(device: device)
+        else {
+            onPermissionDenied?()
+            return
+        }
+
+        captureDevice = device
 
         session.beginConfiguration()
+        session.sessionPreset = .high
+
+        guard session.canAddInput(input) else {
+            session.commitConfiguration()
+            return
+        }
         session.addInput(input)
 
-        let output = AVCaptureMetadataOutput()
-        session.addOutput(output)
-        output.setMetadataObjectsDelegate(self, queue: .main)
+        guard session.canAddOutput(metadataOutput) else {
+            session.commitConfiguration()
+            return
+        }
+        session.addOutput(metadataOutput)
 
-        // Support both Code 128 barcodes AND QR codes for flexibility
-        output.metadataObjectTypes = [.code128, .qr, .ean13, .ean8]
+        metadataOutput.setMetadataObjectsDelegate(self, queue: .main)
+
+        let desiredTypes: [AVMetadataObject.ObjectType] = [
+            .code128,
+            .code39,
+            .code39Mod43,
+            .code93,
+            .ean13,
+            .ean8,
+            .upce,
+            .interleaved2of5,
+            .itf14,
+            .qr,
+            .pdf417,
+            .aztec,
+            .dataMatrix
+        ]
+        metadataOutput.metadataObjectTypes = desiredTypes.filter {
+            metadataOutput.availableMetadataObjectTypes.contains($0)
+        }
 
         session.commitConfiguration()
+        isConfigured = true
 
         let preview = AVCaptureVideoPreviewLayer(session: session)
         preview.videoGravity = .resizeAspectFill
@@ -680,38 +887,99 @@ class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObj
         view.layer.insertSublayer(preview, at: 0)
         previewLayer = preview
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.startRunning()
-        }
+        setupRotationCoordinator()
+        updatePreviewRotation()
+        updateScanWindow()
+        startSessionIfNeeded()
     }
+
+    // MARK: - Scan window
+
+    func updateScanWindow() {
+        if scanFullFrame {
+            metadataOutput.rectOfInterest = CGRect(x: 0, y: 0, width: 1, height: 1)
+            return
+        }
+
+        guard let previewLayer, !scanWindowRect.isEmpty else { return }
+
+        // Use AVFoundation's own conversion so rectOfInterest stays correct
+        // even with resizeAspectFill, device rotation, and different screen sizes.
+        let metadataRect = previewLayer.metadataOutputRectConverted(fromLayerRect: scanWindowRect)
+        let clampedRect = CGRect(
+            x: metadataRect.origin.x.clamped(to: 0...1),
+            y: metadataRect.origin.y.clamped(to: 0...1),
+            width: metadataRect.width.clamped(to: 0...1),
+            height: metadataRect.height.clamped(to: 0...1)
+        )
+
+        guard clampedRect.width > 0, clampedRect.height > 0 else { return }
+        metadataOutput.rectOfInterest = clampedRect
+    }
+
+    // MARK: - Metadata delegate
 
     func metadataOutput(
         _ output: AVCaptureMetadataOutput,
         didOutput metadataObjects: [AVMetadataObject],
         from connection: AVCaptureConnection
     ) {
+        guard !hasDeliveredScan else { return }
+
         guard
-            let obj = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
+            let preview = previewLayer,
+            let obj = metadataObjects
+                .compactMap({ $0 as? AVMetadataMachineReadableCodeObject })
+                .first(where: { ($0.stringValue ?? "").isEmpty == false }),
             let code = obj.stringValue,
             !code.isEmpty
         else { return }
 
-        session.stopRunning()
+        // Safety filter: report scanning stays tied to the visible guide.
+        // IU scanning intentionally skips this because the IU label is tiny and
+        // often sits outside the guide even when the camera can read it.
+        if !scanFullFrame, let transformed = preview.transformedMetadataObject(for: obj) {
+            let looseWindow = scanWindowRect.insetBy(dx: -90, dy: -70)
+            guard looseWindow.intersects(transformed.bounds) || looseWindow.contains(transformed.bounds.center) else {
+                return
+            }
+        }
+
+        hasDeliveredScan = true
+        stopSession()
         onScan?(code)
     }
 
+    // MARK: - Session control
+
+    func startSessionIfNeeded() {
+        guard isConfigured else { return }
+        sessionQueue.async { [weak self] in
+            guard let self, !self.session.isRunning else { return }
+            self.session.startRunning()
+        }
+    }
+
     func stopSession() {
-        guard session.isRunning else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.stopRunning()
+        sessionQueue.async { [weak self] in
+            guard let self, self.session.isRunning else { return }
+            self.session.stopRunning()
         }
     }
 
     func restartSession() {
-        guard !session.isRunning else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.startRunning()
-        }
+        hasDeliveredScan = false
+        startSessionIfNeeded()
+    }
+}
+
+private extension CGRect {
+    var center: CGPoint { CGPoint(x: midX, y: midY) }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 

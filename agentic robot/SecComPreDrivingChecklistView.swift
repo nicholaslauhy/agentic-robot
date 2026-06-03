@@ -288,6 +288,12 @@ struct SecComPreDrivingChecklistView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                             }
                             .buttonStyle(.plain)
+                            .confirmationDialog("Add Damage Photo", isPresented: $showDamageImageOptions, titleVisibility: .visible) {
+                                Button("Take Photo") { showDamageCamera = true }
+                                Button("Choose from Library") { showDamagePicker = true }
+                                Button("Upload JPG/PNG File") { showDamageFileImporter = true }
+                                Button("Cancel", role: .cancel) {}
+                            }
                         } else {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 10) {
@@ -319,6 +325,12 @@ struct SecComPreDrivingChecklistView: View {
                                             .clipShape(RoundedRectangle(cornerRadius: 10))
                                     }
                                     .buttonStyle(.plain)
+                                    .confirmationDialog("Add Damage Photo", isPresented: $showDamageImageOptions, titleVisibility: .visible) {
+                                        Button("Take Photo") { showDamageCamera = true }
+                                        Button("Choose from Library") { showDamagePicker = true }
+                                        Button("Upload JPG/PNG File") { showDamageFileImporter = true }
+                                        Button("Cancel", role: .cancel) {}
+                                    }
                                 }
                                 .padding(.vertical, 4)
                             }
@@ -378,13 +390,7 @@ struct SecComPreDrivingChecklistView: View {
                 useOther: $useOtherVehicle
             )
         }
-        // Damage image options
-        .confirmationDialog("Add Damage Photo", isPresented: $showDamageImageOptions, titleVisibility: .visible) {
-            Button("Take Photo") { showDamageCamera = true }
-            Button("Choose from Library") { showDamagePicker = true }
-            Button("Upload JPG/PNG File") { showDamageFileImporter = true }
-            Button("Cancel", role: .cancel) {}
-        }
+        // Damage image options dialog moved to button level for correct anchor positioning
         .sheet(isPresented: $showDamageCamera) {
             ImagePicker(sourceType: .camera) { img in damageImages.append(img) }
         }
