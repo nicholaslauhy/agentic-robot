@@ -20,6 +20,7 @@ struct FuelRefuelView: View {
     @State private var odometer: String = ""
     @State private var usedMastercard: Bool? = nil
     @State private var mastercardNumber: String = ""
+    @FocusState private var isMastercardFieldFocused: Bool
 
     // Vehicle picker (reuse same groups)
     @State private var selectedGroup: VehicleGroup? = nil
@@ -31,7 +32,6 @@ struct FuelRefuelView: View {
 
     // Fuel receipt
     @State private var receiptImage: UIImage? = nil
-    @State private var showReceiptOptions = false
     @State private var showReceiptCamera = false
     @State private var showReceiptPicker = false
     @State private var showReceiptFileImporter = false
@@ -148,9 +148,11 @@ struct FuelRefuelView: View {
                         if usedMastercard == true {
                             Divider()
                             formRow(label: "Mastercard Number") {
-                                TextField("16-digit card number", text: $mastercardNumber)
+                                TextField("1234 5678 9012 3456", text: $mastercardNumber)
                                     .keyboardType(.numberPad)
+                                    .textContentType(.creditCardNumber)
                                     .multilineTextAlignment(.trailing)
+                                    .focused($isMastercardFieldFocused)
                             }
                         }
                     }
@@ -174,8 +176,24 @@ struct FuelRefuelView: View {
                                 }
                             }
                         } else {
-                            Button {
-                                showReceiptOptions = true
+                            Menu {
+                                Button {
+                                    showReceiptCamera = true
+                                } label: {
+                                    Label("Take Photo", systemImage: "camera.fill")
+                                }
+
+                                Button {
+                                    showReceiptPicker = true
+                                } label: {
+                                    Label("Choose from Library", systemImage: "photo.on.rectangle")
+                                }
+
+                                Button {
+                                    showReceiptFileImporter = true
+                                } label: {
+                                    Label("Upload JPG/PNG File", systemImage: "doc.badge.plus")
+                                }
                             } label: {
                                 HStack {
                                     Image(systemName: "plus.circle.fill")
@@ -240,12 +258,6 @@ struct FuelRefuelView: View {
             )
         }
         // Receipt image options
-        .confirmationDialog("Attach Receipt", isPresented: $showReceiptOptions, titleVisibility: .visible) {
-            Button("Take Photo")            { showReceiptCamera = true }
-            Button("Choose from Library")   { showReceiptPicker = true }
-            Button("Upload JPG/PNG File")   { showReceiptFileImporter = true }
-            Button("Cancel", role: .cancel) {}
-        }
         .sheet(isPresented: $showReceiptCamera) {
             ImagePicker(sourceType: .camera) { img in receiptImage = img }
         }
@@ -281,8 +293,14 @@ struct FuelRefuelView: View {
         }
         .onChange(of: mastercardNumber) { _, newValue in
             let digitsOnly = String(newValue.filter { $0.isNumber }.prefix(16))
-            if digitsOnly != newValue {
-                mastercardNumber = digitsOnly
+            let formatted = formatMastercardNumber(digitsOnly)
+
+            if mastercardNumber != formatted {
+                mastercardNumber = formatted
+            }
+
+            if digitsOnly.count == 16 {
+                isMastercardFieldFocused = false
             }
         }
         .sheet(isPresented: $showReviewSheet) {
@@ -364,6 +382,23 @@ struct FuelRefuelView: View {
 
     private var cleanOdometer: String {
         odometer.filter { $0.isNumber }
+    }
+
+    private func formatMastercardNumber(_ digits: String) -> String {
+        let limitedDigits = String(digits.filter { $0.isNumber }.prefix(16))
+
+        return stride(from: 0, to: limitedDigits.count, by: 4)
+            .map { index in
+                let start = limitedDigits.index(limitedDigits.startIndex, offsetBy: index)
+                let end = limitedDigits.index(
+                    start,
+                    offsetBy: min(4, limitedDigits.distance(from: start, to: limitedDigits.endIndex)),
+                    limitedBy: limitedDigits.endIndex
+                ) ?? limitedDigits.endIndex
+
+                return String(limitedDigits[start..<end])
+            }
+            .joined(separator: " ")
     }
 
     private func validateAndShowReview() {
