@@ -26,6 +26,62 @@ struct ConfirmBaselineRegion: Codable {
     let x2: Int
     let y2: Int
     let label: String
+    let imageWidth: Int?   // original image width when this region was saved
+    let imageHeight: Int?  // original image height when this region was saved
+
+    // Visual reference used by the backend to re-find this exact physical
+    // region in future photos. This avoids hardcoded/stale coordinates.
+    let referenceCropBase64: String?
+    let templateX1: Int?
+    let templateY1: Int?
+    let templateX2: Int?
+    let templateY2: Int?
+
+    func rescaled(to image: UIImage?) -> ConfirmBaselineRegion {
+        guard let image else { return self }
+        let normalized = image.htxNormalizedImage()
+        let targetWidth = max(1, Int(normalized.size.width.rounded()))
+        let targetHeight = max(1, Int(normalized.size.height.rounded()))
+
+        guard let savedWidth = imageWidth,
+              let savedHeight = imageHeight,
+              savedWidth > 0,
+              savedHeight > 0,
+              (savedWidth != targetWidth || savedHeight != targetHeight) else {
+            return ConfirmBaselineRegion(
+                x1: min(max(0, x1), targetWidth),
+                y1: min(max(0, y1), targetHeight),
+                x2: min(max(0, x2), targetWidth),
+                y2: min(max(0, y2), targetHeight),
+                label: label,
+                imageWidth: imageWidth ?? targetWidth,
+                imageHeight: imageHeight ?? targetHeight,
+                referenceCropBase64: referenceCropBase64,
+                templateX1: templateX1,
+                templateY1: templateY1,
+                templateX2: templateX2,
+                templateY2: templateY2
+            )
+        }
+
+        let scaleX = Double(targetWidth) / Double(savedWidth)
+        let scaleY = Double(targetHeight) / Double(savedHeight)
+
+        return ConfirmBaselineRegion(
+            x1: min(max(0, Int((Double(x1) * scaleX).rounded())), targetWidth),
+            y1: min(max(0, Int((Double(y1) * scaleY).rounded())), targetHeight),
+            x2: min(max(0, Int((Double(x2) * scaleX).rounded())), targetWidth),
+            y2: min(max(0, Int((Double(y2) * scaleY).rounded())), targetHeight),
+            label: label,
+            imageWidth: targetWidth,
+            imageHeight: targetHeight,
+            referenceCropBase64: referenceCropBase64,
+            templateX1: templateX1,
+            templateY1: templateY1,
+            templateX2: templateX2,
+            templateY2: templateY2
+        )
+    }
 }
 
 struct ConfirmBaselineBatchAngle: Codable {
@@ -49,6 +105,13 @@ struct BaselineRegion: Codable {
     let x2: Int?
     let y2: Int?
     let label: String?
+    let imageWidth: Int?
+    let imageHeight: Int?
+    let referenceCropBase64: String?
+    let templateX1: Int?
+    let templateY1: Int?
+    let templateX2: Int?
+    let templateY2: Int?
 }
 
 
@@ -266,7 +329,7 @@ struct DamageDetection: Codable, Identifiable {
 
 
 
-private extension UIImage {
+extension UIImage {
     func htxNormalizedImage() -> UIImage {
         if imageOrientation == .up { return self }
         let renderer = UIGraphicsImageRenderer(size: size)
@@ -303,6 +366,56 @@ private extension UIImage {
         return UIImage(cgImage: cgImage, scale: scale, orientation: .up)
             .jpegData(compressionQuality: 0.75)?
             .base64EncodedString() ?? ""
+    }
+
+    func htxReferenceTemplateBase64(region: ConfirmBaselineRegion) -> (base64: String, templateX1: Int, templateY1: Int, templateX2: Int, templateY2: Int)? {
+        let normalized = htxNormalizedImage()
+        let scale = normalized.scale
+        let imageSize = normalized.size
+        let imageRect = CGRect(origin: .zero, size: imageSize)
+
+        let damageRect = CGRect(
+            x: max(0, CGFloat(region.x1)),
+            y: max(0, CGFloat(region.y1)),
+            width: max(1, CGFloat(region.x2 - region.x1)),
+            height: max(1, CGFloat(region.y2 - region.y1))
+        ).intersection(imageRect)
+
+        guard damageRect.width > 0, damageRect.height > 0 else { return nil }
+
+        // Save context around the damage, not only the tiny box. This gives the
+        // backend more pixels/features to match when future photos are nearer,
+        // further, or taken in a different environment.
+        let padX = max(damageRect.width * 1.25, imageSize.width * 0.035, 40)
+        let padY = max(damageRect.height * 1.25, imageSize.height * 0.035, 40)
+
+        let templateRect = damageRect.insetBy(dx: -padX, dy: -padY).intersection(imageRect)
+        guard templateRect.width > 8, templateRect.height > 8 else { return nil }
+
+        let cropRectInPixels = CGRect(
+            x: templateRect.minX * scale,
+            y: templateRect.minY * scale,
+            width: templateRect.width * scale,
+            height: templateRect.height * scale
+        )
+
+        guard let cgImage = normalized.cgImage?.cropping(to: cropRectInPixels) else { return nil }
+
+        let templateImage = UIImage(cgImage: cgImage, scale: scale, orientation: .up)
+        guard let data = templateImage.jpegData(compressionQuality: 0.82) else { return nil }
+
+        let tx1 = Int((damageRect.minX - templateRect.minX).rounded())
+        let ty1 = Int((damageRect.minY - templateRect.minY).rounded())
+        let tx2 = Int((damageRect.maxX - templateRect.minX).rounded())
+        let ty2 = Int((damageRect.maxY - templateRect.minY).rounded())
+
+        return (
+            data.base64EncodedString(),
+            max(0, tx1),
+            max(0, ty1),
+            max(1, tx2),
+            max(1, ty2)
+        )
     }
 
     func htxContextBase64(region: ConfirmBaselineRegion) -> String {
@@ -364,7 +477,8 @@ final class DamageAnalysisService {
                 )
                 let filteredNew = filterDetections(
                     compared.results,
-                    excluding: localBaseline
+                    excluding: localBaseline,
+                    images: images
                 )
                 return filteredNew + localExisting
             }
@@ -381,7 +495,8 @@ final class DamageAnalysisService {
                 )
                 let filteredNew = filterDetections(
                     normalResults,
-                    excluding: localBaseline
+                    excluding: localBaseline,
+                    images: images
                 )
                 return filteredNew + localExisting
             }
@@ -393,7 +508,8 @@ final class DamageAnalysisService {
 
     private func filterDetections(
         _ detections: [DamageDetection],
-        excluding baselineAngles: [ConfirmBaselineBatchAngle]
+        excluding baselineAngles: [ConfirmBaselineBatchAngle],
+        images: [UIImage] = []
     ) -> [DamageDetection] {
         detections.filter { detection in
             guard let dx1 = detection.x1,
@@ -403,10 +519,15 @@ final class DamageAnalysisService {
                 return true
             }
 
+            let currentImage = (detection.angleIndex >= 0 && detection.angleIndex < images.count)
+                ? images[detection.angleIndex]
+                : nil
+
             let overlapsExisting = baselineAngles.contains { angle in
                 guard angle.angle_index == detection.angleIndex else { return false }
-                return angle.regions.contains { region in
-                    Self.iou(
+                return angle.regions.contains { storedRegion in
+                    let region = storedRegion.rescaled(to: currentImage)
+                    return Self.iou(
                         ax1: dx1, ay1: dy1, ax2: dx2, ay2: dy2,
                         bx1: region.x1, by1: region.y1, bx2: region.x2, by2: region.y2
                     ) >= 0.40
@@ -422,10 +543,11 @@ final class DamageAnalysisService {
         images: [UIImage]
     ) -> [DamageDetection] {
         baselineAngles.flatMap { angle in
-            angle.regions.map { region in
+            angle.regions.map { storedRegion in
                 let image = (angle.angle_index >= 0 && angle.angle_index < images.count)
                     ? images[angle.angle_index].htxNormalizedImage()
                     : nil
+                let region = storedRegion.rescaled(to: image)
 
                 let cropBase64 = image?.htxCropBase64(region: region) ?? ""
                 let contextBase64 = image?.htxContextBase64(region: region) ?? cropBase64
@@ -444,6 +566,8 @@ final class DamageAnalysisService {
                     y1: region.y1,
                     x2: region.x2,
                     y2: region.y2,
+                    imageWidth: region.imageWidth,
+                    imageHeight: region.imageHeight,
                     explanation: "Pre-existing benchmark damage saved from a previous report."
                 )
             }

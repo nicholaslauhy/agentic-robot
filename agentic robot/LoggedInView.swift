@@ -36,6 +36,11 @@ struct LoggedInView: View {
     @State private var isSubmitting = false
     @State private var showButtons = false
     @State private var localErrorMessage: String? = nil
+    @State private var anprUploadTask: URLSessionUploadTask? = nil
+
+    private let anprServerURLString = "http://192.168.86.239:8000/detect"
+    private let anprRequestTimeout: TimeInterval = 15
+    private let anprResourceTimeout: TimeInterval = 20
 
     /// Which input mode is selected
     @State private var inputMode: InputMode = .licencePlate
@@ -48,35 +53,83 @@ struct LoggedInView: View {
     private let fullText =
         "Okay, I need to identify the vehicle. Scan the IU barcode or photograph the licence plate."
 
-    // MARK: - ANPR API Call (unchanged)
+    // MARK: - ANPR API Call
     func sendToANPRServer(image: UIImage) {
-        guard let url = URL(string: "http://192.168.86.239:8000/detect") else { return }
+        anprUploadTask?.cancel()
 
-        var request = URLRequest(url: url)
+        guard let url = URL(string: anprServerURLString) else {
+            isSubmitting = false
+            localErrorMessage = "Invalid licence plate server URL. Please check the IP address in LoggedInView.swift."
+            return
+        }
+
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            isSubmitting = false
+            localErrorMessage = "Could not prepare this image for licence plate detection. Please try another photo."
+            return
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: anprRequestTimeout)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
 
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)",
                          forHTTPHeaderField: "Content-Type")
 
         var body = Data()
-        let imageData = image.jpegData(compressionQuality: 0.8)!
-
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"\r\n".data(using: .utf8)!)
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
-        URLSession.shared.uploadTask(with: request, from: body) { data, _, error in
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = anprRequestTimeout
+        configuration.timeoutIntervalForResource = anprResourceTimeout
+        configuration.waitsForConnectivity = false
 
-            guard let data = data,
-                  let response = try? JSONDecoder().decode([String: String].self, from: data),
-                  let rawPlate = response["plate"] else {
+        let session = URLSession(configuration: configuration)
 
+        let task = session.uploadTask(with: request, from: body) { data, urlResponse, error in
+            defer {
+                session.invalidateAndCancel()
+                DispatchQueue.main.async {
+                    self.anprUploadTask = nil
+                }
+            }
+
+            if let error = error {
                 DispatchQueue.main.async {
                     self.isSubmitting = false
-                    self.localErrorMessage = "Could not reach the server. Please try again."
+                    self.localErrorMessage = self.anprErrorMessage(for: error)
+                }
+                return
+            }
+
+            if let httpResponse = urlResponse as? HTTPURLResponse,
+               !(200...299).contains(httpResponse.statusCode) {
+                DispatchQueue.main.async {
+                    self.isSubmitting = false
+                    self.localErrorMessage = "Licence plate server responded with HTTP \(httpResponse.statusCode). Please check that the correct backend is running at \(self.anprServerURLString)."
+                }
+                return
+            }
+
+            guard let data = data, !data.isEmpty else {
+                DispatchQueue.main.async {
+                    self.isSubmitting = false
+                    self.localErrorMessage = "Licence plate server returned an empty response. Please try again."
+                }
+                return
+            }
+
+            guard let response = try? JSONDecoder().decode([String: String].self, from: data),
+                  let rawPlate = response["plate"] else {
+                let rawText = String(data: data, encoding: .utf8) ?? "unreadable response"
+                DispatchQueue.main.async {
+                    self.isSubmitting = false
+                    self.localErrorMessage = "Licence plate server returned an invalid response: \(rawText.prefix(120))."
                 }
                 return
             }
@@ -94,18 +147,37 @@ struct LoggedInView: View {
             let plate: String
             if trimmed.contains("text='") {
                 let components = trimmed.components(separatedBy: "text='")
-                plate = components[1].components(separatedBy: "'").first ?? trimmed
+                plate = components.dropFirst().first?.components(separatedBy: "'").first ?? trimmed
             } else {
                 plate = trimmed
             }
 
             DispatchQueue.main.async {
                 self.isSubmitting = false
-                self.plateResult = plate
+                self.plateResult = plate.uppercased()
                 self.navigateToResultPage = true
             }
+        }
 
-        }.resume()
+        anprUploadTask = task
+        task.resume()
+    }
+
+    private func anprErrorMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return "Licence plate detection took too long and timed out. Please check that the ANPR backend is running and try again."
+            case .cannotConnectToHost, .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .dnsLookupFailed:
+                return "Could not reach the licence plate server at \(anprServerURLString). Please check your Wi-Fi, backend server, and IP address."
+            case .cancelled:
+                return "Licence plate detection was cancelled. Please try again."
+            default:
+                return "Licence plate detection failed: \(urlError.localizedDescription). Please check that the backend server and IP address are correct."
+            }
+        }
+
+        return "Licence plate detection failed: \(error.localizedDescription). Please try again."
     }
 
     // MARK: - IU Barcode Firestore Lookup
@@ -620,6 +692,9 @@ struct LoggedInView: View {
 
             HStack(spacing: 10) {
                 Button {
+                    self.anprUploadTask?.cancel()
+                    self.anprUploadTask = nil
+                    self.isSubmitting = false
                     self.selectedImage = nil
                     self.localErrorMessage = nil
                 } label: {
@@ -637,6 +712,7 @@ struct LoggedInView: View {
 
                 Button {
                     guard !isSubmitting else { return }
+                    localErrorMessage = nil
                     isSubmitting = true
                     sendToANPRServer(image: image)
                 } label: {

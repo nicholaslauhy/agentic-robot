@@ -120,8 +120,13 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         // divide by the displayed UIImage size. Use backend imageWidth/imageHeight
         // when available, then fall back to the image size for manually-created cases.
         if let x1 = detection.x1, let y1 = detection.y1, let x2 = detection.x2, let y2 = detection.y2 {
-            let sourceWidth = CGFloat(detection.imageWidth ?? Int((detection.cleanContextImage ?? detection.contextImage)?.size.width ?? 0))
-            let sourceHeight = CGFloat(detection.imageHeight ?? Int((detection.cleanContextImage ?? detection.contextImage)?.size.height ?? 0))
+            // Prefer the backend-reported image dimensions (pixel-exact).
+            // Fall back to the actual pixel size of the context image — this
+            // handles baseline detections that pre-date the imageWidth/imageHeight
+            // fields, and local-cache items where those fields may be nil.
+            let fallbackImage = detection.cleanContextImage ?? detection.contextImage
+            let sourceWidth  = CGFloat(detection.imageWidth  ?? Int(fallbackImage?.size.width  ?? 0))
+            let sourceHeight = CGFloat(detection.imageHeight ?? Int(fallbackImage?.size.height ?? 0))
 
             if sourceWidth > 0, sourceHeight > 0 {
                 let nx1 = max(0, min(1, CGFloat(x1) / sourceWidth))
@@ -140,6 +145,8 @@ class MutableDamageDetection: ObservableObject, Identifiable {
                     self.normalizedBBox = nil
                 }
             } else {
+                // Last resort: we have pixel coords but no image size at all.
+                // Store nil — the box simply won't be drawn rather than crashing.
                 self.normalizedBBox = nil
             }
         } else {
@@ -3627,12 +3634,45 @@ struct PoliceReportStageTwoView: View {
         if let x1 = detection.x1, let y1 = detection.y1,
            let x2 = detection.x2, let y2 = detection.y2,
            x2 > x1, y2 > y1 {
+            let sourceImage: UIImage? = {
+                guard detection.angleIndex >= 0, detection.angleIndex < scanImages.count else {
+                    return detection.cleanContextImage ?? detection.contextImage ?? detection.cropImage
+                }
+                return scanImages[detection.angleIndex]
+            }()
+
+            let baseRegion = ConfirmBaselineRegion(
+                x1: x1,
+                y1: y1,
+                x2: x2,
+                y2: y2,
+                label: detection.damageType,
+                imageWidth: detection.imageWidth,
+                imageHeight: detection.imageHeight,
+                referenceCropBase64: nil,
+                templateX1: nil,
+                templateY1: nil,
+                templateX2: nil,
+                templateY2: nil
+            )
+
+            guard let template = sourceImage?.htxReferenceTemplateBase64(region: baseRegion) else {
+                return baseRegion
+            }
+
             return ConfirmBaselineRegion(
                 x1: x1,
                 y1: y1,
                 x2: x2,
                 y2: y2,
-                label: detection.damageType
+                label: detection.damageType,
+                imageWidth: detection.imageWidth,
+                imageHeight: detection.imageHeight,
+                referenceCropBase64: template.base64,
+                templateX1: template.templateX1,
+                templateY1: template.templateY1,
+                templateX2: template.templateX2,
+                templateY2: template.templateY2
             )
         }
 
@@ -3658,12 +3698,38 @@ struct PoliceReportStageTwoView: View {
 
         guard x2 > x1, y2 > y1 else { return nil }
 
+        let baseRegion = ConfirmBaselineRegion(
+            x1: x1,
+            y1: y1,
+            x2: x2,
+            y2: y2,
+            label: detection.damageType,
+            imageWidth: Int(width),
+            imageHeight: Int(height),
+            referenceCropBase64: nil,
+            templateX1: nil,
+            templateY1: nil,
+            templateX2: nil,
+            templateY2: nil
+        )
+
+        guard let template = normalized.htxReferenceTemplateBase64(region: baseRegion) else {
+            return baseRegion
+        }
+
         return ConfirmBaselineRegion(
             x1: x1,
             y1: y1,
             x2: x2,
             y2: y2,
-            label: detection.damageType
+            label: detection.damageType,
+            imageWidth: Int(width),
+            imageHeight: Int(height),
+            referenceCropBase64: template.base64,
+            templateX1: template.templateX1,
+            templateY1: template.templateY1,
+            templateX2: template.templateX2,
+            templateY2: template.templateY2
         )
     }
 
