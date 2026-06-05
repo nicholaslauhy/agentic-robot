@@ -19,18 +19,26 @@ struct GeminiAngleService {
         "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent"
 
     // ── Retry configuration ────────────────────────────────────────────────
-    // 3 attempts total, backoff: 0s → 1.5s → 3s = max ~4.5s extra wait
-    // Combined with a 20s per-attempt timeout, worst case ≈ 20+1.5+20+3+20 = ~64s
-    // but in practice 503s resolve after the first retry delay.
     private static let maxRetries = 3
-    private static let retryDelays: [Double] = [0, 1.5, 3.0] // seconds before each attempt
+    private static let retryDelays: [Double] = [0, 1.5, 3.0]
     // ──────────────────────────────────────────────────────────────────────
 
+    // MARK: - App slot names (what the UI shows)
+    // Left  = the LEFT SIDE slot  → camera stands on the LEFT  of the car → car's RIGHT side faces camera
+    // Right = the RIGHT SIDE slot → camera stands on the RIGHT of the car → car's LEFT  side faces camera
+    //
+    // In plain English:
+    //   "Left Side"  photo: you walk to the LEFT of the car and shoot across. BMW badge on right of frame.
+    //   "Right Side" photo: you walk to the RIGHT of the car and shoot across. BMW badge on left of frame.
+    //
+    // We tell Gemini EXACTLY what physical orientation to expect for each slot.
+    // No swapping, no mapping — Gemini's answer is used directly.
+
     enum DetectedAngle: String {
-        case front = "Front"
-        case rear  = "Rear"
-        case left  = "Left"
-        case right = "Right"
+        case front   = "Front"
+        case rear    = "Rear"
+        case left    = "Left"
+        case right   = "Right"
         case unknown = "Unknown"
     }
 
@@ -54,16 +62,15 @@ struct GeminiAngleService {
         let rawText: String
 
         var isAccepted: Bool {
-            matchesExpectedAngle && confidence >= 0.40 && detectedAngle != .unknown
+            matchesExpectedAngle && confidence >= 0.50 && detectedAngle != .unknown
         }
 
         var debugSummary: String {
-            "Expected=\(expectedAngle.rawValue), Detected=\(detectedAngle.rawValue), Match=\(matchesExpectedAngle), Confidence=\(confidence), Reason=\(reason), Raw=\(rawText)"
+            "Expected=\(expectedAngle.rawValue), Detected=\(detectedAngle.rawValue), Match=\(matchesExpectedAngle), Confidence=\(confidence), Reason=\(reason)"
         }
     }
 
     private struct ModelAngleResponse: Decodable {
-        let angle: String?
         let detectedAngle: String?
         let matchesExpectedAngle: Bool?
         let confidence: Double?
@@ -79,7 +86,8 @@ struct GeminiAngleService {
         print("========================================\n")
     }
 
-    /// Backwards-compatible simple API.
+    // MARK: - Public API
+
     static func detectAngle(
         image: UIImage,
         completion: @escaping (DetectedAngle) -> Void
@@ -89,7 +97,6 @@ struct GeminiAngleService {
         }
     }
 
-    /// General classifier. Prefer validateExpectedAngle(image:expectedAngle:) for upload validation.
     static func detectAngleDetailed(
         image: UIImage,
         completion: @escaping (AngleDetectionResult) -> Void
@@ -102,7 +109,6 @@ struct GeminiAngleService {
         }
     }
 
-    /// Best API for the app flow.
     static func validateExpectedAngle(
         image: UIImage,
         expectedAngle: DetectedAngle,
@@ -126,16 +132,11 @@ struct GeminiAngleService {
 
         let base64 = jpeg.base64EncodedString()
         let prompt = buildPrompt(expectedAngle: expectedAngle)
-        debugLog("Sending angle request. Model: \(modelName). Expected slot: \(expectedAngle?.rawValue ?? "None")")
+        debugLog("Sending angle request. Expected slot: \(expectedAngle?.rawValue ?? "None")\nPrompt:\n\(prompt)")
 
-        attemptRequest(base64: base64,
-                       prompt: prompt,
-                       expectedAngle: expectedAngle,
-                       attempt: 0,
-                       completion: completion)
+        attemptRequest(base64: base64, prompt: prompt, expectedAngle: expectedAngle, attempt: 0, completion: completion)
     }
 
-    /// Recursive retry with delay. Retries only on 503 (UNAVAILABLE) responses.
     private static func attemptRequest(
         base64: String,
         prompt: String,
@@ -147,16 +148,14 @@ struct GeminiAngleService {
 
         let execute = {
             guard let request = buildURLRequest(base64: base64, prompt: prompt) else {
-                completion(failureResult(expectedAngle: expectedAngle, reason: "Could not build Gemini request."))
+                completion(failureResult(expectedAngle: expectedAngle, reason: "Could not build request."))
                 return
             }
 
             URLSession.shared.dataTask(with: request) { data, response, error in
-                // Network-level error — no retry (likely a timeout or connectivity issue)
                 if let error = error {
                     DispatchQueue.main.async {
-                        completion(failureResult(expectedAngle: expectedAngle,
-                                                 reason: error.localizedDescription))
+                        completion(failureResult(expectedAngle: expectedAngle, reason: error.localizedDescription))
                     }
                     return
                 }
@@ -168,34 +167,25 @@ struct GeminiAngleService {
                     return
                 }
 
-                // Check for a retryable 503 error in the JSON body
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let errorObj = json["error"] as? [String: Any],
                    let code = errorObj["code"] as? Int,
                    code == 503 {
-
                     let nextAttempt = attempt + 1
                     if nextAttempt < maxRetries {
-                        debugLog("Attempt \(attempt + 1)/\(maxRetries) got 503. Retrying in \(retryDelays[min(nextAttempt, retryDelays.count - 1)])s…")
-                        attemptRequest(base64: base64,
-                                       prompt: prompt,
-                                       expectedAngle: expectedAngle,
-                                       attempt: nextAttempt,
-                                       completion: completion)
+                        debugLog("503 on attempt \(attempt + 1). Retrying in \(retryDelays[min(nextAttempt, retryDelays.count - 1)])s…")
+                        attemptRequest(base64: base64, prompt: prompt, expectedAngle: expectedAngle,
+                                       attempt: nextAttempt, completion: completion)
                     } else {
-                        let raw = String(data: data, encoding: .utf8) ?? ""
-                        debugLog("All \(maxRetries) attempts exhausted. Last error:\n\(raw)")
                         DispatchQueue.main.async {
                             completion(failureResult(expectedAngle: expectedAngle,
-                                                     reason: "Gemini is temporarily unavailable. Please try again shortly."))
+                                                     reason: "Gemini is temporarily unavailable. Please try again."))
                         }
                     }
                     return
                 }
 
-                // Normal parse path
                 handleResponse(data: data, expectedAngle: expectedAngle, completion: completion)
-
             }.resume()
         }
 
@@ -212,17 +202,12 @@ struct GeminiAngleService {
         let body: [String: Any] = [
             "contents": [[
                 "parts": [
-                    [
-                        "inline_data": [
-                            "mime_type": "image/jpeg",
-                            "data": base64
-                        ]
-                    ],
+                    ["inline_data": ["mime_type": "image/jpeg", "data": base64]],
                     ["text": prompt]
                 ]
             ]],
             "generationConfig": [
-                "maxOutputTokens": 2048,
+                "maxOutputTokens": 256,
                 "temperature": 0.0,
                 "topP": 0.1,
                 "topK": 1
@@ -239,11 +224,11 @@ struct GeminiAngleService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = bodyData
-        request.timeoutInterval = 20   // Shorter per-attempt timeout (was 40s)
+        request.timeoutInterval = 20
         return request
     }
 
-    // MARK: - Response parsing
+    // MARK: - Response handling
 
     private static func handleResponse(
         data: Data,
@@ -257,33 +242,27 @@ struct GeminiAngleService {
             let parts = content["parts"] as? [[String: Any]]
         else {
             let raw = String(data: data, encoding: .utf8) ?? ""
-            debugLog("Gemini returned unusable response:\n\(raw)")
+            debugLog("Unusable response:\n\(raw)")
             DispatchQueue.main.async {
-                completion(failureResult(expectedAngle: expectedAngle,
-                                         reason: "Gemini did not return a usable response."))
+                completion(failureResult(expectedAngle: expectedAngle, reason: "Gemini did not return a usable response."))
             }
             return
         }
 
-        let finishReason = candidates.first?["finishReason"] as? String ?? "unknown"
         let text = parts
             .compactMap { $0["text"] as? String }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !text.isEmpty else {
-            let raw = String(data: data, encoding: .utf8) ?? ""
-            debugLog("Gemini returned parts but no text:\n\(raw)")
             DispatchQueue.main.async {
-                completion(failureResult(expectedAngle: expectedAngle,
-                                         reason: "Gemini returned an empty text response."))
+                completion(failureResult(expectedAngle: expectedAngle, reason: "Gemini returned an empty response."))
             }
             return
         }
 
         let result = parseValidationResponse(from: text, expectedAngle: expectedAngle)
-        let fullRawResponse = String(data: data, encoding: .utf8) ?? ""
-        debugLog("Finish reason: \(finishReason)\nRaw Gemini text:\n\(text)\n\nParsed result:\n\(result.debugSummary)\n\nFull API response:\n\(fullRawResponse)")
+        debugLog("Raw Gemini text:\n\(text)\n\nParsed: \(result.debugSummary)")
         DispatchQueue.main.async { completion(result) }
     }
 
@@ -297,42 +276,84 @@ struct GeminiAngleService {
     }
 
     // MARK: - Prompt
+    //
+    // Rule: bonnet on LEFT side of image = "Left" slot. Bonnet on RIGHT = "Right" slot.
+    // No driver-side / vehicle-side reasoning. Pure image-frame position of the bonnet.
 
     private static func buildPrompt(expectedAngle: DetectedAngle?) -> String {
-        let expectedLine: String
-        if let expectedAngle, expectedAngle != .unknown {
-            expectedLine = "Expected upload slot: \(expectedAngle.rawValue). Decide whether the image is valid for this expected slot."
-        } else {
-            expectedLine = "No expected slot was provided. Classify the uploaded car photo."
-        }
 
-        return """
-        You are validating a car inspection photo. Look only at the main car.
+        let coreRule = """
+        You are inspecting a car photo. Your only job is to classify which angle was captured.
 
-        \(expectedLine)
+        HOW TO CLASSIFY SIDE SHOTS — one simple rule:
+        Look at the bonnet (the front hood of the car).
+        • If the bonnet is on the LEFT side of the image  → classify as "Left"
+        • If the bonnet is on the RIGHT side of the image → classify as "Right"
 
-        Classify the visible view as exactly one of:
-        Front, Rear, Left, Right, Unknown.
+        HOW TO CLASSIFY FRONT / REAR:
+        • You can see the headlights and grille straight-on → classify as "Front"
+        • You can see the tail-lights and boot straight-on  → classify as "Rear"
 
-        App convention:
-        Front = front grille/headlights/bonnet view.
-        Rear = rear boot/tail lights view.
-        Left = the app's Left Side slot.
-        Right = the app's Right Side slot.
-
-        Important side rule:
-        The app's side convention is opposite of the vehicle's physical left/right.
-        So if normal vehicle-side reasoning says Right, the app wants Left.
-        If normal vehicle-side reasoning says Left, the app wants Right.
-
-        Be lenient. Slight diagonal/3-quarter views are okay.
-        Never include Markdown fences or explanations.
-        Return only this JSON, one line:
-        {"detectedAngle":"Front","matchesExpectedAngle":true,"confidence":0.9,"reason":"front view"}
+        Do NOT think about which side of the car the driver sits on.
+        Do NOT think about physical left/right of the vehicle.
+        ONLY look at where the bonnet appears in the image frame.
         """
+
+        if let expectedAngle, expectedAngle != .unknown {
+
+            let check: String
+            switch expectedAngle {
+            case .left:
+                check = """
+                EXPECTED SLOT: "Left"
+                ACCEPT this photo only if the bonnet is clearly on the LEFT side of the image.
+                REJECT if the bonnet is on the right side, or if this is a front/rear shot.
+                """
+            case .right:
+                check = """
+                EXPECTED SLOT: "Right"
+                ACCEPT this photo only if the bonnet is clearly on the RIGHT side of the image.
+                REJECT if the bonnet is on the left side, or if this is a front/rear shot.
+                """
+            case .front:
+                check = """
+                EXPECTED SLOT: "Front"
+                ACCEPT this photo only if it shows the front grille and headlights straight-on.
+                REJECT if it is a side shot or rear shot.
+                """
+            case .rear:
+                check = """
+                EXPECTED SLOT: "Rear"
+                ACCEPT this photo only if it shows the rear boot and tail-lights straight-on.
+                REJECT if it is a side shot or front shot.
+                """
+            case .unknown:
+                check = ""
+            }
+
+            return """
+            \(coreRule)
+
+            \(check)
+
+            Respond with ONLY this JSON on a single line, no markdown, no explanation:
+            {"detectedAngle":"Left","matchesExpectedAngle":true,"confidence":0.95,"reason":"bonnet is on the left side of the image"}
+            """
+        } else {
+            return """
+            \(coreRule)
+
+            Classify this image into exactly one of: Front, Rear, Left, Right, Unknown.
+
+            Respond with ONLY this JSON on a single line, no markdown, no explanation:
+            {"detectedAngle":"Left","matchesExpectedAngle":true,"confidence":0.95,"reason":"bonnet is on the left side of the image"}
+            """
+        }
     }
 
     // MARK: - JSON parsing
+    //
+    // NO angle mapping/swapping here. Gemini's detectedAngle is the app slot name directly.
 
     private static func parseValidationResponse(
         from text: String,
@@ -343,39 +364,52 @@ struct GeminiAngleService {
 
         if let jsonData = jsonText.data(using: .utf8),
            let decoded = try? JSONDecoder().decode(ModelAngleResponse.self, from: jsonData) {
-            let geminiDetected = parseDetectedAngle(from: decoded.detectedAngle ?? decoded.angle ?? "")
-            let detected = mapGeminiAngleToAppAngle(geminiDetected)
+
+            let detected = parseDetectedAngle(from: decoded.detectedAngle ?? "")
             let reason = decoded.reason ?? ""
-
-            let directMatch = expected != .unknown && detected == expected
-            let modelSaidMatch = expected != .unknown && decoded.matchesExpectedAngle == true && detected != .unknown
-            let matches = directMatch || modelSaidMatch
-
             let rawConfidence = decoded.confidence ?? (detected == .unknown ? 0.0 : 0.60)
-            let adjustedConfidence = matches ? max(rawConfidence, 0.60) : rawConfidence
-            let confidence = min(max(adjustedConfidence, 0.0), 1.0)
+            let confidence = min(max(rawConfidence, 0.0), 1.0)
+
+            // Trust Gemini's matchesExpectedAngle, but also do our own direct check.
+            // Both must agree for acceptance — this prevents false positives.
+            let directMatch = expected != .unknown && detected == expected
+            let geminiSaysMatch = decoded.matchesExpectedAngle == true
+            // Accept only if BOTH the direct label match AND Gemini's own verdict agree.
+            // This catches cases where Gemini's label and its verdict contradict each other.
+            let matches: Bool
+            if expected == .unknown {
+                matches = false
+            } else if directMatch && geminiSaysMatch {
+                matches = true   // both agree: accept
+            } else if !directMatch && !geminiSaysMatch {
+                matches = false  // both agree: reject
+            } else {
+                // They disagree — be conservative and reject
+                debugLog("⚠️ Conflict: directMatch=\(directMatch), geminiSaysMatch=\(geminiSaysMatch), detected=\(detected.rawValue), expected=\(expected.rawValue). Rejecting.")
+                matches = false
+            }
 
             return AngleValidationResult(expectedAngle: expected,
                                          detectedAngle: detected,
                                          matchesExpectedAngle: matches,
                                          confidence: confidence,
-                                         reason: appendSideMappingNote(reason, geminiDetected: geminiDetected, appDetected: detected),
+                                         reason: reason,
                                          rawText: text)
         }
 
-        let geminiDetected = parseDetectedAngle(from: text)
-        let detected = mapGeminiAngleToAppAngle(geminiDetected)
+        // Fallback: plain text parse
+        let detected = parseDetectedAngle(from: text)
         let confidence = detected == .unknown ? 0.0 : 0.60
         let matches = expected != .unknown && detected == expected
         return AngleValidationResult(expectedAngle: expected,
                                      detectedAngle: detected,
                                      matchesExpectedAngle: matches,
                                      confidence: confidence,
-                                     reason: appendSideMappingNote("Recovered from partial Gemini JSON.",
-                                                                   geminiDetected: geminiDetected,
-                                                                   appDetected: detected),
+                                     reason: "Recovered from non-JSON response.",
                                      rawText: text)
     }
+
+    // MARK: - Helpers
 
     private static func extractJSONObject(from text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -420,24 +454,6 @@ struct GeminiAngleService {
             index = text.index(after: index)
         }
         return nil
-    }
-
-    private static func mapGeminiAngleToAppAngle(_ angle: DetectedAngle) -> DetectedAngle {
-        switch angle {
-        case .left:  return .right
-        case .right: return .left
-        default:     return angle
-        }
-    }
-
-    private static func appendSideMappingNote(
-        _ reason: String,
-        geminiDetected: DetectedAngle,
-        appDetected: DetectedAngle
-    ) -> String {
-        guard geminiDetected != appDetected else { return reason }
-        let base = reason.isEmpty ? "Side mapped to app convention." : reason
-        return "\(base) Gemini=\(geminiDetected.rawValue), App=\(appDetected.rawValue)."
     }
 
     private static func parseDetectedAngle(from text: String) -> DetectedAngle {
