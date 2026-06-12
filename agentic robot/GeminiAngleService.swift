@@ -277,26 +277,36 @@ struct GeminiAngleService {
 
     // MARK: - Prompt
     //
-    // Rule: bonnet on LEFT side of image = "Left" slot. Bonnet on RIGHT = "Right" slot.
-    // No driver-side / vehicle-side reasoning. Pure image-frame position of the bonnet.
+    // IMPORTANT:
+    // The app slot names are based on where the officer stands, not the vehicle's own left/right.
+    // Left slot  = officer stands on the left side of the vehicle; car front/bonnet appears on RIGHT of image.
+    // Right slot = officer stands on the right side of the vehicle; car front/bonnet appears on LEFT of image.
+    // This avoids Gemini flipping the labels using its own idea of vehicle left/right.
 
     private static func buildPrompt(expectedAngle: DetectedAngle?) -> String {
 
         let coreRule = """
-        You are inspecting a car photo. Your only job is to classify which angle was captured.
+        You are validating car inspection photos for an app with four fixed slots:
+        Front, Rear, Left, Right.
 
-        HOW TO CLASSIFY SIDE SHOTS — one simple rule:
-        Look at the bonnet (the front hood of the car).
-        • If the bonnet is on the LEFT side of the image  → classify as "Left"
-        • If the bonnet is on the RIGHT side of the image → classify as "Right"
+        VERY IMPORTANT SIDE-SHOT RULE:
+        The app's Left/Right labels are camera-position slots, NOT the physical left/right side of the car.
 
-        HOW TO CLASSIFY FRONT / REAR:
-        • You can see the headlights and grille straight-on → classify as "Front"
-        • You can see the tail-lights and boot straight-on  → classify as "Rear"
+        For SIDE photos:
+        • If the car front / bonnet / headlights are on the RIGHT side of the image, classify it as "Left".
+        • If the car front / bonnet / headlights are on the LEFT side of the image, classify it as "Right".
 
-        Do NOT think about which side of the car the driver sits on.
-        Do NOT think about physical left/right of the vehicle.
-        ONLY look at where the bonnet appears in the image frame.
+        Examples:
+        • Side view, front of car at image right  → "Left"
+        • Side view, front of car at image left   → "Right"
+
+        For FRONT / REAR photos:
+        • Headlights and grille straight-on → "Front"
+        • Tail-lights and boot straight-on  → "Rear"
+
+        Do NOT use driver side.
+        Do NOT use the car manufacturer's left/right side.
+        Do NOT mirror or reinterpret the app labels.
         """
 
         if let expectedAngle, expectedAngle != .unknown {
@@ -305,26 +315,26 @@ struct GeminiAngleService {
             switch expectedAngle {
             case .left:
                 check = """
-                EXPECTED SLOT: "Left"
-                ACCEPT this photo only if the bonnet is clearly on the LEFT side of the image.
-                REJECT if the bonnet is on the right side, or if this is a front/rear shot.
+                EXPECTED APP SLOT: "Left"
+                ACCEPT only if this is a side photo and the car front/bonnet/headlights are on the RIGHT side of the image.
+                REJECT if the car front/bonnet/headlights are on the LEFT side of the image, or if it is a front/rear shot.
                 """
             case .right:
                 check = """
-                EXPECTED SLOT: "Right"
-                ACCEPT this photo only if the bonnet is clearly on the RIGHT side of the image.
-                REJECT if the bonnet is on the left side, or if this is a front/rear shot.
+                EXPECTED APP SLOT: "Right"
+                ACCEPT only if this is a side photo and the car front/bonnet/headlights are on the LEFT side of the image.
+                REJECT if the car front/bonnet/headlights are on the RIGHT side of the image, or if it is a front/rear shot.
                 """
             case .front:
                 check = """
-                EXPECTED SLOT: "Front"
-                ACCEPT this photo only if it shows the front grille and headlights straight-on.
+                EXPECTED APP SLOT: "Front"
+                ACCEPT only if it shows the front grille/headlights straight-on.
                 REJECT if it is a side shot or rear shot.
                 """
             case .rear:
                 check = """
-                EXPECTED SLOT: "Rear"
-                ACCEPT this photo only if it shows the rear boot and tail-lights straight-on.
+                EXPECTED APP SLOT: "Rear"
+                ACCEPT only if it shows the rear boot/tail-lights straight-on.
                 REJECT if it is a side shot or front shot.
                 """
             case .unknown:
@@ -336,17 +346,20 @@ struct GeminiAngleService {
 
             \(check)
 
-            Respond with ONLY this JSON on a single line, no markdown, no explanation:
-            {"detectedAngle":"Left","matchesExpectedAngle":true,"confidence":0.95,"reason":"bonnet is on the left side of the image"}
+            Return JSON only, no markdown.
+            Include the app slot label in detectedAngle.
+            Schema:
+            {"detectedAngle":"Front|Rear|Left|Right|Unknown","matchesExpectedAngle":true,"confidence":0.95,"reason":"short reason mentioning whether the bonnet/front is on image left or image right for side shots"}
             """
         } else {
             return """
             \(coreRule)
 
-            Classify this image into exactly one of: Front, Rear, Left, Right, Unknown.
+            Classify this image into exactly one app slot: Front, Rear, Left, Right, Unknown.
 
-            Respond with ONLY this JSON on a single line, no markdown, no explanation:
-            {"detectedAngle":"Left","matchesExpectedAngle":true,"confidence":0.95,"reason":"bonnet is on the left side of the image"}
+            Return JSON only, no markdown.
+            Schema:
+            {"detectedAngle":"Front|Rear|Left|Right|Unknown","matchesExpectedAngle":false,"confidence":0.95,"reason":"short reason mentioning whether the bonnet/front is on image left or image right for side shots"}
             """
         }
     }
@@ -370,23 +383,25 @@ struct GeminiAngleService {
             let rawConfidence = decoded.confidence ?? (detected == .unknown ? 0.0 : 0.60)
             let confidence = min(max(rawConfidence, 0.0), 1.0)
 
-            // Trust Gemini's matchesExpectedAngle, but also do our own direct check.
-            // Both must agree for acceptance — this prevents false positives.
             let directMatch = expected != .unknown && detected == expected
             let geminiSaysMatch = decoded.matchesExpectedAngle == true
-            // Accept only if BOTH the direct label match AND Gemini's own verdict agree.
-            // This catches cases where Gemini's label and its verdict contradict each other.
+            let sideReasonMatch = sideSlotMatchesFromReason(reason: reason, rawText: text, expected: expected)
+
+            // Side slots are the flaky part: Gemini often labels a correct Right-slot photo as
+            // "Left" because the car front is on the left of the frame. For side shots, trust
+            // either the corrected app-slot label OR the reason text that states the bonnet/front
+            // is on the expected side of the IMAGE.
             let matches: Bool
             if expected == .unknown {
                 matches = false
-            } else if directMatch && geminiSaysMatch {
-                matches = true   // both agree: accept
-            } else if !directMatch && !geminiSaysMatch {
-                matches = false  // both agree: reject
+            } else if expected == .left || expected == .right {
+                matches = directMatch || geminiSaysMatch || sideReasonMatch
             } else {
-                // They disagree — be conservative and reject
-                debugLog("⚠️ Conflict: directMatch=\(directMatch), geminiSaysMatch=\(geminiSaysMatch), detected=\(detected.rawValue), expected=\(expected.rawValue). Rejecting.")
-                matches = false
+                matches = directMatch && geminiSaysMatch
+            }
+
+            if !matches {
+                debugLog("⚠️ Angle rejected: directMatch=\(directMatch), geminiSaysMatch=\(geminiSaysMatch), sideReasonMatch=\(sideReasonMatch), detected=\(detected.rawValue), expected=\(expected.rawValue).")
             }
 
             return AngleValidationResult(expectedAngle: expected,
@@ -400,7 +415,7 @@ struct GeminiAngleService {
         // Fallback: plain text parse
         let detected = parseDetectedAngle(from: text)
         let confidence = detected == .unknown ? 0.0 : 0.60
-        let matches = expected != .unknown && detected == expected
+        let matches = expected != .unknown && (detected == expected || sideSlotMatchesFromReason(reason: text, rawText: text, expected: expected))
         return AngleValidationResult(expectedAngle: expected,
                                      detectedAngle: detected,
                                      matchesExpectedAngle: matches,
@@ -454,6 +469,51 @@ struct GeminiAngleService {
             index = text.index(after: index)
         }
         return nil
+    }
+
+    private static func sideSlotMatchesFromReason(reason: String, rawText: String, expected: DetectedAngle) -> Bool {
+        guard expected == .left || expected == .right else { return false }
+
+        let combined = "\(reason) \(rawText)"
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        // Reject obvious front/rear classifications.
+        if combined.contains("straight-on") || combined.contains("straight on") ||
+           combined.contains("front view") || combined.contains("rear view") ||
+           combined.contains("tail-light") || combined.contains("taillight") ||
+           combined.contains("boot straight") || combined.contains("grille straight") {
+            return false
+        }
+
+        let saysFrontOnImageLeft =
+            combined.contains("front is on the left") ||
+            combined.contains("front of car is on the left") ||
+            combined.contains("front of the car is on the left") ||
+            combined.contains("bonnet is on the left") ||
+            combined.contains("hood is on the left") ||
+            combined.contains("headlights are on the left") ||
+            combined.contains("front/bonnet/headlights are on the left") ||
+            combined.contains("image left")
+
+        let saysFrontOnImageRight =
+            combined.contains("front is on the right") ||
+            combined.contains("front of car is on the right") ||
+            combined.contains("front of the car is on the right") ||
+            combined.contains("bonnet is on the right") ||
+            combined.contains("hood is on the right") ||
+            combined.contains("headlights are on the right") ||
+            combined.contains("front/bonnet/headlights are on the right") ||
+            combined.contains("image right")
+
+        switch expected {
+        case .right:
+            return saysFrontOnImageLeft && !saysFrontOnImageRight
+        case .left:
+            return saysFrontOnImageRight && !saysFrontOnImageLeft
+        default:
+            return false
+        }
     }
 
     private static func parseDetectedAngle(from text: String) -> DetectedAngle {

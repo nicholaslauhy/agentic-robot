@@ -16,8 +16,8 @@ struct ScanAngle: Identifiable {
 let scanAngles: [ScanAngle] = [
     ScanAngle(id: 0, label: "Front",      instruction: "Stand in front — aim at the bonnet",    iconName: "car.front.waves.up"),
     ScanAngle(id: 1, label: "Rear",       instruction: "Stand behind — aim at the boot",         iconName: "car.rear.waves.up"),
-    ScanAngle(id: 2, label: "Left Side",  instruction: "Stand on the left side of the vehicle",  iconName: "arrow.left.square"),
-    ScanAngle(id: 3, label: "Right Side", instruction: "Stand on the right side of the vehicle", iconName: "arrow.right.square"),
+    ScanAngle(id: 2, label: "Left Side",  instruction: "Stand on the left side — front should appear on the right of the photo",  iconName: "arrow.left.square"),
+    ScanAngle(id: 3, label: "Right Side", instruction: "Stand on the right side — front should appear on the left of the photo", iconName: "arrow.right.square"),
 ]
 
 private struct AngleFailureContext: Identifiable {
@@ -400,6 +400,9 @@ struct ScratchScanView: View {
             .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
             .padding(.horizontal)
 
+            photoTipsCard
+                .padding(.horizontal)
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(0..<scanAngles.count, id: \.self) { idx in
@@ -462,6 +465,42 @@ struct ScratchScanView: View {
         .animation(.easeInOut, value: currentAngleIndex)
     }
 
+    private var photoTipsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "lightbulb.fill")
+                    .foregroundColor(HTXTheme.primaryPurple)
+                Text("Photo tips")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.primary)
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                tipLine("Keep the vehicle as isolated as possible — avoid other cars, people, pillars, cones, or clutter.")
+                tipLine("Shoot in a well-lit area and avoid harsh reflections, glare, shadows, or rain/water marks.")
+                tipLine("Keep the whole car visible, level, and not overly zoomed in; crop only if the surroundings confuse the scan.")
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(HTXTheme.primaryPurple.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    private func tipLine(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("•")
+                .font(.caption)
+                .foregroundColor(HTXTheme.primaryPurple)
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     // MARK: - Review View
 
     private var reviewView: some View {
@@ -505,6 +544,9 @@ struct ScratchScanView: View {
                     : "All 4 angles are required before submitting. Tap a slot to add the missing photo.")
                     .font(.subheadline).foregroundColor(allCaptured ? .secondary : .orange)
                     .multilineTextAlignment(.center).padding(.horizontal)
+
+                photoTipsCard
+                    .padding(.horizontal)
 
                 LazyVStack(spacing: 16) {
                     ForEach(0..<scanAngles.count, id: \.self) { idx in
