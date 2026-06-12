@@ -38,7 +38,7 @@ struct LoggedInView: View {
     @State private var localErrorMessage: String? = nil
     @State private var anprUploadTask: URLSessionUploadTask? = nil
 
-    private let anprServerURLString = "http://192.168.86.239:8000/detect"
+    private let anprServerURLString = "http://192.168.86.240:8000/detect"
     private let anprRequestTimeout: TimeInterval = 15
     private let anprResourceTimeout: TimeInterval = 20
 

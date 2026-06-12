@@ -29,8 +29,13 @@ struct ConfirmBaselineRegion: Codable {
     let imageWidth: Int?   // original image width when this region was saved
     let imageHeight: Int?  // original image height when this region was saved
 
-    // Visual reference used by the backend to re-find this exact physical
-    // region in future photos. This avoids hardcoded/stale coordinates.
+    // Full clean benchmark image. Backend uses this to estimate zoom/rotation/
+    // translation from old report image -> new scan image, then projects this
+    // region into the new image.
+    let referenceImageBase64: String?
+
+    // Small visual reference crop. Backend only uses this as a fallback if
+    // full-image alignment cannot find enough matching features.
     let referenceCropBase64: String?
     let templateX1: Int?
     let templateY1: Int?
@@ -56,6 +61,7 @@ struct ConfirmBaselineRegion: Codable {
                 label: label,
                 imageWidth: imageWidth ?? targetWidth,
                 imageHeight: imageHeight ?? targetHeight,
+                referenceImageBase64: referenceImageBase64,
                 referenceCropBase64: referenceCropBase64,
                 templateX1: templateX1,
                 templateY1: templateY1,
@@ -75,6 +81,7 @@ struct ConfirmBaselineRegion: Codable {
             label: label,
             imageWidth: targetWidth,
             imageHeight: targetHeight,
+            referenceImageBase64: referenceImageBase64,
             referenceCropBase64: referenceCropBase64,
             templateX1: templateX1,
             templateY1: templateY1,
@@ -107,6 +114,7 @@ struct BaselineRegion: Codable {
     let label: String?
     let imageWidth: Int?
     let imageHeight: Int?
+    let referenceImageBase64: String?
     let referenceCropBase64: String?
     let templateX1: Int?
     let templateY1: Int?
@@ -123,30 +131,31 @@ private enum PlateNormalizer {
     }
 }
 
+
+private enum DamageAngleMetadata {
+    static let names = ["Front", "Rear", "Left Side", "Right Side"]
+
+    static func name(for index: Int) -> String {
+        if index >= 0 && index < names.count { return names[index] }
+        return "Angle \(index)"
+    }
+}
+
 private enum LocalBaselineCache {
     private static func key(for plate: String) -> String {
         "np299.localBaseline." + PlateNormalizer.normalize(plate)
     }
 
     static func save(plate: String, angles: [ConfirmBaselineBatchAngle]) {
-        let cleanedAngles = angles.map { angle in
-            ConfirmBaselineBatchAngle(
-                angle_index: angle.angle_index,
-                angle_name: angle.angle_name,
-                regions: angle.regions.filter { $0.x2 > $0.x1 && $0.y2 > $0.y1 }
-            )
-        }.filter { !$0.regions.isEmpty }
-
-        guard let data = try? JSONEncoder().encode(cleanedAngles) else { return }
-        UserDefaults.standard.set(data, forKey: key(for: plate))
+        // Disabled on purpose. Keeping a second local copy caused old benchmark
+        // boxes to reappear even after baselines.db was deleted on the backend.
+        UserDefaults.standard.removeObject(forKey: key(for: plate))
     }
 
     static func load(plate: String) -> [ConfirmBaselineBatchAngle] {
-        guard let data = UserDefaults.standard.data(forKey: key(for: plate)),
-              let angles = try? JSONDecoder().decode([ConfirmBaselineBatchAngle].self, from: data) else {
-            return []
-        }
-        return angles
+        // Backend database is the single source of truth.
+        UserDefaults.standard.removeObject(forKey: key(for: plate))
+        return []
     }
 }
 
@@ -346,12 +355,24 @@ extension UIImage {
         let normalized = htxNormalizedImage()
         let scale = normalized.scale
         let imageSize = normalized.size
+        let imageRect = CGRect(origin: .zero, size: imageSize)
+
+        // Same pixel->point conversion as htxReferenceTemplateBase64.
+        let coordScale: CGFloat = {
+            if let iw = region.imageWidth, iw > 0 { return imageSize.width / CGFloat(iw) }
+            return 1.0 / scale
+        }()
+        let coordScaleY: CGFloat = {
+            if let ih = region.imageHeight, ih > 0 { return imageSize.height / CGFloat(ih) }
+            return 1.0 / scale
+        }()
+
         let rect = CGRect(
-            x: max(0, CGFloat(region.x1)),
-            y: max(0, CGFloat(region.y1)),
-            width: max(1, CGFloat(region.x2 - region.x1)),
-            height: max(1, CGFloat(region.y2 - region.y1))
-        ).intersection(CGRect(origin: .zero, size: imageSize))
+            x: max(0, CGFloat(region.x1) * coordScale),
+            y: max(0, CGFloat(region.y1) * coordScaleY),
+            width: max(1, CGFloat(region.x2 - region.x1) * coordScale),
+            height: max(1, CGFloat(region.y2 - region.y1) * coordScaleY)
+        ).intersection(imageRect)
 
         guard rect.width > 0, rect.height > 0,
               let cgImage = normalized.cgImage?.cropping(to: CGRect(
@@ -371,14 +392,35 @@ extension UIImage {
     func htxReferenceTemplateBase64(region: ConfirmBaselineRegion) -> (base64: String, templateX1: Int, templateY1: Int, templateX2: Int, templateY2: Int)? {
         let normalized = htxNormalizedImage()
         let scale = normalized.scale
-        let imageSize = normalized.size
+        let imageSize = normalized.size          // UIKit POINTS (pixels / scale)
         let imageRect = CGRect(origin: .zero, size: imageSize)
 
+        // region.x1/y1/x2/y2 come from the backend in full-res PIXEL space.
+        // region.imageWidth/imageHeight are also in pixels.
+        // imageSize is in UIKit POINTS. We must convert coords to points before
+        // doing any CGRect geometry, otherwise the damageRect sits outside
+        // imageRect and the intersection returns an empty rect -> nil return ->
+        // no reference crop saved -> template matching always fails.
+        let coordScale: CGFloat = {
+            if let iw = region.imageWidth, iw > 0 {
+                // Backend pixel width -> point width conversion factor
+                return imageSize.width / CGFloat(iw)
+            }
+            // If imageWidth is missing, try the scale factor directly.
+            return 1.0 / scale
+        }()
+        let coordScaleY: CGFloat = {
+            if let ih = region.imageHeight, ih > 0 {
+                return imageSize.height / CGFloat(ih)
+            }
+            return 1.0 / scale
+        }()
+
         let damageRect = CGRect(
-            x: max(0, CGFloat(region.x1)),
-            y: max(0, CGFloat(region.y1)),
-            width: max(1, CGFloat(region.x2 - region.x1)),
-            height: max(1, CGFloat(region.y2 - region.y1))
+            x: max(0, CGFloat(region.x1) * coordScale),
+            y: max(0, CGFloat(region.y1) * coordScaleY),
+            width: max(1, CGFloat(region.x2 - region.x1) * coordScale),
+            height: max(1, CGFloat(region.y2 - region.y1) * coordScaleY)
         ).intersection(imageRect)
 
         guard damageRect.width > 0, damageRect.height > 0 else { return nil }
@@ -392,6 +434,7 @@ extension UIImage {
         let templateRect = damageRect.insetBy(dx: -padX, dy: -padY).intersection(imageRect)
         guard templateRect.width > 8, templateRect.height > 8 else { return nil }
 
+        // Convert back to device pixels for the actual cgImage crop.
         let cropRectInPixels = CGRect(
             x: templateRect.minX * scale,
             y: templateRect.minY * scale,
@@ -404,10 +447,12 @@ extension UIImage {
         let templateImage = UIImage(cgImage: cgImage, scale: scale, orientation: .up)
         guard let data = templateImage.jpegData(compressionQuality: 0.82) else { return nil }
 
-        let tx1 = Int((damageRect.minX - templateRect.minX).rounded())
-        let ty1 = Int((damageRect.minY - templateRect.minY).rounded())
-        let tx2 = Int((damageRect.maxX - templateRect.minX).rounded())
-        let ty2 = Int((damageRect.maxY - templateRect.minY).rounded())
+        // templateX/Y are in the coordinate space of the saved JPEG image
+        // (templateRect * scale = device pixels, then rendered as a 1x UIImage).
+        let tx1 = Int((damageRect.minX - templateRect.minX).rounded() * scale)
+        let ty1 = Int((damageRect.minY - templateRect.minY).rounded() * scale)
+        let tx2 = Int((damageRect.maxX - templateRect.minX).rounded() * scale)
+        let ty2 = Int((damageRect.maxY - templateRect.minY).rounded() * scale)
 
         return (
             data.base64EncodedString(),
@@ -445,7 +490,7 @@ final class DamageAnalysisService {
 
     private init() {}
 
-    private let baseURLString = "http://192.168.86.239:8000"
+    private let baseURLString = "http://192.168.86.240:8000"
 
     /// Smart NP299 analysis.
     /// Always asks the backend comparison endpoint first. If the backend has no
@@ -458,11 +503,11 @@ final class DamageAnalysisService {
     /// If the backend database was restarted/deleted or the app is pointed at a
     /// different backend folder, the app can still show the existing benchmark
     /// from the last generated report on this device.
-    func analyzeForPlate(plate: String, images: [UIImage]) async throws -> [DamageDetection] {
+    func analyzeForPlate(plate: String, images: [UIImage], angleIndices: [Int]? = nil) async throws -> [DamageDetection] {
         let localBaseline = LocalBaselineCache.load(plate: plate)
 
         do {
-            let compared = try await analyzeCompared(plate: plate, images: images)
+            let compared = try await analyzeCompared(plate: plate, images: images, angleIndices: angleIndices)
 
             if !compared.baseline.isEmpty {
                 print("Backend benchmark found. New: \(compared.results.count), existing: \(compared.baseline.count)")
@@ -488,7 +533,7 @@ final class DamageAnalysisService {
         } catch {
             if !localBaseline.isEmpty {
                 print("Compared analysis failed, but local benchmark exists. Falling back to normal analysis + local benchmark:", error)
-                let normalResults = try await analyze(images: images)
+                let normalResults = try await analyze(images: images, angleIndices: angleIndices)
                 let localExisting = makeLocalBaselineDetections(
                     from: localBaseline,
                     images: images
@@ -606,13 +651,13 @@ final class DamageAnalysisService {
         return try JSONDecoder().decode(BaselineLookupResponse.self, from: data)
     }
 
-    func analyzeCompared(plate: String, images: [UIImage]) async throws -> DamageAnalysisComparedResponse {
+    func analyzeCompared(plate: String, images: [UIImage], angleIndices: [Int]? = nil) async throws -> DamageAnalysisComparedResponse {
         let encodedPlate = plate.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? plate
         guard let url = URL(string: "\(baseURLString)/analyze-damage-compared?plate=\(encodedPlate)") else {
             throw URLError(.badURL)
         }
 
-        let data = try await uploadImages(images, to: url)
+        let data = try await uploadImages(images, to: url, angleIndices: angleIndices)
 
         if let raw = String(data: data, encoding: .utf8) {
             print("Compared damage API raw response:", raw)
@@ -621,12 +666,12 @@ final class DamageAnalysisService {
         return try JSONDecoder().decode(DamageAnalysisComparedResponse.self, from: data)
     }
 
-    func analyze(images: [UIImage]) async throws -> [DamageDetection] {
+    func analyze(images: [UIImage], angleIndices: [Int]? = nil) async throws -> [DamageDetection] {
         guard let url = URL(string: "\(baseURLString)/analyze-damage") else {
             throw URLError(.badURL)
         }
 
-        let data = try await uploadImages(images, to: url)
+        let data = try await uploadImages(images, to: url, angleIndices: angleIndices)
 
         if let raw = String(data: data, encoding: .utf8) {
             print("Damage API raw response:", raw)
@@ -682,10 +727,14 @@ final class DamageAnalysisService {
         }
 
         LocalBaselineCache.save(plate: plate, angles: angles)
-        print("Saved local benchmark cache for \(PlateNormalizer.normalize(plate)) with \(angles.reduce(0) { $0 + $1.regions.count }) region(s).")
+        print("Backend benchmark saved for \(PlateNormalizer.normalize(plate)); local fallback cache cleared.")
     }
 
-    private func uploadImages(_ images: [UIImage], to url: URL) async throws -> Data {
+    private func uploadImages(
+        _ images: [UIImage],
+        to url: URL,
+        angleIndices: [Int]? = nil
+    ) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 300
@@ -695,11 +744,35 @@ final class DamageAnalysisService {
 
         var body = Data()
 
-        for (index, image) in images.enumerated() {
+        // Send the real scan slot for every file. The backend must not infer
+        // left/right/front/rear purely from multipart order, because replacing
+        // or cropping images can change upload order in some SwiftUI flows.
+        let indices = angleIndices ?? Array(images.indices)
+        let names = indices.map { DamageAngleMetadata.name(for: $0) }
+
+        let encoder = JSONEncoder()
+        if let indicesData = try? encoder.encode(indices),
+           let indicesJSON = String(data: indicesData, encoding: .utf8) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"angle_indices\"\r\n\r\n".data(using: .utf8)!)
+            body.append(indicesJSON.data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        if let namesData = try? encoder.encode(names),
+           let namesJSON = String(data: namesData, encoding: .utf8) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"angle_names\"\r\n\r\n".data(using: .utf8)!)
+            body.append(namesJSON.data(using: .utf8)!)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+
+        for (uploadPosition, image) in images.enumerated() {
+            let angleIndex = uploadPosition < indices.count ? indices[uploadPosition] : uploadPosition
             guard let imageData = image.jpegData(compressionQuality: 0.75) else { continue }
 
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"damage_\(index).jpg\"\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"damage_angle_\(angleIndex).jpg\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
             body.append(imageData)
             body.append("\r\n".data(using: .utf8)!)

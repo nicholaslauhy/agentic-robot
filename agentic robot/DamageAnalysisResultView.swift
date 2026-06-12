@@ -3631,9 +3631,9 @@ struct PoliceReportStageTwoView: View {
         from detection: MutableDamageDetection,
         scanImages: [UIImage]
     ) -> ConfirmBaselineRegion? {
-        if let x1 = detection.x1, let y1 = detection.y1,
-           let x2 = detection.x2, let y2 = detection.y2,
-           x2 > x1, y2 > y1 {
+        if let originalX1 = detection.x1, let originalY1 = detection.y1,
+           let originalX2 = detection.x2, let originalY2 = detection.y2,
+           originalX2 > originalX1, originalY2 > originalY1 {
             let sourceImage: UIImage? = {
                 guard detection.angleIndex >= 0, detection.angleIndex < scanImages.count else {
                     return detection.cleanContextImage ?? detection.contextImage ?? detection.cropImage
@@ -3641,14 +3641,36 @@ struct PoliceReportStageTwoView: View {
                 return scanImages[detection.angleIndex]
             }()
 
+            guard let sourceImage else { return nil }
+            let normalizedSource = sourceImage.htxNormalizedImage()
+            let referenceWidth = max(1, Int(normalizedSource.size.width.rounded()))
+            let referenceHeight = max(1, Int(normalizedSource.size.height.rounded()))
+
+            // The backend coordinates can be based on a resized analysis image,
+            // while the saved reference image can be the original camera image.
+            // Convert the box into the exact coordinate space of the image that
+            // is actually stored. Without this, the later zoom/angle transform
+            // projects a tiny or shifted box even when image alignment succeeds.
+            let coordinateWidth = max(1, detection.imageWidth ?? referenceWidth)
+            let coordinateHeight = max(1, detection.imageHeight ?? referenceHeight)
+            let scaleX = Double(referenceWidth) / Double(coordinateWidth)
+            let scaleY = Double(referenceHeight) / Double(coordinateHeight)
+
+            let x1 = min(max(0, Int((Double(originalX1) * scaleX).rounded())), referenceWidth)
+            let y1 = min(max(0, Int((Double(originalY1) * scaleY).rounded())), referenceHeight)
+            let x2 = min(max(0, Int((Double(originalX2) * scaleX).rounded())), referenceWidth)
+            let y2 = min(max(0, Int((Double(originalY2) * scaleY).rounded())), referenceHeight)
+            guard x2 > x1, y2 > y1 else { return nil }
+
             let baseRegion = ConfirmBaselineRegion(
                 x1: x1,
                 y1: y1,
                 x2: x2,
                 y2: y2,
                 label: detection.damageType,
-                imageWidth: detection.imageWidth,
-                imageHeight: detection.imageHeight,
+                imageWidth: referenceWidth,
+                imageHeight: referenceHeight,
+                referenceImageBase64: nil,
                 referenceCropBase64: nil,
                 templateX1: nil,
                 templateY1: nil,
@@ -3656,7 +3678,7 @@ struct PoliceReportStageTwoView: View {
                 templateY2: nil
             )
 
-            guard let template = sourceImage?.htxReferenceTemplateBase64(region: baseRegion) else {
+            guard let template = normalizedSource.htxReferenceTemplateBase64(region: baseRegion) else {
                 return baseRegion
             }
 
@@ -3666,8 +3688,9 @@ struct PoliceReportStageTwoView: View {
                 x2: x2,
                 y2: y2,
                 label: detection.damageType,
-                imageWidth: detection.imageWidth,
-                imageHeight: detection.imageHeight,
+                imageWidth: referenceWidth,
+                imageHeight: referenceHeight,
+                referenceImageBase64: normalizedSource.htxJPEGBase64(compressionQuality: 0.72),
                 referenceCropBase64: template.base64,
                 templateX1: template.templateX1,
                 templateY1: template.templateY1,
@@ -3706,6 +3729,7 @@ struct PoliceReportStageTwoView: View {
             label: detection.damageType,
             imageWidth: Int(width),
             imageHeight: Int(height),
+            referenceImageBase64: nil,
             referenceCropBase64: nil,
             templateX1: nil,
             templateY1: nil,
@@ -3725,6 +3749,7 @@ struct PoliceReportStageTwoView: View {
             label: detection.damageType,
             imageWidth: Int(width),
             imageHeight: Int(height),
+            referenceImageBase64: normalized.htxJPEGBase64(compressionQuality: 0.68),
             referenceCropBase64: template.base64,
             templateX1: template.templateX1,
             templateY1: template.templateY1,

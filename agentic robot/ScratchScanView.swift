@@ -40,7 +40,7 @@ struct ScratchScanView: View {
     var onBackToPlateResult: () -> Void
     var initialImages: [UIImage] = []
     var startOnReviewScreen: Bool = false
-    var onScanComplete: ([UIImage], @escaping () -> Void) -> Void
+    var onScanComplete: ([UIImage], [Int], @escaping () -> Void) -> Void
 
     @State private var currentAngleIndex: Int
     @State private var capturedImages: [UIImage?]
@@ -71,7 +71,7 @@ struct ScratchScanView: View {
         onBackToPlateResult: @escaping () -> Void,
         initialImages: [UIImage] = [],
         startOnReviewScreen: Bool = false,
-        onScanComplete: @escaping ([UIImage], @escaping () -> Void) -> Void
+        onScanComplete: @escaping ([UIImage], [Int], @escaping () -> Void) -> Void
     ) {
         self.plate = plate
         self.carType = carType
@@ -527,7 +527,13 @@ struct ScratchScanView: View {
 
                 Button {
                     isSubmittingAnalysis = true
-                    onScanComplete(capturedImages.compactMap { $0 }) {
+                    let orderedPairs = capturedImages.enumerated().compactMap { slot, image -> (Int, UIImage)? in
+                        guard let image else { return nil }
+                        return (slot, image)
+                    }
+                    let orderedImages = orderedPairs.map { $0.1 }
+                    let angleIndices = orderedPairs.map { $0.0 }
+                    onScanComplete(orderedImages, angleIndices) {
                         isSubmittingAnalysis = false
                     }
                 } label: {

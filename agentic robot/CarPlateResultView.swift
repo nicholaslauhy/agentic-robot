@@ -158,10 +158,11 @@ struct CarPlateResultView: View {
                     },
                     initialImages: shouldOpenScratchOnReview ? scannedImages : [],
                     startOnReviewScreen: shouldOpenScratchOnReview,
-                    onScanComplete: { images, finishLoading in
+                    onScanComplete: { images, angleIndices, finishLoading in
                         scannedImages = images
                         startDamageAnalysis(
                             images: images,
+                            angleIndices: angleIndices,
                             carType: carType,
                             finishLoading: finishLoading
                         )
@@ -283,6 +284,7 @@ struct CarPlateResultView: View {
 
     private func startDamageAnalysis(
         images: [UIImage],
+        angleIndices: [Int],
         carType: CarType,
         finishLoading: @escaping () -> Void
     ) {
@@ -295,7 +297,7 @@ struct CarPlateResultView: View {
 
         Task {
             do {
-                let results = try await damageAnalysisService.analyzeForPlate(plate: editablePlate, images: images)
+                let results = try await damageAnalysisService.analyzeForPlate(plate: editablePlate, images: images, angleIndices: angleIndices)
                 
                 await MainActor.run {
                     print("Damage analysis succeeded")
