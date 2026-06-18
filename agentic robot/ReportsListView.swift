@@ -435,6 +435,7 @@ struct SecComDetailSheet: View {
     @State private var damageImages: [UIImage] = []
     @State private var isLoadingDamageImages = false
     @State private var damageImageError: String? = nil
+    @State private var selectedDamageImage: ZoomableImageItem? = nil
 
     private var equipment: [String] { d["equipment"] as? [String] ?? [] }
     private var selectedEquipmentSet: Set<String> {
@@ -545,15 +546,32 @@ struct SecComDetailSheet: View {
                             sectionCard(title: "New Damage Detected", icon: "camera.fill", accent: accent) {
                                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
                                     ForEach(damageImages.indices, id: \.self) { idx in
-                                        Image(uiImage: damageImages[idx])
-                                            .resizable()
-                                            .scaledToFill()
+                                        Button {
+                                            selectedDamageImage = ZoomableImageItem(image: damageImages[idx])
+                                        } label: {
+                                            ZStack(alignment: .bottomTrailing) {
+                                                Image(uiImage: damageImages[idx])
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 120, height: 120)
+                                                    .clipped()
+
+                                                Image(systemName: "magnifyingglass.circle.fill")
+                                                    .font(.title2)
+                                                    .symbolRenderingMode(.palette)
+                                                    .foregroundStyle(.white, Color.black.opacity(0.55))
+                                                    .padding(7)
+                                            }
                                             .frame(width: 120, height: 120)
                                             .clipShape(RoundedRectangle(cornerRadius: 12))
                                             .overlay(
                                                 RoundedRectangle(cornerRadius: 12)
                                                     .stroke(accent.opacity(0.18), lineWidth: 1)
                                             )
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Open damage image \(idx + 1)")
+                                        .accessibilityHint("Opens a full-screen image that can be zoomed and panned")
                                     }
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -573,6 +591,9 @@ struct SecComDetailSheet: View {
                 }
             }
             .onAppear { loadDamageImages() }
+            .fullScreenCover(item: $selectedDamageImage) { item in
+                ZoomableImageViewer(image: item.image)
+            }
         }
     }
 
@@ -629,6 +650,7 @@ struct FuelDetailSheet: View {
     @State private var receiptImage: UIImage? = nil
     @State private var isLoadingReceipt = false
     @State private var receiptError: String? = nil
+    @State private var selectedReceiptImage: ZoomableImageItem? = nil
 
     private var d: [String: Any] { doc.raw }
     private var usedMastercard: Bool { d["usedMastercard"] as? Bool ?? false }
@@ -699,11 +721,30 @@ struct FuelDetailSheet: View {
                             }
                         } else if let img = receiptImage {
                             sectionCard(title: "Fuel Receipt", icon: "doc.text.fill", accent: accent) {
-                                Image(uiImage: img)
-                                    .resizable().scaledToFit()
-                                    .frame(maxHeight: 280)
+                                Button {
+                                    selectedReceiptImage = ZoomableImageItem(image: img)
+                                } label: {
+                                    ZStack(alignment: .bottomTrailing) {
+                                        Image(uiImage: img)
+                                            .resizable()
+                                            .scaledToFit()
+                                            .frame(maxHeight: 280)
+                                            .frame(maxWidth: .infinity)
+
+                                        Label("Tap to zoom", systemImage: "magnifyingglass")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 7)
+                                            .background(Color.black.opacity(0.62))
+                                            .clipShape(Capsule())
+                                            .padding(10)
+                                    }
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Open fuel receipt")
+                                .accessibilityHint("Opens a full-screen image that can be zoomed and panned")
                             }
                         }
                         Spacer().frame(height: 10)
@@ -718,6 +759,9 @@ struct FuelDetailSheet: View {
                 }
             }
             .onAppear { loadReceiptImage() }
+            .fullScreenCover(item: $selectedReceiptImage) { item in
+                ZoomableImageViewer(image: item.image)
+            }
         }
     }
 
@@ -744,6 +788,120 @@ struct FuelDetailSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Full-screen zoomable image viewer
+private struct ZoomableImageItem: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
+private struct ZoomableImageViewer: View {
+    let image: UIImage
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    private let minimumScale: CGFloat = 1
+    private let maximumScale: CGFloat = 6
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .scaleEffect(scale)
+                .offset(offset)
+                .gesture(magnificationGesture)
+                .simultaneousGesture(dragGesture)
+                .onTapGesture(count: 2) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        if scale > minimumScale {
+                            resetZoom()
+                        } else {
+                            scale = 2.5
+                            lastScale = 2.5
+                        }
+                    }
+                }
+
+            VStack {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .accessibilityLabel("Close image")
+                }
+                .padding()
+
+                Spacer()
+
+                Text("Pinch to zoom • Drag to move • Double-tap to reset")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(.bottom, 24)
+                    .opacity(scale == minimumScale ? 1 : 0.75)
+            }
+        }
+        .statusBarHidden(true)
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(max(lastScale * value, minimumScale), maximumScale)
+                if scale == minimumScale {
+                    offset = .zero
+                }
+            }
+            .onEnded { _ in
+                if scale <= minimumScale {
+                    resetZoom()
+                } else {
+                    lastScale = scale
+                }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > minimumScale else { return }
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                guard scale > minimumScale else {
+                    resetZoom()
+                    return
+                }
+                lastOffset = offset
+            }
+    }
+
+    private func resetZoom() {
+        scale = minimumScale
+        lastScale = minimumScale
+        offset = .zero
+        lastOffset = .zero
     }
 }
 
