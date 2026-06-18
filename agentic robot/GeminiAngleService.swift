@@ -168,9 +168,12 @@ struct GeminiAngleService {
                 }
 
                 if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let errorObj = json["error"] as? [String: Any],
-                   let code = errorObj["code"] as? Int,
-                   code == 503 {
+                   let errorObj = json["error"] as? [String: Any] {
+
+                    let code = errorObj["code"] as? Int ?? -1
+                    let message = errorObj["message"] as? String ?? "Gemini API error"
+
+                    if code == 503 {
                     let nextAttempt = attempt + 1
                     if nextAttempt < maxRetries {
                         debugLog("503 on attempt \(attempt + 1). Retrying in \(retryDelays[min(nextAttempt, retryDelays.count - 1)])s…")
@@ -181,6 +184,15 @@ struct GeminiAngleService {
                             completion(failureResult(expectedAngle: expectedAngle,
                                                      reason: "Gemini is temporarily unavailable. Please try again."))
                         }
+                    }
+                    return
+                    }
+
+                    DispatchQueue.main.async {
+                        completion(failureResult(
+                            expectedAngle: expectedAngle,
+                            reason: "Service error (\(code)): \(message)"
+                        ))
                     }
                     return
                 }
@@ -207,10 +219,21 @@ struct GeminiAngleService {
                 ]
             ]],
             "generationConfig": [
-                "maxOutputTokens": 256,
+                "maxOutputTokens": 1024,
                 "temperature": 0.0,
                 "topP": 0.1,
-                "topK": 1
+                "topK": 1,
+                "responseMimeType": "application/json",
+                "responseSchema": [
+                    "type": "OBJECT",
+                    "properties": [
+                        "detectedAngle":        ["type": "STRING"],
+                        "matchesExpectedAngle": ["type": "BOOLEAN"],
+                        "confidence":           ["type": "NUMBER"],
+                        "reason":               ["type": "STRING"]
+                    ],
+                    "required": ["detectedAngle", "matchesExpectedAngle", "confidence", "reason"]
+                ]
             ]
         ]
 
@@ -244,7 +267,7 @@ struct GeminiAngleService {
             let raw = String(data: data, encoding: .utf8) ?? ""
             debugLog("Unusable response:\n\(raw)")
             DispatchQueue.main.async {
-                completion(failureResult(expectedAngle: expectedAngle, reason: "Gemini did not return a usable response."))
+                completion(failureResult(expectedAngle: expectedAngle, reason: "Gemini returned an unexpected response format."))
             }
             return
         }
@@ -256,7 +279,7 @@ struct GeminiAngleService {
 
         guard !text.isEmpty else {
             DispatchQueue.main.async {
-                completion(failureResult(expectedAngle: expectedAngle, reason: "Gemini returned an empty response."))
+                completion(failureResult(expectedAngle: expectedAngle, reason: "Gemini returned an empty response. Please try again."))
             }
             return
         }
@@ -279,9 +302,8 @@ struct GeminiAngleService {
     //
     // IMPORTANT:
     // The app slot names are based on where the officer stands, not the vehicle's own left/right.
-    // Left slot  = officer stands on the left side of the vehicle; car front/bonnet appears on RIGHT of image.
-    // Right slot = officer stands on the right side of the vehicle; car front/bonnet appears on LEFT of image.
-    // This avoids Gemini flipping the labels using its own idea of vehicle left/right.
+    // Left slot  = left side of the car is visible; car front/bonnet appears on LEFT of image.
+    // Right slot = right side of the car is visible; car front/bonnet appears on RIGHT of image.
 
     private static func buildPrompt(expectedAngle: DetectedAngle?) -> String {
 
@@ -290,15 +312,15 @@ struct GeminiAngleService {
         Front, Rear, Left, Right.
 
         VERY IMPORTANT SIDE-SHOT RULE:
-        The app's Left/Right labels are camera-position slots, NOT the physical left/right side of the car.
+        Left = the LEFT side of the car body is visible. Right = the RIGHT side of the car body is visible.
 
-        For SIDE photos:
-        • If the car front / bonnet / headlights are on the RIGHT side of the image, classify it as "Left".
-        • If the car front / bonnet / headlights are on the LEFT side of the image, classify it as "Right".
+        For SIDE photos, use the bonnet/front position:
+        • If the car front / bonnet / headlights are on the LEFT side of the image, classify it as "Left".
+        • If the car front / bonnet / headlights are on the RIGHT side of the image, classify it as "Right".
 
         Examples:
-        • Side view, front of car at image right  → "Left"
-        • Side view, front of car at image left   → "Right"
+        • Side view, front of car at image left  → "Left"
+        • Side view, front of car at image right → "Right"
 
         For FRONT / REAR photos:
         • Headlights and grille straight-on → "Front"
@@ -316,14 +338,14 @@ struct GeminiAngleService {
             case .left:
                 check = """
                 EXPECTED APP SLOT: "Left"
-                ACCEPT only if this is a side photo and the car front/bonnet/headlights are on the RIGHT side of the image.
-                REJECT if the car front/bonnet/headlights are on the LEFT side of the image, or if it is a front/rear shot.
+                ACCEPT only if this is a side photo and the car front/bonnet/headlights are on the LEFT side of the image.
+                REJECT if the car front/bonnet/headlights are on the RIGHT side of the image, or if it is a front/rear shot.
                 """
             case .right:
                 check = """
                 EXPECTED APP SLOT: "Right"
-                ACCEPT only if this is a side photo and the car front/bonnet/headlights are on the LEFT side of the image.
-                REJECT if the car front/bonnet/headlights are on the RIGHT side of the image, or if it is a front/rear shot.
+                ACCEPT only if this is a side photo and the car front/bonnet/headlights are on the RIGHT side of the image.
+                REJECT if the car front/bonnet/headlights are on the LEFT side of the image, or if it is a front/rear shot.
                 """
             case .front:
                 check = """
@@ -345,21 +367,12 @@ struct GeminiAngleService {
             \(coreRule)
 
             \(check)
-
-            Return JSON only, no markdown.
-            Include the app slot label in detectedAngle.
-            Schema:
-            {"detectedAngle":"Front|Rear|Left|Right|Unknown","matchesExpectedAngle":true,"confidence":0.95,"reason":"short reason mentioning whether the bonnet/front is on image left or image right for side shots"}
             """
         } else {
             return """
             \(coreRule)
 
             Classify this image into exactly one app slot: Front, Rear, Left, Right, Unknown.
-
-            Return JSON only, no markdown.
-            Schema:
-            {"detectedAngle":"Front|Rear|Left|Right|Unknown","matchesExpectedAngle":false,"confidence":0.95,"reason":"short reason mentioning whether the bonnet/front is on image left or image right for side shots"}
             """
         }
     }
@@ -412,15 +425,18 @@ struct GeminiAngleService {
                                          rawText: text)
         }
 
-        // Fallback: plain text parse
+        // Fallback: plain text parse (should not occur when responseMimeType is enforced)
         let detected = parseDetectedAngle(from: text)
         let confidence = detected == .unknown ? 0.0 : 0.60
         let matches = expected != .unknown && (detected == expected || sideSlotMatchesFromReason(reason: text, rawText: text, expected: expected))
+        debugLog("⚠️ Fell through to plain-text parse. Raw text:\n\(text)")
         return AngleValidationResult(expectedAngle: expected,
                                      detectedAngle: detected,
                                      matchesExpectedAngle: matches,
                                      confidence: confidence,
-                                     reason: "Recovered from non-JSON response.",
+                                     reason: detected == .unknown
+                                         ? "Could not determine the angle. Please retake the photo."
+                                         : "Angle identified from photo.",
                                      rawText: text)
     }
 
@@ -507,9 +523,9 @@ struct GeminiAngleService {
             combined.contains("image right")
 
         switch expected {
-        case .right:
-            return saysFrontOnImageLeft && !saysFrontOnImageRight
         case .left:
+            return saysFrontOnImageLeft && !saysFrontOnImageRight
+        case .right:
             return saysFrontOnImageRight && !saysFrontOnImageLeft
         default:
             return false
