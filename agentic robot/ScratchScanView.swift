@@ -16,8 +16,8 @@ struct ScanAngle: Identifiable {
 let scanAngles: [ScanAngle] = [
     ScanAngle(id: 0, label: "Front",      instruction: "Stand in front — aim at the bonnet",    iconName: "car.front.waves.up"),
     ScanAngle(id: 1, label: "Rear",       instruction: "Stand behind — aim at the boot",         iconName: "car.rear.waves.up"),
-    ScanAngle(id: 2, label: "Left Side",  instruction: "Stand on the left side — front should appear on the right of the photo",  iconName: "arrow.left.square"),
-    ScanAngle(id: 3, label: "Right Side", instruction: "Stand on the right side — front should appear on the left of the photo", iconName: "arrow.right.square"),
+    ScanAngle(id: 2, label: "Left Side",  instruction: "Left Side — front should appear on the left of the photo",  iconName: "arrow.left.square"),
+    ScanAngle(id: 3, label: "Right Side", instruction: "Right Side — front should appear on the right of the photo", iconName: "arrow.right.square"),
 ]
 
 private struct AngleFailureContext: Identifiable {
@@ -28,7 +28,9 @@ private struct AngleFailureContext: Identifiable {
     let isReplacement: Bool
 
     var canOverride: Bool {
-        result.isStraightEnough && result.straightnessScore >= 0.78
+        // Always show a manual override on the failure popup.
+        // This is a deliberate fallback for slow/failed AI responses, bad JSON, or hallucinated checks.
+        true
     }
 }
 
@@ -118,7 +120,7 @@ struct ScratchScanView: View {
             } else if isValidatingImage {
                 BlockingLoadingOverlay(
                     title: "Processing image…",
-                    message: "Checking whether this photo matches the required vehicle angle."
+                    message: "Checking whether the photo contains a full car, matches the required angle, and is straight enough for calibration."
                 )
             }
         }
@@ -150,9 +152,9 @@ struct ScratchScanView: View {
                 carType: carType,
                 angleId: currentAngleIndex
             ) { image in
-                // CameraOverlayImagePicker already validates the captured photo before
-                // calling onPick. Do not validate again here, because a second Gemini
-                // call can disagree with the first one and falsely reject a correct photo.
+                // CameraOverlayImagePicker already validates that the captured photo contains a full car,
+                // matches the expected angle, and is straight enough before calling onPick.
+                // Do not validate again here because a second model call can disagree.
                 let index = currentAngleIndex
                 capturedImages[index] = image
                 showCamera = false
@@ -557,6 +559,7 @@ struct ScratchScanView: View {
                 tipLine("Shoot in a well-lit area and avoid harsh reflections, glare, shadows, or rain/water marks.")
                 tipLine("Keep the whole car visible, level, and not overly zoomed in; crop only if the surroundings confuse the scan.")
                 tipLine("Stand straight-on to the requested angle. Avoid diagonal, slanted, or 3/4 perspective shots.")
+                tipLine("Make sure the vehicle is actually in frame and the required front, rear, or full side profile is visible.")
             }
         }
         .padding()
@@ -793,7 +796,7 @@ private struct AngleFailurePopup: View {
 
     private var cleanedReason: String {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "The image could not be confidently matched to the required angle." : trimmed
+        return trimmed.isEmpty ? "The image could not be accepted. Make sure a full car is visible, the angle is correct, and the photo is straight." : trimmed
     }
 
     var body: some View {
@@ -805,7 +808,7 @@ private struct AngleFailurePopup: View {
                     .font(.system(size: 42, weight: .semibold))
                     .foregroundColor(.orange)
 
-                Text("Angle Check Failed")
+                Text("Photo Check Failed")
                     .font(.title3.bold())
                     .multilineTextAlignment(.center)
 
@@ -829,8 +832,8 @@ private struct AngleFailurePopup: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                 Text(canOverride
-                     ? "You can override only if the photo is straight enough for calibration."
-                     : "This photo is too slanted for calibration, so it must be retaken.")
+                     ? "Use Override only when you can clearly confirm the full car is visible, the angle is correct, and the photo is straight enough for calibration."
+                     : "This photo is not valid for calibration, so it must be retaken or replaced.")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -1458,19 +1461,19 @@ final class MagnifierCameraViewController: UIViewController {
     private func updateDistanceLabel() {
         switch distanceState {
         case .tooClose:
-            distanceLabel.text            = "   ↔  Move further away  ↔   "
+            distanceLabel.text            = "   ↔  Fit the whole vehicle inside the guide  ↔   "
             distanceLabel.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.88)
             distanceLabel.textColor       = .white
             shutterButton?.alpha          = 0.35
             shutterButton?.isEnabled      = false
         case .tooFar:
-            distanceLabel.text            = "   ↕  Move closer to the vehicle  ↕   "
+            distanceLabel.text            = "   ↕  Aim at the full vehicle first  ↕   "
             distanceLabel.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.88)
             distanceLabel.textColor       = .white
             shutterButton?.alpha          = 0.35
             shutterButton?.isEnabled      = false
         case .good:
-            distanceLabel.text            = "   ✓  Good distance — ready to shoot   "
+            distanceLabel.text            = "   ✓  Frame ready — photo will be verified   "
             distanceLabel.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.82)
             distanceLabel.textColor       = .white
             shutterButton?.alpha          = 1.0
@@ -1537,17 +1540,17 @@ final class MagnifierCameraViewController: UIViewController {
         iconLabel.textAlignment = .center
 
         let titleLabel = UILabel()
-        titleLabel.text = "Angle Check Failed"
+        titleLabel.text = "Photo Check Failed"
         titleLabel.font = .systemFont(ofSize: 20, weight: .bold)
         titleLabel.textColor = .systemOrange
         titleLabel.textAlignment = .center
 
         let cleanedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? "The image could not be confidently matched to the required angle."
+            ? "The image could not be accepted. Make sure a full car is visible, the angle is correct, and the photo is straight."
             : reason
 
         let detailLabel = UILabel()
-        detailLabel.text = "Expected: \(expected)\nDetected: \(detected.rawValue)\nConfidence: \(Int((confidence * 100).rounded()))%\n\nReason:\n\(cleanedReason)\n\n" + (canOverride ? "You can override only if the photo is straight enough for calibration." : "This photo is too slanted for calibration, so it must be retaken.")
+        detailLabel.text = "Expected: \(expected)\nDetected: \(detected.rawValue)\nConfidence: \(Int((confidence * 100).rounded()))%\n\nReason:\n\(cleanedReason)\n\n" + (canOverride ? "Use Override only when you can clearly confirm the full car is visible, the angle is correct, and the photo is straight enough for calibration." : "This photo is not valid for calibration, so it must be retaken or replaced.")
         detailLabel.font = .systemFont(ofSize: 14)
         detailLabel.textColor = .secondaryLabel
         detailLabel.textAlignment = .center
@@ -1600,7 +1603,7 @@ final class MagnifierCameraViewController: UIViewController {
             overrideBtn.heightAnchor.constraint(equalToConstant: 48),
         ])
 
-        print("\n========== GEMINI ANGLE FAILURE DETAILS ==========")
+        print("\n========== VEHICLE PHOTO CHECK FAILURE DETAILS ==========")
         print(debugSummary)
         print("===============================================\n")
 
@@ -1713,10 +1716,10 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
               let image = UIImage(data: data)
         else { isCapturing = false; return }
 
-        // Show "Checking angle…" spinner
+        // Show "Checking photo…" spinner
         showAngleVerifying()
 
-        // Map angleId label to the single word Gemini returns
+        // Map angleId label to the single word the validator returns
         let label = scanAngles[min(angleId, scanAngles.count - 1)].label
         let expectedWord: String
         switch label {
@@ -1729,9 +1732,9 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
             showAngleError(detected: .unknown,
                            expected: expectedWord,
                            capturedImage: image,
-                           reason: "Could not map expected angle to Gemini enum.",
+                           reason: "Could not map expected angle to vehicle checker enum.",
                            confidence: 0.0,
-                           debugSummary: "Could not map expected angle to Gemini enum.",
+                           debugSummary: "Could not map expected angle to vehicle checker enum.",
                            canOverride: false)
             return
         }
@@ -1751,7 +1754,7 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
                                     reason: result.reason,
                                     confidence: result.confidence,
                                     debugSummary: result.debugSummary,
-                                    canOverride: result.isStraightEnough && result.straightnessScore >= 0.78)
+                                    canOverride: true)
             }
         }
     }
