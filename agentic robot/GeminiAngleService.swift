@@ -318,14 +318,48 @@ struct GeminiAngleService {
 
     // MARK: - Prompt
 
+    private static func expectedAngleInstruction(_ expectedAngle: DetectedAngle?) -> String {
+        guard let expectedAngle else {
+            return "No specific slot is being validated. Classify the photo objectively."
+        }
+
+        switch expectedAngle {
+        case .right:
+            return """
+            EXPECTED SLOT = RIGHT SIDE.
+            RIGHT SIDE in this app means ONLY this: the BONNET/HOOD/NOSE END is on the RIGHT side of the IMAGE.
+            Accept as Right only when bonnetEndX > bootEndX and frontEndX > rearEndX.
+            Reject as not Right when the bonnet/hood/headlights are on image-left, even if it is the vehicle's real-world right side.
+            Do not use driver/passenger side. Do not use the physical left/right side of the car.
+            """
+        case .left:
+            return """
+            EXPECTED SLOT = LEFT SIDE.
+            LEFT SIDE in this app means ONLY this: the BONNET/HOOD/NOSE END is on the LEFT side of the IMAGE.
+            Accept as Left only when bonnetEndX < bootEndX and frontEndX < rearEndX.
+            Reject as not Left when the bonnet/hood/headlights are on image-right, even if it is the vehicle's real-world left side.
+            Do not use driver/passenger side. Do not use the physical left/right side of the car.
+            """
+        case .front:
+            return "EXPECTED SLOT = FRONT. The grille/headlights/front bumper face the camera. Do not require side-view rules."
+        case .rear:
+            return "EXPECTED SLOT = REAR. The tail-lights/boot/rear bumper face the camera. Do not require side-view rules or full side length."
+        case .unknown:
+            return "No specific slot is being validated. Classify the photo objectively."
+        }
+    }
+
     private static func buildPrompt(expectedAngle: DetectedAngle?) -> String {
         return """
         You are objectively describing ONE vehicle inspection photo for an iOS app.
 
-        CRITICAL RULE: You are NOT told what angle is expected. Describe exactly what
-        you see in the photo, with no bias toward any particular answer. There is no
-        "correct" answer to satisfy — just report what is actually in the image.
+        CRITICAL RULE: Use the expected slot only as the validation target.
+        Still describe exactly what you see in the photo. Do not force a match.
+        Wrong-side rejection is better than accepting the wrong photo.
         Return ONLY valid JSON. No markdown. No extra text.
+
+        EXPECTED SLOT CONTEXT FOR THIS VALIDATION:
+        \(expectedAngleInstruction(expectedAngle))
 
         IMAGE COORDINATES:
         - The left edge of the photo is x=0.
@@ -472,6 +506,7 @@ struct GeminiAngleService {
         }
 
         let finalSide = consensusSide(
+            expected: expected,
             coordinateSide: coordinateSide,
             textSide: textSide,
             cameraDirectionSide: cameraDirectionSide,
@@ -639,6 +674,7 @@ struct GeminiAngleService {
     }
 
     private static func consensusSide(
+        expected: DetectedAngle,
         coordinateSide: String,
         textSide: String,
         cameraDirectionSide: String,
@@ -652,18 +688,36 @@ struct GeminiAngleService {
     ) -> String {
         guard sideProfileScore >= 0.70 else { return "unknown" }
 
-        // Most important fix: do NOT let a vague text label make Left pass.
-        // The final side is based primarily on bonnet/boot or front/rear x-coordinates.
+        // Use image-coordinate evidence first. The model often confuses "Left/Right"
+        // with the vehicle's physical side, but x-coordinates are tied to the photo.
         if coordinateSide != "unknown" {
             return coordinateSide
         }
 
-        // Fallback only when coordinates are missing: require all non-coordinate text signals to agree.
         let signals = [textSide, cameraDirectionSide, booleanSide, angleSide]
             .filter { $0 == "left" || $0 == "right" }
 
         let leftCount = signals.filter { $0 == "left" }.count
         let rightCount = signals.filter { $0 == "right" }.count
+
+        // For the side slots, wrong acceptance is worse than retake. Require strong agreement.
+        // But do not require the vague detectedAngle label to agree, because that label is the
+        // one most likely to be flipped by real-world car-side wording.
+        if expected == .right {
+            let strongRight = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "right" }.count
+            let strongLeft = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "left" }.count
+            if strongRight >= 2 && strongLeft == 0 { return "right" }
+            if strongLeft >= 2 && strongRight == 0 { return "left" }
+            return "unknown"
+        }
+
+        if expected == .left {
+            let strongLeft = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "left" }.count
+            let strongRight = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "right" }.count
+            if strongLeft >= 2 && strongRight == 0 { return "left" }
+            if strongRight >= 2 && strongLeft == 0 { return "right" }
+            return "unknown"
+        }
 
         if leftCount >= 3 && rightCount == 0 { return "left" }
         if rightCount >= 3 && leftCount == 0 { return "right" }
@@ -686,8 +740,41 @@ struct GeminiAngleService {
 
     private static func normalizeSideFrontPosition(_ value: String?) -> String {
         let clean = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if clean == "left" || clean == "image_left" || clean.contains("front on left") || clean.contains("front is on the left") { return "left" }
-        if clean == "right" || clean == "image_right" || clean.contains("front on right") || clean.contains("front is on the right") { return "right" }
+
+        if clean == "left"
+            || clean == "image_left"
+            || clean == "bonnet_left"
+            || clean == "bonnet_on_image_left"
+            || clean == "hood_on_image_left"
+            || clean == "nose_on_image_left"
+            || clean.contains("bonnet on image left")
+            || clean.contains("hood on image left")
+            || clean.contains("nose on image left")
+            || clean.contains("bonnet is on the left")
+            || clean.contains("front on left")
+            || clean.contains("front is on the left")
+            || clean.contains("front on image left")
+            || clean.contains("front is on image left") {
+            return "left"
+        }
+
+        if clean == "right"
+            || clean == "image_right"
+            || clean == "bonnet_right"
+            || clean == "bonnet_on_image_right"
+            || clean == "hood_on_image_right"
+            || clean == "nose_on_image_right"
+            || clean.contains("bonnet on image right")
+            || clean.contains("hood on image right")
+            || clean.contains("nose on image right")
+            || clean.contains("bonnet is on the right")
+            || clean.contains("front on right")
+            || clean.contains("front is on the right")
+            || clean.contains("front on image right")
+            || clean.contains("front is on image right") {
+            return "right"
+        }
+
         return "unknown"
     }
 
