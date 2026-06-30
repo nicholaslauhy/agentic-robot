@@ -117,7 +117,7 @@ struct GeminiAngleService {
             case .front:
                 return 0.62
             case .left, .right:
-                return 0.72
+                return 0.82
             case .unknown:
                 return 0.62
             }
@@ -144,6 +144,10 @@ struct GeminiAngleService {
         let bootEndX: Double?
         let sideProfileScore: Double?
         let isThreeQuarterSideView: Bool?
+        let nearEndSizePercent: Double?
+        let farEndSizePercent: Double?
+        let wheelsAppearCircular: Bool?
+        let cameraPerpendicularToSide: Bool?
         let reason: String?
     }
 
@@ -345,11 +349,17 @@ struct GeminiAngleService {
         - If the bonnet/hood/headlights are on image-left, it is LEFT SIDE for this app, even if you think it is the car's real-world right side.
         - If you cannot clearly locate the bonnet end and boot end, return detectedAngle="Unknown" and sideFrontPosition="unknown".
 
-        SIDE STRAIGHTNESS / CALIBRATION RULE:
-        - For side photos, be strict. A valid photo must be a mostly straight side profile.
-        - Reject diagonal side-corner / 3-quarter / perspective views.
-        - If one end is much closer/larger than the other, set isThreeQuarterSideView=true, isStraightEnough=false, straightnessScore below 0.70, sideProfileScore below 0.70.
-        - A valid side profile should show both bonnet end and boot end, with the car side nearly parallel to the image plane.
+        SIDE STRAIGHTNESS / CALIBRATION RULE — BE VERY STRICT:
+        - This photo will be used for pixel-level bounding-box calibration, so even a mild angle is NOT acceptable.
+        - The camera must be pointing PERPENDICULAR (90 degrees) to the side of the car, like a profile mugshot. Imagine the car's side as a flat plane — the camera's line of sight must be a straight line directly into that plane, not at a diagonal.
+        - Check the two wheels: in a properly straight side photo, the front wheel and rear wheel should look almost the same size and both should look like circles (or near-circles), sitting on the same horizontal line.
+        - If the wheel nearer the camera looks noticeably bigger than the far wheel, OR the wheels look like tilted ellipses instead of circles, OR you can see the front windscreen/grille AND the rear windscreen/boot face at the same time at an angle (instead of a flat side silhouette), the photo is taken at an angle and MUST be rejected.
+        - If one end of the car (bonnet end or boot end) is closer to the camera and therefore looks bigger/taller than the other end, that is a 3/4 angled shot and MUST be rejected, even if it is only a mild angle.
+        - Estimate nearEndSizePercent and farEndSizePercent: rate how large each end of the car (bonnet end vs boot end) appears in the frame, 0-100, where 100 means it fills/dominates the frame and is the closest point to the camera. In a correctly straight shot these two values must be nearly equal (within about 8 of each other). If they differ by more than 8, the shot is angled.
+        - Set wheelsAppearCircular=true ONLY if both visible wheels look like proper circles/ellipses with the same proportions, not skewed/stretched ellipses pointing toward a vanishing point.
+        - Set cameraPerpendicularToSide=true ONLY if the camera is truly side-on with no visible diagonal convergence of the car's body lines.
+        - If one end is much closer/larger than the other, set isThreeQuarterSideView=true, isStraightEnough=false, straightnessScore below 0.50, sideProfileScore below 0.50.
+        - When in doubt, REJECT. It is much better to ask the user to retake a slightly-off photo than to accept an angled photo.
 
         FRONT / REAR RULES:
         - Front means grille/headlights/front bumper face the camera.
@@ -387,6 +397,10 @@ struct GeminiAngleService {
           "bootEndX": null,
           "sideProfileScore": 0.0,
           "isThreeQuarterSideView": false,
+          "nearEndSizePercent": 0.0,
+          "farEndSizePercent": 0.0,
+          "wheelsAppearCircular": true,
+          "cameraPerpendicularToSide": true,
           "reason": "short reason"
         }
 
@@ -420,6 +434,18 @@ struct GeminiAngleService {
         let isThreeQuarterSideView = decoded.isThreeQuarterSideView == true
         let perspectiveIssue = decoded.perspectiveIssue ?? "None"
         let modelReason = decoded.reason ?? ""
+
+        // Concrete, hard-to-fake perspective check: how close in apparent size the two ends of
+        // the car are, plus whether the wheels look circular and the camera looks perpendicular.
+        // This catches angled/3-quarter shots even when the model's own free-text reason and
+        // vague scores don't flag it.
+        var endSizeMismatch = false
+        if let nearSize = decoded.nearEndSizePercent, let farSize = decoded.farEndSizePercent {
+            endSizeMismatch = abs(nearSize - farSize) > 8.0
+        }
+        let wheelsNotCircular = decoded.wheelsAppearCircular == false
+        let notPerpendicular = decoded.cameraPerpendicularToSide == false
+        let perspectiveSignalReject = endSizeMismatch || wheelsNotCircular || notPerpendicular
 
         let coordinateSide = inferSideFrontPosition(frontEndX: decoded.frontEndX, rearEndX: decoded.rearEndX, bonnetEndX: decoded.bonnetEndX, bootEndX: decoded.bootEndX)
         let textSide = normalizeSideFrontPosition(decoded.sideFrontPosition)
@@ -494,6 +520,9 @@ struct GeminiAngleService {
         }
 
         var hardPerspectiveReject = isThreeQuarterSideView || containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
+        if expected == .left || expected == .right {
+            hardPerspectiveReject = hardPerspectiveReject || perspectiveSignalReject
+        }
         if expected == .rear {
             // "not a side view" is correct for rear. Do not use that phrase to reject rear images.
             hardPerspectiveReject = containsHardRearPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
@@ -512,7 +541,12 @@ struct GeminiAngleService {
         case .left, .right:
             straightnessScore = min(rawStraightnessScore, sideProfileScore)
             // Strict for calibration: a very angled side/corner shot must not pass.
-            isStraight = !hardPerspectiveReject && decoded.isStraightEnough == true && rawStraightnessScore >= 0.78 && sideProfileScore >= 0.75
+            isStraight = !hardPerspectiveReject
+                && decoded.isStraightEnough == true
+                && decoded.wheelsAppearCircular == true
+                && decoded.cameraPerpendicularToSide == true
+                && rawStraightnessScore >= 0.85
+                && sideProfileScore >= 0.82
         case .unknown:
             straightnessScore = rawStraightnessScore
             isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.62)
@@ -591,6 +625,9 @@ struct GeminiAngleService {
         }
 
         if !isStraight {
+            if expected == .left || expected == .right {
+                return "This photo is taken at an angle, not straight-on. Please stand directly to the side of the car, level with the middle of the car, and take the photo perpendicular to the car's side so both wheels look the same size."
+            }
             return "The vehicle is too angled/slanted for calibration. Please retake it more straight-on."
         }
 
