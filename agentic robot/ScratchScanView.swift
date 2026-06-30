@@ -26,6 +26,10 @@ private struct AngleFailureContext: Identifiable {
     let expectedIndex: Int
     let result: GeminiAngleService.AngleValidationResult
     let isReplacement: Bool
+
+    var canOverride: Bool {
+        result.isStraightEnough && result.straightnessScore >= 0.78
+    }
 }
 
 // MARK: - Main View
@@ -92,45 +96,17 @@ struct ScratchScanView: View {
     }
 
     var body: some View {
-        ZStack {
-            SubtleHTXBackground()
+        GeometryReader { rootGeo in
+            ZStack {
+                SubtleHTXBackground()
 
-            VStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    headerView(isLandscape: rootGeo.size.width > rootGeo.size.height)
+                    progressBarView
 
-                // HEADER
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Scratch Scan").font(.largeTitle).bold().foregroundColor(HTXTheme.primaryPurple)
-                        Text("\(carType.rawValue)  ·  \(plate)")
-                            .font(.subheadline).foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Button("Logout") { onLogout() }.foregroundColor(.red)
+                    if showCompletionScreen { reviewView } else { scanGuideView }
                 }
-                .padding()
-
-                // PROGRESS BAR
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("\(capturedCount) of \(scanAngles.count) angles captured")
-                            .font(.caption).foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(Int(progress * 100))%")
-                            .font(.caption.bold()).foregroundColor(HTXTheme.primaryPurple)
-                    }
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4).fill(Color(.systemGray5)).frame(height: 8)
-                            RoundedRectangle(cornerRadius: 4).fill(HTXTheme.primaryPurple)
-                                .frame(width: geo.size.width * progress, height: 8)
-                                .animation(.spring(response: 0.5), value: progress)
-                        }
-                    }
-                    .frame(height: 8)
-                }
-                .padding(.horizontal).padding(.bottom, 12)
-
-                if showCompletionScreen { reviewView } else { scanGuideView }
+                .padding(.top, max(0, rootGeo.safeAreaInsets.top - 6))
             }
         }
         .overlay {
@@ -153,6 +129,7 @@ struct ScratchScanView: View {
                     detected: failure.result.detectedAngle.rawValue,
                     confidence: failure.result.confidence,
                     reason: failure.result.reason,
+                    canOverride: failure.canOverride,
                     onRetake: {
                         angleFailureContext = nil
                         selectedPhotoItem = nil
@@ -295,6 +272,61 @@ struct ScratchScanView: View {
         }
     }
 
+    private func headerView(isLandscape: Bool) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: isLandscape ? 0 : 2) {
+                Text("Scratch Scan")
+                    .font(isLandscape ? .system(size: 30, weight: .bold) : .largeTitle.bold())
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text("\(carType.rawValue)  ·  \(plate)")
+                    .font(isLandscape ? .caption : .subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 12)
+
+            Button("Logout") { onLogout() }
+                .foregroundColor(.red)
+                .padding(.top, isLandscape ? 4 : 0)
+        }
+        .padding(.horizontal)
+        .padding(.top, isLandscape ? 4 : 8)
+        .padding(.bottom, isLandscape ? 6 : 10)
+    }
+
+    private var progressBarView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(capturedCount) of \(scanAngles.count) angles captured")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("\(Int(progress * 100))%")
+                    .font(.caption.bold())
+                    .foregroundColor(HTXTheme.primaryPurple)
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(.systemGray5))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(HTXTheme.primaryPurple)
+                        .frame(width: geo.size.width * progress, height: 8)
+                        .animation(.spring(response: 0.5), value: progress)
+                }
+            }
+            .frame(height: 8)
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
+    }
+
     // MARK: - Angle Validation
 
     private func expectedAngleWord(for index: Int) -> String {
@@ -378,126 +410,248 @@ struct ScratchScanView: View {
     // MARK: - Scan Guide View
 
     private var scanGuideView: some View {
-        VStack(spacing: 16) {
+        GeometryReader { geo in
+            let isLandscape = geo.size.width > geo.size.height
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground))
-                CarSilhouetteView(carType: carType, angleId: currentAngleIndex).padding(.horizontal, 18).padding(.vertical, 10)
+            if isLandscape {
+                landscapeScanGuideView(size: geo.size)
+            } else {
+                portraitScanGuideView(size: geo.size)
             }
-            .frame(height: 310).padding(.horizontal)
-
-            HStack(spacing: 16) {
-                Image(systemName: scanAngles[currentAngleIndex].iconName)
-                    .font(.system(size: 26, weight: .bold)).foregroundColor(HTXTheme.primaryPurple).frame(width: 40)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(scanAngles[currentAngleIndex].label).font(.headline)
-                    Text(scanAngles[currentAngleIndex].instruction)
-                        .font(.subheadline).foregroundColor(.secondary)
-                }
-                Spacer()
-            }
-            .padding()
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
-            .padding(.horizontal)
-
-            photoTipsCard
-                .padding(.horizontal)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(0..<scanAngles.count, id: \.self) { idx in
-                        AngleThumbnail(
-                            label: scanAngles[idx].label,
-                            image: capturedImages[idx],
-                            isCurrent: idx == currentAngleIndex,
-                            accentColor: HTXTheme.primaryPurple
-                        )
-                        .onTapGesture { withAnimation { currentAngleIndex = idx } }
-                    }
-                }
-                .padding(.horizontal)
-            }
-            .frame(height: 90)
-
-            if let err = localErrorMessage {
-                Text(err).foregroundColor(.red).font(.footnote)
-                    .multilineTextAlignment(.center).padding(.horizontal)
-            }
-
-            Spacer()
-
-            HStack(spacing: 12) {
-                Button {
-                    if currentAngleIndex > 0 {
-                        withAnimation { currentAngleIndex -= 1 }
-                    } else {
-                        dismiss()
-                    }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(HTXTheme.primaryPurple)
-                        .frame(width: 52, height: 52)
-                        .background(Color(.secondarySystemBackground))
-                        .cornerRadius(12)
-                }
-
-                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Label("Library", systemImage: "photo.on.rectangle")
-                        .foregroundColor(HTXTheme.primaryPurple)
-                        .frame(maxWidth: .infinity).padding()
-                        .background(Color(.secondarySystemBackground)).cornerRadius(12)
-                }
-                Button {
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        localErrorMessage = nil; showCamera = true
-                    } else {
-                        localErrorMessage = "Camera is not available on this device."
-                    }
-                } label: {
-                    Label("Take Photo", systemImage: "camera.fill")
-                        .frame(maxWidth: .infinity).padding()
-                        .background(HTXTheme.primaryPurple).foregroundColor(.white).cornerRadius(12)
-                }
-            }
-            .padding(.horizontal).padding(.bottom, 24)
         }
         .animation(.easeInOut, value: currentAngleIndex)
     }
 
+    private func portraitScanGuideView(size: CGSize) -> some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 16) {
+                currentAnglePreview(height: min(310, max(220, size.height * 0.38)))
+                    .padding(.horizontal)
+
+                currentInstructionCard
+                    .padding(.horizontal)
+
+                photoTipsCard
+                    .padding(.horizontal)
+
+                angleThumbnailStrip
+                    .frame(height: 90)
+
+                errorMessageView
+            }
+            .padding(.bottom, 96)
+        }
+        .safeAreaInset(edge: .bottom) {
+            actionButtonBar
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                .background(.ultraThinMaterial)
+        }
+    }
+
+    private func landscapeScanGuideView(size: CGSize) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            currentAnglePreview(height: max(220, size.height - 18))
+                .frame(width: max(360, size.width * 0.58))
+                .padding(.leading)
+                .padding(.bottom, 10)
+
+            ScrollView(showsIndicators: true) {
+                VStack(spacing: 12) {
+                    currentInstructionCard
+                    photoTipsCard
+                    angleThumbnailStrip
+                        .frame(height: 88)
+                    errorMessageView
+                    actionButtonBar
+                        .padding(.top, 4)
+                }
+                .padding(.trailing)
+                .padding(.bottom, 18)
+            }
+        }
+    }
+
+    private func currentAnglePreview(height: CGFloat) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            RoundedRectangle(cornerRadius: 20)
+                .fill(Color(.secondarySystemBackground))
+
+            if let image = capturedImages[currentAngleIndex] {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .onTapGesture {
+                        replacingIndex = currentAngleIndex
+                        showReplaceSheet = true
+                    }
+
+                HStack {
+                    Text(scanAngles[currentAngleIndex].label)
+                        .font(.subheadline.bold())
+                        .foregroundColor(.white)
+                    Spacer()
+                    Label("Tap to replace", systemImage: "pencil.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.68), Color.black.opacity(0.0)],
+                        startPoint: .bottom,
+                        endPoint: .top
+                    )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+            } else {
+                CarSilhouetteView(carType: carType, angleId: currentAngleIndex)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var currentInstructionCard: some View {
+        HStack(spacing: 16) {
+            Image(systemName: scanAngles[currentAngleIndex].iconName)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .frame(width: 40)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(scanAngles[currentAngleIndex].label)
+                    .font(.headline)
+                Text(scanAngles[currentAngleIndex].instruction)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+    }
+
+
     private var photoTipsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "lightbulb.fill")
                     .foregroundColor(HTXTheme.primaryPurple)
                 Text("Photo tips")
-                    .font(.subheadline.bold())
+                    .font(.headline)
                     .foregroundColor(.primary)
             }
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 tipLine("Keep the vehicle as isolated as possible — avoid other cars, people, pillars, cones, or clutter.")
                 tipLine("Shoot in a well-lit area and avoid harsh reflections, glare, shadows, or rain/water marks.")
                 tipLine("Keep the whole car visible, level, and not overly zoomed in; crop only if the surroundings confuse the scan.")
+                tipLine("Stand straight-on to the requested angle. Avoid diagonal, slanted, or 3/4 perspective shots.")
             }
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground).opacity(0.65))
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(HTXTheme.primaryPurple.opacity(0.15), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(HTXTheme.primaryPurple.opacity(0.20), lineWidth: 1)
         )
     }
 
     private func tipLine(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 8) {
             Text("•")
-                .font(.caption)
                 .foregroundColor(HTXTheme.primaryPurple)
             Text(text)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var angleThumbnailStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(0..<scanAngles.count, id: \.self) { idx in
+                    AngleThumbnail(
+                        label: scanAngles[idx].label,
+                        image: capturedImages[idx],
+                        isCurrent: idx == currentAngleIndex,
+                        accentColor: HTXTheme.primaryPurple
+                    )
+                    .onTapGesture { withAnimation { currentAngleIndex = idx } }
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private var errorMessageView: some View {
+        Group {
+            if let err = localErrorMessage {
+                Text(err)
+                    .foregroundColor(.red)
+                    .font(.footnote)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+        }
+    }
+
+    private var actionButtonBar: some View {
+        HStack(spacing: 12) {
+            Button {
+                if currentAngleIndex > 0 {
+                    withAnimation { currentAngleIndex -= 1 }
+                } else {
+                    dismiss()
+                }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .frame(width: 52, height: 52)
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+            }
+
+            PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                Label("Library", systemImage: "photo.on.rectangle")
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color(.secondarySystemBackground))
+                    .cornerRadius(12)
+            }
+
+            Button {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    localErrorMessage = nil
+                    showCamera = true
+                } else {
+                    localErrorMessage = "Camera is not available on this device."
+                }
+            } label: {
+                Label("Take Photo", systemImage: "camera.fill")
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(HTXTheme.primaryPurple)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
         }
     }
 
@@ -633,6 +787,7 @@ private struct AngleFailurePopup: View {
     let detected: String
     let confidence: Double
     let reason: String
+    let canOverride: Bool
     let onRetake: () -> Void
     let onOverride: () -> Void
 
@@ -673,7 +828,9 @@ private struct AngleFailurePopup: View {
                 .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
-                Text("You can override this if the photo is still usable for damage analysis.")
+                Text(canOverride
+                     ? "You can override only if the photo is straight enough for calibration."
+                     : "This photo is too slanted for calibration, so it must be retaken.")
                     .font(.footnote)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -689,14 +846,16 @@ private struct AngleFailurePopup: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
 
-                    Button(action: onOverride) {
-                        Text("Override and Use Image Anyway")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color(.secondarySystemBackground))
-                            .foregroundColor(HTXTheme.primaryPurple)
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    if canOverride {
+                        Button(action: onOverride) {
+                            Text("Override and Use Image Anyway")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color(.secondarySystemBackground))
+                                .foregroundColor(HTXTheme.primaryPurple)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
                     }
                 }
             }
@@ -1358,7 +1517,8 @@ final class MagnifierCameraViewController: UIViewController {
                                 capturedImage: UIImage,
                                 reason: String,
                                 confidence: Double,
-                                debugSummary: String) {
+                                debugSummary: String,
+                                canOverride: Bool) {
         verifyingOverlay?.removeFromSuperview()
         verifyingOverlay = nil
         pendingOverrideImage = capturedImage
@@ -1387,7 +1547,7 @@ final class MagnifierCameraViewController: UIViewController {
             : reason
 
         let detailLabel = UILabel()
-        detailLabel.text = "Expected: \(expected)\nDetected: \(detected.rawValue)\nConfidence: \(Int((confidence * 100).rounded()))%\n\nReason:\n\(cleanedReason)\n\nYou can override this if the photo is still usable for damage analysis."
+        detailLabel.text = "Expected: \(expected)\nDetected: \(detected.rawValue)\nConfidence: \(Int((confidence * 100).rounded()))%\n\nReason:\n\(cleanedReason)\n\n" + (canOverride ? "You can override only if the photo is straight enough for calibration." : "This photo is too slanted for calibration, so it must be retaken.")
         detailLabel.font = .systemFont(ofSize: 14)
         detailLabel.textColor = .secondaryLabel
         detailLabel.textAlignment = .center
@@ -1411,7 +1571,7 @@ final class MagnifierCameraViewController: UIViewController {
         overrideBtn.translatesAutoresizingMaskIntoConstraints = false
         overrideBtn.addTarget(self, action: #selector(overrideAngleTapped), for: .touchUpInside)
 
-        let buttonStack = UIStackView(arrangedSubviews: [retakeBtn, overrideBtn])
+        let buttonStack = UIStackView(arrangedSubviews: canOverride ? [retakeBtn, overrideBtn] : [retakeBtn])
         buttonStack.axis = .vertical
         buttonStack.spacing = 10
         buttonStack.alignment = .fill
@@ -1571,7 +1731,8 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
                            capturedImage: image,
                            reason: "Could not map expected angle to Gemini enum.",
                            confidence: 0.0,
-                           debugSummary: "Could not map expected angle to Gemini enum.")
+                           debugSummary: "Could not map expected angle to Gemini enum.",
+                           canOverride: false)
             return
         }
 
@@ -1589,7 +1750,8 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
                                     capturedImage: image,
                                     reason: result.reason,
                                     confidence: result.confidence,
-                                    debugSummary: result.debugSummary)
+                                    debugSummary: result.debugSummary,
+                                    canOverride: result.isStraightEnough && result.straightnessScore >= 0.78)
             }
         }
     }

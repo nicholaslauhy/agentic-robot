@@ -13,7 +13,7 @@ struct GeminiAngleService {
     private static let apiKey = "AQ.Ab8RN6Lq982WOxRGQffyhjC--Lk9e_WJWr_yBH1IzVw44B4hSw"
     // ──────────────────────────────────────────────────────────────────────
 
-    private static let modelName = "gemini-2.5-flash"
+    private static let modelName = "gemini-3.5-flash"
 
     private static let endpoint =
         "https://generativelanguage.googleapis.com/v1beta/models/\(modelName):generateContent"
@@ -58,15 +58,22 @@ struct GeminiAngleService {
         let detectedAngle: DetectedAngle
         let matchesExpectedAngle: Bool
         let confidence: Double
+        let isStraightEnough: Bool
+        let straightnessScore: Double
+        let perspectiveIssue: String
         let reason: String
         let rawText: String
 
         var isAccepted: Bool {
-            matchesExpectedAngle && confidence >= 0.50 && detectedAngle != .unknown
+            matchesExpectedAngle &&
+            confidence >= 0.55 &&
+            detectedAngle != .unknown &&
+            isStraightEnough &&
+            straightnessScore >= 0.78
         }
 
         var debugSummary: String {
-            "Expected=\(expectedAngle.rawValue), Detected=\(detectedAngle.rawValue), Match=\(matchesExpectedAngle), Confidence=\(confidence), Reason=\(reason)"
+            "Expected=\(expectedAngle.rawValue), Detected=\(detectedAngle.rawValue), Match=\(matchesExpectedAngle), Confidence=\(confidence), Straight=\(isStraightEnough), StraightnessScore=\(straightnessScore), PerspectiveIssue=\(perspectiveIssue), Reason=\(reason)"
         }
     }
 
@@ -74,6 +81,9 @@ struct GeminiAngleService {
         let detectedAngle: String?
         let matchesExpectedAngle: Bool?
         let confidence: Double?
+        let isStraightEnough: Bool?
+        let straightnessScore: Double?
+        let perspectiveIssue: String?
         let reason: String?
     }
 
@@ -230,9 +240,12 @@ struct GeminiAngleService {
                         "detectedAngle":        ["type": "STRING"],
                         "matchesExpectedAngle": ["type": "BOOLEAN"],
                         "confidence":           ["type": "NUMBER"],
+                        "isStraightEnough":     ["type": "BOOLEAN"],
+                        "straightnessScore":    ["type": "NUMBER"],
+                        "perspectiveIssue":     ["type": "STRING"],
                         "reason":               ["type": "STRING"]
                     ],
-                    "required": ["detectedAngle", "matchesExpectedAngle", "confidence", "reason"]
+                    "required": ["detectedAngle", "matchesExpectedAngle", "confidence", "isStraightEnough", "straightnessScore", "perspectiveIssue", "reason"]
                 ]
             ]
         ]
@@ -294,6 +307,9 @@ struct GeminiAngleService {
                               detectedAngle: .unknown,
                               matchesExpectedAngle: false,
                               confidence: 0.0,
+                              isStraightEnough: false,
+                              straightnessScore: 0.0,
+                              perspectiveIssue: reason,
                               reason: reason,
                               rawText: "")
     }
@@ -310,6 +326,21 @@ struct GeminiAngleService {
         let coreRule = """
         You are validating car inspection photos for an app with four fixed slots:
         Front, Rear, Left, Right.
+
+        You must validate TWO things independently:
+        1. The photo is the expected angle slot.
+        2. The vehicle is more or less straight and suitable for later bounding-box calibration.
+
+        STRICT STRAIGHTNESS RULE:
+        A photo is acceptable only when the car is nearly parallel to the image frame for the requested slot.
+        Allow only a small buffer for normal hand movement.
+        Reject photos with obvious diagonal/slanted perspective, 3/4 corner perspective, strong keystone distortion,
+        one end of the car much larger than the other, or the vehicle body line running strongly upward/downward.
+        For side shots, the car's side profile should be broadside and nearly horizontal, not angled away into depth.
+        For front/rear shots, the car should be centered and straight-on, not photographed from one corner.
+
+        Return isStraightEnough=false and straightnessScore below 0.78 if the vehicle is too slanted for calibration.
+        Use straightnessScore from 0.0 to 1.0 where 1.0 is perfectly straight and 0.78 is the minimum acceptable buffer.
 
         VERY IMPORTANT SIDE-SHOT RULE:
         Left = the LEFT side of the car body is visible. Right = the RIGHT side of the car body is visible.
@@ -329,6 +360,15 @@ struct GeminiAngleService {
         Do NOT use driver side.
         Do NOT use the car manufacturer's left/right side.
         Do NOT mirror or reinterpret the app labels.
+
+        Return only JSON using this exact meaning:
+        detectedAngle: "Front", "Rear", "Left", "Right", or "Unknown".
+        matchesExpectedAngle: true only if the detected app slot matches the expected slot.
+        confidence: your confidence for the angle slot, from 0.0 to 1.0.
+        isStraightEnough: true only if the vehicle is straight enough for bounding-box calibration.
+        straightnessScore: 0.0 to 1.0; must be at least 0.78 to be accepted.
+        perspectiveIssue: short explanation of any slant/perspective problem, or "None".
+        reason: one concise explanation combining the angle and straightness decision.
         """
 
         if let expectedAngle, expectedAngle != .unknown {
@@ -395,6 +435,12 @@ struct GeminiAngleService {
             let reason = decoded.reason ?? ""
             let rawConfidence = decoded.confidence ?? (detected == .unknown ? 0.0 : 0.60)
             let confidence = min(max(rawConfidence, 0.0), 1.0)
+            let rawStraightnessScore = decoded.straightnessScore ?? 0.0
+            let straightnessScore = min(max(rawStraightnessScore, 0.0), 1.0)
+            let perspectiveIssue = decoded.perspectiveIssue ?? ""
+            let modelStraightEnough = decoded.isStraightEnough == true
+            let textFlagsSlant = containsSlantWarning(reason: reason, perspectiveIssue: perspectiveIssue, rawText: text)
+            let isStraightEnough = modelStraightEnough && straightnessScore >= 0.78 && !textFlagsSlant
 
             let directMatch = expected != .unknown && detected == expected
             let geminiSaysMatch = decoded.matchesExpectedAngle == true
@@ -417,11 +463,24 @@ struct GeminiAngleService {
                 debugLog("⚠️ Angle rejected: directMatch=\(directMatch), geminiSaysMatch=\(geminiSaysMatch), sideReasonMatch=\(sideReasonMatch), detected=\(detected.rawValue), expected=\(expected.rawValue).")
             }
 
+            let finalReason: String
+            if !isStraightEnough {
+                let issue = perspectiveIssue.trimmingCharacters(in: .whitespacesAndNewlines)
+                finalReason = issue.isEmpty || issue.lowercased() == "none"
+                    ? "Photo is too slanted for reliable bounding-box calibration. Retake it with the car straighter and more parallel to the frame."
+                    : "Photo is too slanted for reliable bounding-box calibration: \(issue)"
+            } else {
+                finalReason = reason
+            }
+
             return AngleValidationResult(expectedAngle: expected,
                                          detectedAngle: detected,
                                          matchesExpectedAngle: matches,
                                          confidence: confidence,
-                                         reason: reason,
+                                         isStraightEnough: isStraightEnough,
+                                         straightnessScore: straightnessScore,
+                                         perspectiveIssue: perspectiveIssue,
+                                         reason: finalReason,
                                          rawText: text)
         }
 
@@ -434,9 +493,12 @@ struct GeminiAngleService {
                                      detectedAngle: detected,
                                      matchesExpectedAngle: matches,
                                      confidence: confidence,
+                                     isStraightEnough: false,
+                                     straightnessScore: 0.0,
+                                     perspectiveIssue: "Could not verify straightness from the response.",
                                      reason: detected == .unknown
                                          ? "Could not determine the angle. Please retake the photo."
-                                         : "Angle identified from photo.",
+                                         : "Could not verify that the car is straight enough. Please retake the photo.",
                                      rawText: text)
     }
 
@@ -485,6 +547,21 @@ struct GeminiAngleService {
             index = text.index(after: index)
         }
         return nil
+    }
+
+
+    private static func containsSlantWarning(reason: String, perspectiveIssue: String, rawText: String) -> Bool {
+        let combined = "\(reason) \(perspectiveIssue) \(rawText)".lowercased()
+        let warningTerms = [
+            "too slanted", "slanted", "diagonal", "3/4", "three-quarter", "three quarter",
+            "corner perspective", "strong perspective", "keystone", "angled away",
+            "not straight", "not parallel", "perspective distortion", "one end",
+            "front end larger", "rear end larger", "body line runs", "tilted"
+        ]
+        if combined.contains("no slant") || combined.contains("none") && perspectiveIssue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "none" {
+            return false
+        }
+        return warningTerms.contains { combined.contains($0) }
     }
 
     private static func sideSlotMatchesFromReason(reason: String, rawText: String, expected: DetectedAngle) -> Bool {
