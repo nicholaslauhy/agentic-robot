@@ -3,7 +3,7 @@
 //  agentic robot
 //
 //  OpenAI-powered vehicle photo validator for Scratch Scan.
-//  The class name is kept as GeminiAngleService so existing app calls do not need to change.
+//  Class name kept as GeminiAngleService so existing ScratchScanView calls do not change.
 //
 
 import UIKit
@@ -12,10 +12,11 @@ struct GeminiAngleService {
 
     // IMPORTANT:
     // Do NOT ship a real API key inside an iOS app for production.
-    // For testing only, paste your new OpenAI key here.
+    // For testing only, paste your NEW key here.
     // Production: iOS app -> your backend -> OpenAI.
-    private static let apiKey = "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"
+    private static let apiKey = "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"
 
+    // User requested gpt-4o, not 4o-mini.
     private static let modelName = "gpt-4o"
     private static let endpoint = "https://api.openai.com/v1/chat/completions"
 
@@ -60,67 +61,36 @@ struct GeminiAngleService {
 
             switch expectedAngle {
             case .rear:
-                // Rear is intentionally lenient: if the rear face is detected and straight enough,
-                // do not fail just because the model gave low generic confidence/visibility scores.
-                return isStraightEnough || straightnessScore >= 0.40
+                // Rear should not fail just because the model says "not a side view".
+                return visibilityScore >= 0.35 && (isStraightEnough || straightnessScore >= 0.35)
+
             case .front:
-                guard confidence >= requiredConfidence(for: expectedAngle) else { return false }
-                guard visibilityScore >= requiredVisibility(for: expectedAngle) else { return false }
-                guard straightnessScore >= requiredStraightness(for: expectedAngle) else { return false }
-                return wholeVehicleVisible && isStraightEnough
+                return wholeVehicleVisible &&
+                       confidence >= 0.45 &&
+                       visibilityScore >= 0.55 &&
+                       isStraightEnough &&
+                       straightnessScore >= 0.58
+
             case .left, .right:
-                guard confidence >= requiredConfidence(for: expectedAngle) else { return false }
-                guard visibilityScore >= requiredVisibility(for: expectedAngle) else { return false }
-                guard straightnessScore >= requiredStraightness(for: expectedAngle) else { return false }
-                // Side slots must show enough of the whole side profile for later bbox calibration.
-                return wholeVehicleVisible && isStraightEnough
+                // Side views must be strict about orientation and perspective.
+                // Orientation is enforced locally from image coordinates/votes, not from the model's vague Left/Right label.
+                return wholeVehicleVisible &&
+                       confidence >= 0.45 &&
+                       visibilityScore >= 0.55 &&
+                       isStraightEnough &&
+                       straightnessScore >= 0.70
+
             case .unknown:
-                guard confidence >= requiredConfidence(for: expectedAngle) else { return false }
-                guard visibilityScore >= requiredVisibility(for: expectedAngle) else { return false }
-                guard straightnessScore >= requiredStraightness(for: expectedAngle) else { return false }
-                return wholeVehicleVisible && isStraightEnough && detectedAngle != .unknown
+                return detectedAngle != .unknown &&
+                       wholeVehicleVisible &&
+                       confidence >= 0.45 &&
+                       visibilityScore >= 0.55 &&
+                       isStraightEnough
             }
         }
 
         var debugSummary: String {
             "Expected=\(expectedAngle.rawValue), Detected=\(detectedAngle.rawValue), Match=\(matchesExpectedAngle), Confidence=\(confidence), CarPresent=\(carPresent), Visible=\(wholeVehicleVisible), VisibilityScore=\(visibilityScore), Straight=\(isStraightEnough), StraightnessScore=\(straightnessScore), Perspective=\(perspectiveIssue), Reason=\(reason)"
-        }
-
-        private func requiredConfidence(for angle: DetectedAngle) -> Double {
-            switch angle {
-            case .rear: return 0.35
-            case .front: return 0.50
-            case .left, .right: return 0.50
-            case .unknown: return 0.50
-            }
-        }
-
-        private func requiredVisibility(for angle: DetectedAngle) -> Double {
-            switch angle {
-            case .rear:
-                // Accept rear photos where the rear face is clearly visible even if the model complains
-                // that the whole car length is not visible.
-                return 0.35
-            case .front:
-                return 0.60
-            case .left, .right:
-                return 0.68
-            case .unknown:
-                return 0.65
-            }
-        }
-
-        private func requiredStraightness(for angle: DetectedAngle) -> Double {
-            switch angle {
-            case .rear:
-                return 0.35
-            case .front:
-                return 0.62
-            case .left, .right:
-                return 0.82
-            case .unknown:
-                return 0.62
-            }
         }
     }
 
@@ -129,11 +99,12 @@ struct GeminiAngleService {
         let wholeVehicleVisible: Bool?
         let visibilityScore: Double?
         let detectedAngle: String?
-        let matchesExpectedAngle: Bool?
         let confidence: Double?
         let isStraightEnough: Bool?
         let straightnessScore: Double?
         let perspectiveIssue: String?
+
+        // Objective side-orientation evidence. These must describe IMAGE coordinates only.
         let sideFrontPosition: String?
         let cameraSideDirection: String?
         let frontIsOnImageLeft: Bool?
@@ -142,12 +113,15 @@ struct GeminiAngleService {
         let rearEndX: Double?
         let bonnetEndX: Double?
         let bootEndX: Double?
+
+        // Straight side-profile evidence.
         let sideProfileScore: Double?
         let isThreeQuarterSideView: Bool?
         let nearEndSizePercent: Double?
         let farEndSizePercent: Double?
-        let wheelsAppearCircular: Bool?
+        let wheelsAppearSimilarSize: Bool?
         let cameraPerpendicularToSide: Bool?
+
         let reason: String?
     }
 
@@ -192,7 +166,8 @@ struct GeminiAngleService {
         expectedAngle: DetectedAngle?,
         completion: @escaping (AngleValidationResult) -> Void
     ) {
-        guard apiKey != "PASTE_YOUR_OPENAI_API_KEY_HERE",
+        guard apiKey != "PASTE_YOUR_NEW_OPENAI_API_KEY_HERE",
+              apiKey != "PASTE_YOUR_OPENAI_API_KEY_HERE",
               !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             completion(failureResult(expectedAngle: expectedAngle,
                                      reason: "OpenAI API key is missing. Paste your new key into GeminiAngleService.swift or call your backend proxy."))
@@ -206,8 +181,8 @@ struct GeminiAngleService {
         }
 
         let base64 = jpeg.base64EncodedString()
-        let prompt = buildPrompt(expectedAngle: expectedAngle)
-        debugLog("Expected slot: \(expectedAngle?.rawValue ?? "None")\nPrompt:\n\(prompt)")
+        let prompt = buildPrompt()
+        debugLog("Expected slot: \(expectedAngle?.rawValue ?? "None")\nPrompt is OBJECTIVE; expected slot is NOT sent to the model. Local code enforces expected slot after parsing.")
 
         guard let request = buildURLRequest(base64: base64, prompt: prompt) else {
             completion(failureResult(expectedAngle: expectedAngle, reason: "Could not build OpenAI request."))
@@ -245,7 +220,7 @@ struct GeminiAngleService {
         let body: [String: Any] = [
             "model": modelName,
             "temperature": 0,
-            "max_tokens": 800,
+            "max_tokens": 700,
             "response_format": ["type": "json_object"],
             "messages": [[
                 "role": "user",
@@ -318,97 +293,53 @@ struct GeminiAngleService {
 
     // MARK: - Prompt
 
-    private static func expectedAngleInstruction(_ expectedAngle: DetectedAngle?) -> String {
-        guard let expectedAngle else {
-            return "No specific slot is being validated. Classify the photo objectively."
-        }
-
-        switch expectedAngle {
-        case .right:
-            return """
-            EXPECTED SLOT = RIGHT SIDE.
-            RIGHT SIDE in this app means ONLY this: the BONNET/HOOD/NOSE END is on the RIGHT side of the IMAGE.
-            Accept as Right only when bonnetEndX > bootEndX and frontEndX > rearEndX.
-            Reject as not Right when the bonnet/hood/headlights are on image-left, even if it is the vehicle's real-world right side.
-            Do not use driver/passenger side. Do not use the physical left/right side of the car.
-            """
-        case .left:
-            return """
-            EXPECTED SLOT = LEFT SIDE.
-            LEFT SIDE in this app means ONLY this: the BONNET/HOOD/NOSE END is on the LEFT side of the IMAGE.
-            Accept as Left only when bonnetEndX < bootEndX and frontEndX < rearEndX.
-            Reject as not Left when the bonnet/hood/headlights are on image-right, even if it is the vehicle's real-world left side.
-            Do not use driver/passenger side. Do not use the physical left/right side of the car.
-            """
-        case .front:
-            return "EXPECTED SLOT = FRONT. The grille/headlights/front bumper face the camera. Do not require side-view rules."
-        case .rear:
-            return "EXPECTED SLOT = REAR. The tail-lights/boot/rear bumper face the camera. Do not require side-view rules or full side length."
-        case .unknown:
-            return "No specific slot is being validated. Classify the photo objectively."
-        }
-    }
-
-    private static func buildPrompt(expectedAngle: DetectedAngle?) -> String {
-        return """
+    private static func buildPrompt() -> String {
+        """
         You are objectively describing ONE vehicle inspection photo for an iOS app.
 
-        CRITICAL RULE: Use the expected slot only as the validation target.
-        Still describe exactly what you see in the photo. Do not force a match.
-        Wrong-side rejection is better than accepting the wrong photo.
         Return ONLY valid JSON. No markdown. No extra text.
-
-        EXPECTED SLOT CONTEXT FOR THIS VALIDATION:
-        \(expectedAngleInstruction(expectedAngle))
+        You are NOT told the expected slot. Do NOT try to satisfy any expected answer.
+        Describe exactly what is visible in the image.
 
         IMAGE COORDINATES:
-        - The left edge of the photo is x=0.
-        - The right edge of the photo is x=100.
-        - All left/right decisions refer ONLY to the photo coordinates.
-        - Do NOT use driver side, passenger side, Singapore road side, steering wheel side, or the real-world left/right side of the vehicle.
+        - Left edge of photo is x=0.
+        - Right edge of photo is x=100.
+        - All left/right decisions refer ONLY to photo coordinates.
+        - Ignore driver side, passenger side, steering wheel side, road side, and real-world vehicle left/right.
 
-        IMPORTANT WORDING:
-        - For side photos, DO NOT think about "front side" of the vehicle.
-        - Use the word BONNET/HOOD/NOSE END instead.
-        - The BONNET END means the end with bonnet/hood, headlights, grille, front bumper, front wheel arch, and windscreen sloping back from the bonnet.
-        - The BOOT END means the end with boot/trunk, tail-lights, rear bumper, rear windscreen/C-pillar.
+        ABSOLUTE APP SIDE DEFINITIONS:
+        - LEFT SIDE = the bonnet/hood/nose/front end of the car is on IMAGE-LEFT.
+        - RIGHT SIDE = the bonnet/hood/nose/front end of the car is on IMAGE-RIGHT.
+        - If the bonnet/front is on image-left, detectedAngle must be "Left".
+        - If the bonnet/front is on image-right, detectedAngle must be "Right".
+        - A side photo can NEVER be both Left and Right.
 
-        SIDE SLOT DEFINITIONS FOR THIS APP:
-        - LEFT SIDE photo = the BONNET END is on the LEFT side of the IMAGE.
-          This must mean bonnetEndX < bootEndX, frontEndX < rearEndX, sideFrontPosition="left".
-        - RIGHT SIDE photo = the BONNET END is on the RIGHT side of the IMAGE.
-          This must mean bonnetEndX > bootEndX, frontEndX > rearEndX, sideFrontPosition="right".
-        - A side photo can NEVER be both left and right.
-        - If the bonnet/hood/headlights are on image-right, it is RIGHT SIDE for this app, even if you think it is the car's real-world left side.
-        - If the bonnet/hood/headlights are on image-left, it is LEFT SIDE for this app, even if you think it is the car's real-world right side.
-        - If you cannot clearly locate the bonnet end and boot end, return detectedAngle="Unknown" and sideFrontPosition="unknown".
+        HOW TO FIND THE BONNET/FRONT END:
+        - Bonnet/front end = hood/bonnet, headlights, grille/front bumper, front wheel arch, windscreen sloping back from the bonnet.
+        - Boot/rear end = trunk/boot, tail-lights, rear bumper, rear windscreen/C-pillar.
+        - frontEndX and bonnetEndX are approximate x-coordinates of the front/bonnet end center, from 0 to 100.
+        - rearEndX and bootEndX are approximate x-coordinates of the rear/boot end center, from 0 to 100.
+        - For LEFT SIDE: bonnetEndX < bootEndX, frontEndX < rearEndX, sideFrontPosition="left", frontIsOnImageLeft=true, frontIsOnImageRight=false.
+        - For RIGHT SIDE: bonnetEndX > bootEndX, frontEndX > rearEndX, sideFrontPosition="right", frontIsOnImageLeft=false, frontIsOnImageRight=true.
+        - If you cannot clearly locate both ends, use detectedAngle="Unknown" and sideFrontPosition="unknown".
 
-        SIDE STRAIGHTNESS / CALIBRATION RULE — BE VERY STRICT:
-        - This photo will be used for pixel-level bounding-box calibration, so even a mild angle is NOT acceptable.
-        - The camera must be pointing PERPENDICULAR (90 degrees) to the side of the car, like a profile mugshot. Imagine the car's side as a flat plane — the camera's line of sight must be a straight line directly into that plane, not at a diagonal.
-        - Check the two wheels: in a properly straight side photo, the front wheel and rear wheel should look almost the same size and both should look like circles (or near-circles), sitting on the same horizontal line.
-        - If the wheel nearer the camera looks noticeably bigger than the far wheel, OR the wheels look like tilted ellipses instead of circles, OR you can see the front windscreen/grille AND the rear windscreen/boot face at the same time at an angle (instead of a flat side silhouette), the photo is taken at an angle and MUST be rejected.
-        - If one end of the car (bonnet end or boot end) is closer to the camera and therefore looks bigger/taller than the other end, that is a 3/4 angled shot and MUST be rejected, even if it is only a mild angle.
-        - Estimate nearEndSizePercent and farEndSizePercent: rate how large each end of the car (bonnet end vs boot end) appears in the frame, 0-100, where 100 means it fills/dominates the frame and is the closest point to the camera. In a correctly straight shot these two values must be nearly equal (within about 8 of each other). If they differ by more than 8, the shot is angled.
-        - Set wheelsAppearCircular=true ONLY if both visible wheels look like proper circles/ellipses with the same proportions, not skewed/stretched ellipses pointing toward a vanishing point.
-        - Set cameraPerpendicularToSide=true ONLY if the camera is truly side-on with no visible diagonal convergence of the car's body lines.
-        - If one end is much closer/larger than the other, set isThreeQuarterSideView=true, isStraightEnough=false, straightnessScore below 0.50, sideProfileScore below 0.50.
-        - When in doubt, REJECT. It is much better to ask the user to retake a slightly-off photo than to accept an angled photo.
+        STRICT SIDE STRAIGHTNESS RULE:
+        - The side photo must be a straight side profile, not a 3/4 angled view.
+        - Reject angled/corner side photos even if the bonnet side is known.
+        - Set isThreeQuarterSideView=true if one end of the car is visibly closer/larger, both front and side faces are visible, both rear and side faces are visible, or body lines strongly converge.
+        - Set cameraPerpendicularToSide=false for diagonal side/corner shots.
+        - For a correct straight side photo, sideProfileScore and straightnessScore should usually be at least 0.75.
 
         FRONT / REAR RULES:
         - Front means grille/headlights/front bumper face the camera.
         - Rear means tail-lights/boot/rear bumper face the camera.
-        - For rear, DO NOT require a side view and DO NOT require the full car length.
-        - For rear, wholeVehicleVisible=true when the rear face is visible enough: tail-lights, boot and rear bumper can be seen.
-        - For rear, do NOT mark cropped simply because only the rear face is shown. That is correct for Rear.
-        - For rear, allow slight off-centre or handheld framing. Only reject obvious rear-corner 3-quarter views, heavy slant, or strong perspective.
-        - The phrase "not a side view" is NOT a problem for a Rear image.
+        - For front/rear, do not apply side bonnet-left/bonnet-right rules.
 
         CAR PRESENCE / VISIBILITY:
-        - carPresent=false if there is no real car/vehicle in frame.
-        - Reject empty carparks, walls, pillars, random objects, people, motorcycles only, close-up parts only, drawings, screenshots, or toys.
-        - For side photos, wholeVehicleVisible=true only if both bonnet end and boot end are visible enough for calibration. Small margins cut off are okay.
-        - For front/rear, wholeVehicleVisible=true if the respective face is sufficiently visible.
+        - carPresent=false if there is no real car/vehicle.
+        - Reject empty carparks, walls, pillars, people, motorcycles only, close-up parts only, drawings, screenshots, or toys.
+        - For side photos, wholeVehicleVisible=true only if both bonnet/front end and boot/rear end are visible enough for calibration.
+        - For front/rear, wholeVehicleVisible=true if the required face is sufficiently visible.
 
         Required JSON schema:
         {
@@ -416,7 +347,6 @@ struct GeminiAngleService {
           "wholeVehicleVisible": true,
           "visibilityScore": 0.0,
           "detectedAngle": "Unknown",
-          "matchesExpectedAngle": false,
           "confidence": 0.0,
           "isStraightEnough": true,
           "straightnessScore": 0.0,
@@ -433,7 +363,7 @@ struct GeminiAngleService {
           "isThreeQuarterSideView": false,
           "nearEndSizePercent": 0.0,
           "farEndSizePercent": 0.0,
-          "wheelsAppearCircular": true,
+          "wheelsAppearSimilarSize": true,
           "cameraPerpendicularToSide": true,
           "reason": "short reason"
         }
@@ -441,11 +371,6 @@ struct GeminiAngleService {
         Allowed detectedAngle values: "Front", "Rear", "Left", "Right", "Unknown".
         Allowed sideFrontPosition values: "left", "right", "unknown".
         Allowed cameraSideDirection values: "bonnet_on_image_left", "bonnet_on_image_right", "unknown".
-
-        Examples:
-        - Bonnet/headlights on image-left and boot/tail-lights on image-right: detectedAngle="Left", sideFrontPosition="left", cameraSideDirection="bonnet_on_image_left", frontIsOnImageLeft=true, frontIsOnImageRight=false, bonnetEndX < bootEndX, frontEndX < rearEndX.
-        - Bonnet/headlights on image-right and boot/tail-lights on image-left: detectedAngle="Right", sideFrontPosition="right", cameraSideDirection="bonnet_on_image_right", frontIsOnImageLeft=false, frontIsOnImageRight=true, bonnetEndX > bootEndX, frontEndX > rearEndX.
-        - Clear rear face with tail-lights/boot/rear bumper: detectedAngle="Rear", wholeVehicleVisible=true, visibilityScore at least 0.70, confidence at least 0.70. Do not complain that it is not a side view.
         """
     }
 
@@ -463,60 +388,22 @@ struct GeminiAngleService {
         let carPresent = decoded.carPresent == true
         var visibilityScore = clamp01(decoded.visibilityScore ?? 0.0)
         var confidence = clamp01(decoded.confidence ?? 0.0)
-        var rawStraightnessScore = clamp01(decoded.straightnessScore ?? 0.0)
+        let rawStraightnessScore = clamp01(decoded.straightnessScore ?? 0.0)
         let sideProfileScore = clamp01(decoded.sideProfileScore ?? 0.0)
-        let isThreeQuarterSideView = decoded.isThreeQuarterSideView == true
         let perspectiveIssue = decoded.perspectiveIssue ?? "None"
         let modelReason = decoded.reason ?? ""
-
-        // Concrete, hard-to-fake perspective check: how close in apparent size the two ends of
-        // the car are, plus whether the wheels look circular and the camera looks perpendicular.
-        // This catches angled/3-quarter shots even when the model's own free-text reason and
-        // vague scores don't flag it.
-        var endSizeMismatch = false
-        if let nearSize = decoded.nearEndSizePercent, let farSize = decoded.farEndSizePercent {
-            endSizeMismatch = abs(nearSize - farSize) > 8.0
-        }
-        let wheelsNotCircular = decoded.wheelsAppearCircular == false
-        let notPerpendicular = decoded.cameraPerpendicularToSide == false
-        let perspectiveSignalReject = endSizeMismatch || wheelsNotCircular || notPerpendicular
-
-        let coordinateSide = inferSideFrontPosition(frontEndX: decoded.frontEndX, rearEndX: decoded.rearEndX, bonnetEndX: decoded.bonnetEndX, bootEndX: decoded.bootEndX)
-        let textSide = normalizeSideFrontPosition(decoded.sideFrontPosition)
-        let cameraDirectionSide = normalizeCameraSideDirection(decoded.cameraSideDirection)
-        let booleanSide = inferSideFromBooleans(left: decoded.frontIsOnImageLeft, right: decoded.frontIsOnImageRight)
         let rawDetected = parseDetectedAngle(from: decoded.detectedAngle ?? "")
 
-        // Rear images were being rejected when the model correctly said "Rear" but gave
-        // confidence/visibility 0 because it was thinking about side-view requirements.
-        // For the Rear slot, a clear rear face is enough.
-        if expected == .rear && rawDetected == .rear && carPresent {
-            confidence = max(confidence, 0.75)
-            visibilityScore = max(visibilityScore, 0.75)
-            rawStraightnessScore = max(rawStraightnessScore, 0.55)
-        }
-
-        let angleSide: String
-        if rawDetected == .left {
-            angleSide = "left"
-        } else if rawDetected == .right {
-            angleSide = "right"
-        } else {
-            angleSide = "unknown"
-        }
-
-        let finalSide = consensusSide(
-            expected: expected,
-            coordinateSide: coordinateSide,
-            textSide: textSide,
-            cameraDirectionSide: cameraDirectionSide,
-            booleanSide: booleanSide,
-            angleSide: angleSide,
-            sideProfileScore: sideProfileScore,
-            frontEndX: decoded.frontEndX,
-            rearEndX: decoded.rearEndX,
-            bonnetEndX: decoded.bonnetEndX,
-            bootEndX: decoded.bootEndX
+        let finalSide = decideFinalSideStrict(
+            coordinateSide: inferSideFromCoordinates(frontEndX: decoded.frontEndX,
+                                                     rearEndX: decoded.rearEndX,
+                                                     bonnetEndX: decoded.bonnetEndX,
+                                                     bootEndX: decoded.bootEndX),
+            textSide: normalizeSideFrontPosition(decoded.sideFrontPosition),
+            cameraSide: normalizeCameraSideDirection(decoded.cameraSideDirection),
+            boolSide: inferSideFromBooleans(left: decoded.frontIsOnImageLeft,
+                                            right: decoded.frontIsOnImageRight),
+            angleSide: sideFromDetectedAngle(rawDetected)
         )
 
         var detected = rawDetected
@@ -524,14 +411,24 @@ struct GeminiAngleService {
             detected = .left
         } else if finalSide == "right" {
             detected = .right
+        } else if expected == .left || expected == .right {
+            // Never let a weak model label alone make a side image pass.
+            // If the objective side evidence is unknown/conflicting, show Unknown.
+            detected = .unknown
+        }
+
+        // Rear images often get low generic scores because the model thinks it needs side length.
+        if expected == .rear && detected == .rear && carPresent {
+            confidence = max(confidence, 0.75)
+            visibilityScore = max(visibilityScore, 0.70)
         }
 
         let matches: Bool
         switch expected {
         case .left:
-            matches = finalSide == "left" && detected == .left && sideProfileScore >= 0.70
+            matches = finalSide == "left" && detected == .left
         case .right:
-            matches = finalSide == "right" && detected == .right && sideProfileScore >= 0.70
+            matches = finalSide == "right" && detected == .right
         case .front:
             matches = detected == .front
         case .rear:
@@ -543,55 +440,55 @@ struct GeminiAngleService {
         let wholeVisible: Bool
         switch expected {
         case .rear:
-            // Do not let the model reject a rear photo as "cropped" when it can clearly see the rear face.
-            // The rear slot only needs the rear face; it does not need the full side length of the car.
             wholeVisible = carPresent && (detected == .rear || decoded.wholeVehicleVisible == true || visibilityScore >= 0.35)
         case .front:
-            wholeVisible = carPresent && (decoded.wholeVehicleVisible == true || visibilityScore >= 0.60)
+            wholeVisible = carPresent && (decoded.wholeVehicleVisible == true || visibilityScore >= 0.55)
         case .left, .right:
-            wholeVisible = carPresent && decoded.wholeVehicleVisible == true && visibilityScore >= 0.68 && sideProfileScore >= 0.70
+            wholeVisible = carPresent && (decoded.wholeVehicleVisible == true || visibilityScore >= 0.55) && finalSide != "unknown"
         case .unknown:
-            wholeVisible = carPresent && (decoded.wholeVehicleVisible == true || visibilityScore >= 0.65)
+            wholeVisible = carPresent && (decoded.wholeVehicleVisible == true || visibilityScore >= 0.55)
         }
 
-        var hardPerspectiveReject = isThreeQuarterSideView || containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
-        if expected == .left || expected == .right {
-            hardPerspectiveReject = hardPerspectiveReject || perspectiveSignalReject
-        }
+        let endSizeMismatch = hasEndSizeMismatch(near: decoded.nearEndSizePercent, far: decoded.farEndSizePercent)
+        let wheelsMismatch = decoded.wheelsAppearSimilarSize == false
+        let notPerpendicular = decoded.cameraPerpendicularToSide == false
+        let threeQuarter = decoded.isThreeQuarterSideView == true
+
+        let hardPerspectiveReject: Bool
         if expected == .rear {
-            // "not a side view" is correct for rear. Do not use that phrase to reject rear images.
             hardPerspectiveReject = containsHardRearPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
+        } else if expected == .left || expected == .right {
+            hardPerspectiveReject = threeQuarter || endSizeMismatch || wheelsMismatch || notPerpendicular || containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
+        } else {
+            hardPerspectiveReject = containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
         }
+
         let straightnessScore: Double
         let isStraight: Bool
-
         switch expected {
+        case .left, .right:
+            // Keep angled-car catching strict.
+            // Correct side must still fail if it is diagonal/3-quarter.
+            straightnessScore = sideProfileScore > 0 ? min(rawStraightnessScore, sideProfileScore) : rawStraightnessScore
+            isStraight = !hardPerspectiveReject &&
+                         (decoded.isStraightEnough == true || rawStraightnessScore >= 0.72) &&
+                         rawStraightnessScore >= 0.66 &&
+                         (sideProfileScore == 0 || sideProfileScore >= 0.62)
         case .rear:
             straightnessScore = rawStraightnessScore
-            // Rear is allowed to be slightly off-centre. Only reject obvious 3/4 rear-corner / strong slant.
             isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.35)
         case .front:
             straightnessScore = rawStraightnessScore
-            isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.62)
-        case .left, .right:
-            straightnessScore = min(rawStraightnessScore, sideProfileScore)
-            // Strict for calibration: a very angled side/corner shot must not pass.
-            isStraight = !hardPerspectiveReject
-                && decoded.isStraightEnough == true
-                && decoded.wheelsAppearCircular == true
-                && decoded.cameraPerpendicularToSide == true
-                && rawStraightnessScore >= 0.85
-                && sideProfileScore >= 0.82
+            isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.58)
         case .unknown:
             straightnessScore = rawStraightnessScore
-            isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.62)
+            isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.58)
         }
 
         let reason = buildFinalReason(expected: expected,
                                       detected: detected,
                                       carPresent: carPresent,
                                       wholeVisible: wholeVisible,
-                                      visibilityScore: visibilityScore,
                                       matches: matches,
                                       finalSide: finalSide,
                                       isStraight: isStraight,
@@ -617,7 +514,6 @@ struct GeminiAngleService {
         detected: DetectedAngle,
         carPresent: Bool,
         wholeVisible: Bool,
-        visibilityScore: Double,
         matches: Bool,
         finalSide: String,
         isStraight: Bool,
@@ -630,16 +526,16 @@ struct GeminiAngleService {
 
         if expected == .left && !matches {
             if finalSide == "right" {
-                return "Wrong side. This photo is Right Side because the car front is on the right side of the image. Left Side requires the car front on the left."
+                return "Wrong side. This is Right Side because the bonnet/front is on the right side of the image. Left Side requires the bonnet/front on the left."
             }
-            return "Could not confirm Left Side. Left Side requires a clear side profile with the car front on the left side of the image."
+            return "Could not confirm Left Side. Left Side requires a clear side profile with the bonnet/front on the left side of the image."
         }
 
         if expected == .right && !matches {
             if finalSide == "left" {
-                return "Wrong side. This photo is Left Side because the car front is on the left side of the image. Right Side requires the car front on the right."
+                return "Wrong side. This is Left Side because the bonnet/front is on the left side of the image. Right Side requires the bonnet/front on the right."
             }
-            return "Could not confirm Right Side. Right Side requires a clear side profile with the car front on the right side of the image."
+            return "Could not confirm Right Side. Right Side requires a clear side profile with the bonnet/front on the right side of the image."
         }
 
         if !wholeVisible {
@@ -649,7 +545,7 @@ struct GeminiAngleService {
             case .front:
                 return "The front face is not visible enough. Please make sure the headlights, grille and front bumper can be seen."
             case .left, .right:
-                return "The side profile is not visible enough. Please include the car from front end to rear end."
+                return "The side profile is not visible enough. Please include the car from bonnet/front end to boot/rear end."
             case .unknown:
                 return "The vehicle is not visible enough for inspection."
             }
@@ -661,74 +557,119 @@ struct GeminiAngleService {
 
         if !isStraight {
             if expected == .left || expected == .right {
-                return "This photo is taken at an angle, not straight-on. Please stand directly to the side of the car, level with the middle of the car, and take the photo perpendicular to the car's side so both wheels look the same size."
+                return "This photo is taken at an angle, not straight-on. Stand directly beside the middle of the car so both ends and wheels look similar in size."
             }
-            return "The vehicle is too angled/slanted for calibration. Please retake it more straight-on."
+            return "The vehicle is too angled or slanted for calibration. Please retake it more straight-on."
         }
 
         if !modelReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return modelReason
         }
 
-        return "Photo accepted. Visibility \(Int(visibilityScore * 100))%, straightness \(Int(straightnessScore * 100))%."
+        return "Photo accepted. Straightness \(Int(straightnessScore * 100))%."
     }
 
-    private static func consensusSide(
-        expected: DetectedAngle,
+    // MARK: - Side decision helpers
+
+    private static func decideFinalSideStrict(
         coordinateSide: String,
         textSide: String,
-        cameraDirectionSide: String,
-        booleanSide: String,
-        angleSide: String,
-        sideProfileScore: Double,
+        cameraSide: String,
+        boolSide: String,
+        angleSide: String
+    ) -> String {
+        // Coordinates are strongest: bonnetEndX/bootEndX or frontEndX/rearEndX.
+        if coordinateSide == "left" || coordinateSide == "right" {
+            return coordinateSide
+        }
+
+        // Vote only from explicit image-coordinate fields.
+        // Do NOT let expected slot bias this. Do NOT pass if left and right conflict.
+        let signals = [textSide, cameraSide, boolSide].filter { $0 == "left" || $0 == "right" }
+        let leftCount = signals.filter { $0 == "left" }.count
+        let rightCount = signals.filter { $0 == "right" }.count
+
+        if leftCount >= 2 && rightCount == 0 { return "left" }
+        if rightCount >= 2 && leftCount == 0 { return "right" }
+
+        // Last fallback: detectedAngle only if at least one explicit field agrees.
+        // This prevents Left slot from accepting right-side images just because the model said "matchesExpectedAngle".
+        if angleSide == "left" && leftCount == 1 && rightCount == 0 { return "left" }
+        if angleSide == "right" && rightCount == 1 && leftCount == 0 { return "right" }
+
+        return "unknown"
+    }
+
+    private static func inferSideFromCoordinates(
         frontEndX: Double?,
         rearEndX: Double?,
         bonnetEndX: Double?,
         bootEndX: Double?
     ) -> String {
-        guard sideProfileScore >= 0.70 else { return "unknown" }
-
-        // Use image-coordinate evidence first. The model often confuses "Left/Right"
-        // with the vehicle's physical side, but x-coordinates are tied to the photo.
-        if coordinateSide != "unknown" {
-            return coordinateSide
+        // Prefer bonnet/boot wording because "front" can be ambiguous.
+        if let bonnetEndX, let bootEndX {
+            let bonnet = clamp100(bonnetEndX)
+            let boot = clamp100(bootEndX)
+            guard abs(bonnet - boot) >= 12 else { return "unknown" }
+            return bonnet < boot ? "left" : "right"
         }
 
-        let signals = [textSide, cameraDirectionSide, booleanSide, angleSide]
-            .filter { $0 == "left" || $0 == "right" }
-
-        let leftCount = signals.filter { $0 == "left" }.count
-        let rightCount = signals.filter { $0 == "right" }.count
-
-        // For the side slots, wrong acceptance is worse than retake. Require strong agreement.
-        // But do not require the vague detectedAngle label to agree, because that label is the
-        // one most likely to be flipped by real-world car-side wording.
-        if expected == .right {
-            let strongRight = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "right" }.count
-            let strongLeft = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "left" }.count
-            if strongRight >= 2 && strongLeft == 0 { return "right" }
-            if strongLeft >= 2 && strongRight == 0 { return "left" }
-            return "unknown"
+        if let frontEndX, let rearEndX {
+            let front = clamp100(frontEndX)
+            let rear = clamp100(rearEndX)
+            guard abs(front - rear) >= 12 else { return "unknown" }
+            return front < rear ? "left" : "right"
         }
 
-        if expected == .left {
-            let strongLeft = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "left" }.count
-            let strongRight = [textSide, cameraDirectionSide, booleanSide].filter { $0 == "right" }.count
-            if strongLeft >= 2 && strongRight == 0 { return "left" }
-            if strongRight >= 2 && strongLeft == 0 { return "right" }
-            return "unknown"
+        return "unknown"
+    }
+
+    private static func normalizeSideFrontPosition(_ value: String?) -> String {
+        let clean = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if clean == "left" ||
+            clean == "image_left" ||
+            clean == "bonnet_left" ||
+            clean == "bonnet_on_image_left" ||
+            clean == "hood_on_image_left" ||
+            clean == "nose_on_image_left" ||
+            clean.contains("bonnet on image left") ||
+            clean.contains("hood on image left") ||
+            clean.contains("nose on image left") ||
+            clean.contains("front on image left") ||
+            clean.contains("front is on image left") ||
+            clean.contains("front on left") ||
+            clean.contains("front is on the left") {
+            return "left"
         }
 
-        if leftCount >= 3 && rightCount == 0 { return "left" }
-        if rightCount >= 3 && leftCount == 0 { return "right" }
+        if clean == "right" ||
+            clean == "image_right" ||
+            clean == "bonnet_right" ||
+            clean == "bonnet_on_image_right" ||
+            clean == "hood_on_image_right" ||
+            clean == "nose_on_image_right" ||
+            clean.contains("bonnet on image right") ||
+            clean.contains("hood on image right") ||
+            clean.contains("nose on image right") ||
+            clean.contains("front on image right") ||
+            clean.contains("front is on image right") ||
+            clean.contains("front on right") ||
+            clean.contains("front is on the right") {
+            return "right"
+        }
 
         return "unknown"
     }
 
     private static func normalizeCameraSideDirection(_ value: String?) -> String {
         let clean = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if clean.contains("bonnet_on_image_left") || clean.contains("bonnet on image left") || clean.contains("front_on_image_left") || clean.contains("front on image left") || clean.contains("front is on image left") { return "left" }
-        if clean.contains("bonnet_on_image_right") || clean.contains("bonnet on image right") || clean.contains("front_on_image_right") || clean.contains("front on image right") || clean.contains("front is on image right") { return "right" }
+        if clean.contains("bonnet_on_image_left") || clean.contains("front_on_image_left") || clean.contains("bonnet on image left") || clean.contains("front on image left") {
+            return "left"
+        }
+        if clean.contains("bonnet_on_image_right") || clean.contains("front_on_image_right") || clean.contains("bonnet on image right") || clean.contains("front on image right") {
+            return "right"
+        }
         return "unknown"
     }
 
@@ -738,74 +679,19 @@ struct GeminiAngleService {
         return "unknown"
     }
 
-    private static func normalizeSideFrontPosition(_ value: String?) -> String {
-        let clean = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
-        if clean == "left"
-            || clean == "image_left"
-            || clean == "bonnet_left"
-            || clean == "bonnet_on_image_left"
-            || clean == "hood_on_image_left"
-            || clean == "nose_on_image_left"
-            || clean.contains("bonnet on image left")
-            || clean.contains("hood on image left")
-            || clean.contains("nose on image left")
-            || clean.contains("bonnet is on the left")
-            || clean.contains("front on left")
-            || clean.contains("front is on the left")
-            || clean.contains("front on image left")
-            || clean.contains("front is on image left") {
-            return "left"
+    private static func sideFromDetectedAngle(_ angle: DetectedAngle) -> String {
+        switch angle {
+        case .left: return "left"
+        case .right: return "right"
+        default: return "unknown"
         }
-
-        if clean == "right"
-            || clean == "image_right"
-            || clean == "bonnet_right"
-            || clean == "bonnet_on_image_right"
-            || clean == "hood_on_image_right"
-            || clean == "nose_on_image_right"
-            || clean.contains("bonnet on image right")
-            || clean.contains("hood on image right")
-            || clean.contains("nose on image right")
-            || clean.contains("bonnet is on the right")
-            || clean.contains("front on right")
-            || clean.contains("front is on the right")
-            || clean.contains("front on image right")
-            || clean.contains("front is on image right") {
-            return "right"
-        }
-
-        return "unknown"
     }
 
-    private static func inferSideFrontPosition(frontEndX: Double?, rearEndX: Double?, bonnetEndX: Double?, bootEndX: Double?) -> String {
-        // Prefer bonnet/boot coordinates because the word "front" caused ambiguous model answers.
-        if let bonnetEndX, let bootEndX {
-            let bonnet = max(0.0, min(100.0, bonnetEndX))
-            let boot = max(0.0, min(100.0, bootEndX))
-            let gap = abs(bonnet - boot)
-            guard gap >= 25 else { return "unknown" }
-            return bonnet < boot ? "left" : "right"
-        }
+    // MARK: - Perspective helpers
 
-        guard let frontEndX, let rearEndX else { return "unknown" }
-
-        let front = max(0.0, min(100.0, frontEndX))
-        let rear = max(0.0, min(100.0, rearEndX))
-        let gap = abs(front - rear)
-
-        guard gap >= 25 else { return "unknown" }
-
-        return front < rear ? "left" : "right"
-    }
-
-    private static func parseDetectedAngle(from text: String) -> DetectedAngle {
-        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if clean.contains("front") { return .front }
-        if clean.contains("rear") || clean.contains("back") { return .rear }
-        if clean.contains("left") { return .left }
-        if clean.contains("right") { return .right }
-        return .unknown
+    private static func hasEndSizeMismatch(near: Double?, far: Double?) -> Bool {
+        guard let near, let far else { return false }
+        return abs(near - far) > 12.0
     }
 
     private static func containsHardRearPerspectiveReject(reason: String, perspectiveIssue: String) -> Bool {
@@ -815,7 +701,7 @@ struct GeminiAngleService {
             "rear-corner", "rear corner", "strong diagonal", "strong perspective",
             "severe perspective", "keystone", "heavily slanted", "very slanted", "too slanted"
         ]
-        return hardTerms.contains(where: { combined.contains($0) })
+        return hardTerms.contains { combined.contains($0) }
     }
 
     private static func containsHardPerspectiveReject(reason: String, perspectiveIssue: String) -> Bool {
@@ -833,7 +719,11 @@ struct GeminiAngleService {
         ]
 
         if hardTerms.contains(where: { combined.contains($0) }) {
-            if mildTerms.contains(where: { combined.contains($0) }) && !combined.contains("obvious") && !combined.contains("strong") && !combined.contains("severe") && !combined.contains("too") {
+            if mildTerms.contains(where: { combined.contains($0) }) &&
+                !combined.contains("obvious") &&
+                !combined.contains("strong") &&
+                !combined.contains("severe") &&
+                !combined.contains("too") {
                 return false
             }
             return true
@@ -842,8 +732,24 @@ struct GeminiAngleService {
         return false
     }
 
+    // MARK: - General helpers
+
+    private static func parseDetectedAngle(from text: String) -> DetectedAngle {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Check Left/Right before Front because model explanations sometimes say "front on image right".
+        if clean == "left" || clean.contains("left side") { return .left }
+        if clean == "right" || clean.contains("right side") { return .right }
+        if clean.contains("rear") || clean.contains("back") { return .rear }
+        if clean.contains("front") { return .front }
+        return .unknown
+    }
+
     private static func clamp01(_ value: Double) -> Double {
         min(max(value, 0.0), 1.0)
+    }
+
+    private static func clamp100(_ value: Double) -> Double {
+        min(max(value, 0.0), 100.0)
     }
 
     private static func extractJSONObject(from text: String) -> String {
