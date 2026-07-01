@@ -16,8 +16,8 @@ struct ScanAngle: Identifiable {
 let scanAngles: [ScanAngle] = [
     ScanAngle(id: 0, label: "Front",      instruction: "Stand in front — aim at the bonnet",    iconName: "car.front.waves.up"),
     ScanAngle(id: 1, label: "Rear",       instruction: "Stand behind — aim at the boot",         iconName: "car.rear.waves.up"),
-    ScanAngle(id: 2, label: "Left Side",  instruction: "Left Side — front should appear on the left of the photo",  iconName: "arrow.left.square"),
-    ScanAngle(id: 3, label: "Right Side", instruction: "Right Side — front should appear on the right of the photo", iconName: "arrow.right.square"),
+    ScanAngle(id: 2, label: "Left Side",  instruction: "Left Side — bonnet/headlights must be on the LEFT edge of the photo",  iconName: "arrow.left.square"),
+    ScanAngle(id: 3, label: "Right Side", instruction: "Right Side — bonnet/headlights must be on the RIGHT edge of the photo", iconName: "arrow.right.square"),
 ]
 
 private struct AngleFailureContext: Identifiable {

@@ -10,15 +10,9 @@ import UIKit
 
 struct GeminiAngleService {
 
-    // IMPORTANT:
-    // Do NOT ship a real API key inside an iOS app for production.
-    // For testing only, paste your NEW key here.
-    // Production: iOS app -> your backend -> OpenAI.
-    private static let apiKey = "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"
-
-    // User requested gpt-4o, not 4o-mini.
-    private static let modelName = "gpt-4o"
-    private static let endpoint = "https://api.openai.com/v1/chat/completions"
+    // The OpenAI key must stay on the server. This endpoint belongs to the same
+    // private backend used by licence-plate and damage analysis.
+    private static let endpoint = "http://192.168.86.229:8000/validate-vehicle-angle"
 
     enum DetectedAngle: String {
         case front   = "Front"
@@ -74,8 +68,12 @@ struct GeminiAngleService {
             case .left, .right:
                 // Side views must be strict about orientation and perspective.
                 // Orientation is enforced locally from image coordinates/votes, not from the model's vague Left/Right label.
+                // Confidence bar raised from 0.45 -> 0.62: side orientation is the
+                // hardest judgment call for the model, so a lukewarm confidence
+                // score is itself a signal the photo (or the model's read of it)
+                // is questionable and should go to Override rather than auto-pass.
                 return wholeVehicleVisible &&
-                       confidence >= 0.45 &&
+                       confidence >= 0.62 &&
                        visibilityScore >= 0.55 &&
                        isStraightEnough &&
                        straightnessScore >= 0.70
@@ -107,6 +105,11 @@ struct GeminiAngleService {
         // Objective side-orientation evidence. These must describe IMAGE coordinates only.
         let sideFrontPosition: String?
         let cameraSideDirection: String?
+        let originalBonnetPosition: String?
+        let mirrorBonnetPosition: String?
+        let mirrorCheckPasses: Bool?
+        let frontCues: String?
+        let rearCues: String?
         let frontIsOnImageLeft: Bool?
         let frontIsOnImageRight: Bool?
         let frontEndX: Double?
@@ -166,26 +169,25 @@ struct GeminiAngleService {
         expectedAngle: DetectedAngle?,
         completion: @escaping (AngleValidationResult) -> Void
     ) {
-        guard apiKey != "PASTE_YOUR_NEW_OPENAI_API_KEY_HERE",
-              apiKey != "PASTE_YOUR_OPENAI_API_KEY_HERE",
-              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            completion(failureResult(expectedAngle: expectedAngle,
-                                     reason: "OpenAI API key is missing. Paste your new key into GeminiAngleService.swift or call your backend proxy."))
-            return
-        }
+        // Normalize first so the JPEG pixels match what the user sees in SwiftUI.
+        // Send one image only: including a mirrored duplicate gives the model two
+        // contradictory vehicle orientations and makes every classification less reliable.
+        let normalized = image.normalizedForAngleValidation()
+        let resized = normalized.resized(toMaxDimension: 1600)
 
-        let resized = image.resized(toMaxDimension: 1600)
         guard let jpeg = resized.jpegData(compressionQuality: 0.90) else {
             completion(failureResult(expectedAngle: expectedAngle, reason: "Could not convert image to JPEG."))
             return
         }
 
-        let base64 = jpeg.base64EncodedString()
-        let prompt = buildPrompt()
-        debugLog("Expected slot: \(expectedAngle?.rawValue ?? "None")\nPrompt is OBJECTIVE; expected slot is NOT sent to the model. Local code enforces expected slot after parsing.")
+        let originalBase64 = jpeg.base64EncodedString()
+        debugLog("Expected slot: \(expectedAngle?.rawValue ?? "Unknown")\nSending one normalized image to the private validation backend.")
 
-        guard let request = buildURLRequest(base64: base64, prompt: prompt) else {
-            completion(failureResult(expectedAngle: expectedAngle, reason: "Could not build OpenAI request."))
+        guard let request = buildURLRequest(
+            originalBase64: originalBase64,
+            expectedAngle: expectedAngle ?? .unknown
+        ) else {
+            completion(failureResult(expectedAngle: expectedAngle, reason: "Could not build the vehicle validation request."))
             return
         }
 
@@ -199,15 +201,15 @@ struct GeminiAngleService {
 
             guard let data else {
                 DispatchQueue.main.async {
-                    completion(failureResult(expectedAngle: expectedAngle, reason: "No data received from OpenAI."))
+                    completion(failureResult(expectedAngle: expectedAngle, reason: "No data received from the vehicle validation server."))
                 }
                 return
             }
 
             if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
-                let raw = String(data: data, encoding: .utf8) ?? ""
+                let serverMessage = backendErrorMessage(from: data)
                 DispatchQueue.main.async {
-                    completion(failureResult(expectedAngle: expectedAngle, reason: "OpenAI HTTP \(http.statusCode): \(raw)"))
+                    completion(failureResult(expectedAngle: expectedAngle, reason: "Vehicle validation failed (HTTP \(http.statusCode)): \(serverMessage)"))
                 }
                 return
             }
@@ -216,25 +218,10 @@ struct GeminiAngleService {
         }.resume()
     }
 
-    private static func buildURLRequest(base64: String, prompt: String) -> URLRequest? {
+    private static func buildURLRequest(originalBase64: String, expectedAngle: DetectedAngle) -> URLRequest? {
         let body: [String: Any] = [
-            "model": modelName,
-            "temperature": 0,
-            "max_tokens": 700,
-            "response_format": ["type": "json_object"],
-            "messages": [[
-                "role": "user",
-                "content": [
-                    ["type": "text", "text": prompt],
-                    [
-                        "type": "image_url",
-                        "image_url": [
-                            "url": "data:image/jpeg;base64,\(base64)",
-                            "detail": "high"
-                        ]
-                    ]
-                ]
-            ]]
+            "originalImageBase64": originalBase64,
+            "expectedAngle": expectedAngle.rawValue
         ]
 
         guard let url = URL(string: endpoint),
@@ -245,9 +232,9 @@ struct GeminiAngleService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = bodyData
-        request.timeoutInterval = 18
+        request.timeoutInterval = 30
         return request
     }
 
@@ -258,14 +245,12 @@ struct GeminiAngleService {
         expectedAngle: DetectedAngle?,
         completion: @escaping (AngleValidationResult) -> Void
     ) {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let message = choices.first?["message"] as? [String: Any],
-              let text = message["content"] as? String else {
+        guard let text = String(data: data, encoding: .utf8),
+              (try? JSONDecoder().decode(ModelAngleResponse.self, from: data)) != nil else {
             let raw = String(data: data, encoding: .utf8) ?? ""
             debugLog("Unexpected API response:\n\(raw)")
             DispatchQueue.main.async {
-                completion(failureResult(expectedAngle: expectedAngle, reason: "OpenAI returned an unexpected response format."))
+                completion(failureResult(expectedAngle: expectedAngle, reason: "The vehicle validation server returned an unexpected response."))
             }
             return
         }
@@ -274,6 +259,15 @@ struct GeminiAngleService {
         let result = parseValidationResponse(from: trimmed, expectedAngle: expectedAngle)
         debugLog("Raw OpenAI text:\n\(trimmed)\n\nParsed: \(result.debugSummary)")
         DispatchQueue.main.async { completion(result) }
+    }
+
+    private static func backendErrorMessage(from data: Data) -> String {
+        if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let detail = object["detail"] as? String,
+           !detail.isEmpty {
+            return detail
+        }
+        return "Please check that the backend is running and has OpenAI API credit."
     }
 
     private static func failureResult(expectedAngle: DetectedAngle?, reason: String) -> AngleValidationResult {
@@ -299,32 +293,37 @@ struct GeminiAngleService {
 
         Return ONLY valid JSON. No markdown. No extra text.
         You are NOT told the expected slot. Do NOT try to satisfy any expected answer.
-        Describe exactly what is visible in the image.
 
-        IMAGE COORDINATES:
-        - Left edge of photo is x=0.
-        - Right edge of photo is x=100.
-        - All left/right decisions refer ONLY to photo coordinates.
-        - Ignore driver side, passenger side, steering wheel side, road side, and real-world vehicle left/right.
+        You receive TWO images:
+        - IMAGE A is the ORIGINAL photo. Every JSON field must describe IMAGE A.
+        - IMAGE B is IMAGE A mirrored horizontally. Use it only to check whether your left/right judgement for IMAGE A is consistent.
 
-        ABSOLUTE APP SIDE DEFINITIONS:
-        - LEFT SIDE = the bonnet/hood/nose/front end of the car is on IMAGE-LEFT.
-        - RIGHT SIDE = the bonnet/hood/nose/front end of the car is on IMAGE-RIGHT.
-        - If the bonnet/front is on image-left, detectedAngle must be "Left".
-        - If the bonnet/front is on image-right, detectedAngle must be "Right".
-        - A side photo can NEVER be both Left and Right.
+        CRITICAL LEFT/RIGHT RULE:
+        - All left/right answers are IMAGE COORDINATES, not real vehicle side names.
+        - Left edge of IMAGE A is x=0. Right edge of IMAGE A is x=100.
+        - Ignore driver side, passenger side, steering wheel side, road side, and physical left/right side of the car.
+        - You are deciding where the BONNET/HOOD/NOSE/FRONT END appears inside IMAGE A.
+
+        APP SIDE CODES FOR SIDE PHOTOS:
+        - If the bonnet/hood/nose/front end is closer to the LEFT EDGE of IMAGE A, output detectedAngle="Left".
+        - If the bonnet/hood/nose/front end is closer to the RIGHT EDGE of IMAGE A, output detectedAngle="Right".
+        - These are app codes only. They do NOT mean the car's real-world left or right side.
+        - Example: if headlights/grille/bonnet are at the RIGHT edge of IMAGE A and tail-lights/boot are at the LEFT edge, output originalBonnetPosition="image_right", sideFrontPosition="right", detectedAngle="Right".
+        - Example: if headlights/grille/bonnet are at the LEFT edge of IMAGE A and tail-lights/boot are at the RIGHT edge, output originalBonnetPosition="image_left", sideFrontPosition="left", detectedAngle="Left".
 
         HOW TO FIND THE BONNET/FRONT END:
-        - Bonnet/front end = hood/bonnet, headlights, grille/front bumper, front wheel arch, windscreen sloping back from the bonnet.
-        - Boot/rear end = trunk/boot, tail-lights, rear bumper, rear windscreen/C-pillar.
-        - frontEndX and bonnetEndX are approximate x-coordinates of the front/bonnet end center, from 0 to 100.
-        - rearEndX and bootEndX are approximate x-coordinates of the rear/boot end center, from 0 to 100.
-        - For LEFT SIDE: bonnetEndX < bootEndX, frontEndX < rearEndX, sideFrontPosition="left", frontIsOnImageLeft=true, frontIsOnImageRight=false.
-        - For RIGHT SIDE: bonnetEndX > bootEndX, frontEndX > rearEndX, sideFrontPosition="right", frontIsOnImageLeft=false, frontIsOnImageRight=true.
-        - If you cannot clearly locate both ends, use detectedAngle="Unknown" and sideFrontPosition="unknown".
+        - Front cues: bonnet/hood, headlights, grille/front bumper, front wheel arch, side mirror near front door, windscreen sloping back from bonnet.
+        - Rear cues: boot/trunk, tail-lights, rear bumper, fuel door, rear windscreen/C-pillar.
+        - frontEndX and bonnetEndX are approximate x-coordinates of the front/bonnet end center in IMAGE A, from 0 to 100.
+        - rearEndX and bootEndX are approximate x-coordinates of the rear/boot end center in IMAGE A, from 0 to 100.
+        - For IMAGE A front-on-left: bonnetEndX < bootEndX, frontEndX < rearEndX, originalBonnetPosition="image_left", sideFrontPosition="left", frontIsOnImageLeft=true, frontIsOnImageRight=false.
+        - For IMAGE A front-on-right: bonnetEndX > bootEndX, frontEndX > rearEndX, originalBonnetPosition="image_right", sideFrontPosition="right", frontIsOnImageLeft=false, frontIsOnImageRight=true.
+        - mirrorBonnetPosition must describe IMAGE B. It should be the opposite of originalBonnetPosition when the side is clear.
+        - mirrorCheckPasses=true only if IMAGE B confirms the opposite left/right position.
+        - If you cannot clearly locate both front and rear ends, use detectedAngle="Unknown" and originalBonnetPosition="unknown".
 
         STRICT SIDE STRAIGHTNESS RULE:
-        - The side photo must be a straight side profile, not a 3/4 angled view.
+        - A side photo must be a straight side profile, not a 3/4 angled view.
         - Reject angled/corner side photos even if the bonnet side is known.
         - Set isThreeQuarterSideView=true if one end of the car is visibly closer/larger, both front and side faces are visible, both rear and side faces are visible, or body lines strongly converge.
         - Set cameraPerpendicularToSide=false for diagonal side/corner shots.
@@ -353,6 +352,11 @@ struct GeminiAngleService {
           "perspectiveIssue": "None",
           "sideFrontPosition": "unknown",
           "cameraSideDirection": "unknown",
+          "originalBonnetPosition": "unknown",
+          "mirrorBonnetPosition": "unknown",
+          "mirrorCheckPasses": false,
+          "frontCues": "short visual evidence for the front end in IMAGE A",
+          "rearCues": "short visual evidence for the rear end in IMAGE A",
           "frontIsOnImageLeft": false,
           "frontIsOnImageRight": false,
           "frontEndX": null,
@@ -365,12 +369,13 @@ struct GeminiAngleService {
           "farEndSizePercent": 0.0,
           "wheelsAppearSimilarSize": true,
           "cameraPerpendicularToSide": true,
-          "reason": "short reason"
+          "reason": "short reason using IMAGE A coordinates only"
         }
 
         Allowed detectedAngle values: "Front", "Rear", "Left", "Right", "Unknown".
         Allowed sideFrontPosition values: "left", "right", "unknown".
         Allowed cameraSideDirection values: "bonnet_on_image_left", "bonnet_on_image_right", "unknown".
+        Allowed originalBonnetPosition and mirrorBonnetPosition values: "image_left", "image_right", "unknown".
         """
     }
 
@@ -394,17 +399,36 @@ struct GeminiAngleService {
         let modelReason = decoded.reason ?? ""
         let rawDetected = parseDetectedAngle(from: decoded.detectedAngle ?? "")
 
+        let coordinateSide = inferSideFromCoordinates(frontEndX: decoded.frontEndX,
+                                                       rearEndX: decoded.rearEndX,
+                                                       bonnetEndX: decoded.bonnetEndX,
+                                                       bootEndX: decoded.bootEndX)
+        let textSide = normalizeSideFrontPosition(decoded.sideFrontPosition)
+        let cameraSide = normalizeCameraSideDirection(decoded.cameraSideDirection)
+        let originalBonnetSide = normalizeBonnetPosition(decoded.originalBonnetPosition)
+        let mirrorBonnetSide = normalizeBonnetPosition(decoded.mirrorBonnetPosition)
+        let mirrorInferredOriginalSide = inferOriginalSideFromMirrorBonnetPosition(mirrorBonnetSide)
+        let boolSide = inferSideFromBooleans(left: decoded.frontIsOnImageLeft,
+                                             right: decoded.frontIsOnImageRight)
+        let angleSide = sideFromDetectedAngle(rawDetected)
+
         let finalSide = decideFinalSideStrict(
-            coordinateSide: inferSideFromCoordinates(frontEndX: decoded.frontEndX,
-                                                     rearEndX: decoded.rearEndX,
-                                                     bonnetEndX: decoded.bonnetEndX,
-                                                     bootEndX: decoded.bootEndX),
-            textSide: normalizeSideFrontPosition(decoded.sideFrontPosition),
-            cameraSide: normalizeCameraSideDirection(decoded.cameraSideDirection),
-            boolSide: inferSideFromBooleans(left: decoded.frontIsOnImageLeft,
-                                            right: decoded.frontIsOnImageRight),
-            angleSide: sideFromDetectedAngle(rawDetected)
+            coordinateSide: coordinateSide,
+            originalBonnetSide: originalBonnetSide,
+            mirrorInferredOriginalSide: mirrorInferredOriginalSide,
+            mirrorCheckPasses: decoded.mirrorCheckPasses,
+            textSide: textSide,
+            cameraSide: cameraSide,
+            boolSide: boolSide,
+            angleSide: angleSide
         )
+
+        debugLog("""
+            Side vote breakdown -> coordinate=\(coordinateSide) originalBonnet=\(originalBonnetSide) mirrorBonnet=\(mirrorBonnetSide) mirrorInferredOriginal=\(mirrorInferredOriginalSide) mirrorCheck=\(decoded.mirrorCheckPasses?.description ?? "nil") text=\(textSide) camera=\(cameraSide) bool=\(boolSide) angle=\(angleSide) => final=\(finalSide)
+            frontEndX=\(decoded.frontEndX?.description ?? "nil") rearEndX=\(decoded.rearEndX?.description ?? "nil") bonnetEndX=\(decoded.bonnetEndX?.description ?? "nil") bootEndX=\(decoded.bootEndX?.description ?? "nil")
+            sideFrontPosition=\(decoded.sideFrontPosition ?? "nil") cameraSideDirection=\(decoded.cameraSideDirection ?? "nil") originalBonnetPosition=\(decoded.originalBonnetPosition ?? "nil") mirrorBonnetPosition=\(decoded.mirrorBonnetPosition ?? "nil") frontIsOnImageLeft=\(decoded.frontIsOnImageLeft?.description ?? "nil") frontIsOnImageRight=\(decoded.frontIsOnImageRight?.description ?? "nil")
+            frontCues=\(decoded.frontCues ?? "nil") rearCues=\(decoded.rearCues ?? "nil")
+            """)
 
         var detected = rawDetected
         if finalSide == "left" {
@@ -421,6 +445,16 @@ struct GeminiAngleService {
         if expected == .rear && detected == .rear && carPresent {
             confidence = max(confidence, 0.75)
             visibilityScore = max(visibilityScore, 0.70)
+        }
+
+        // For side photos, once objective bonnet-position evidence resolves the side,
+        // do not let a low generic confidence score reject an otherwise clear photo.
+        // Wrong-side photos still fail below because matchesExpectedAngle will be false.
+        if (expected == .left || expected == .right || expected == .unknown),
+           (detected == .left || detected == .right),
+           finalSide != "unknown",
+           carPresent {
+            confidence = max(confidence, 0.78)
         }
 
         let matches: Bool
@@ -573,29 +607,56 @@ struct GeminiAngleService {
 
     private static func decideFinalSideStrict(
         coordinateSide: String,
+        originalBonnetSide: String,
+        mirrorInferredOriginalSide: String,
+        mirrorCheckPasses: Bool?,
         textSide: String,
         cameraSide: String,
         boolSide: String,
         angleSide: String
     ) -> String {
-        // Coordinates are strongest: bonnetEndX/bootEndX or frontEndX/rearEndX.
-        if coordinateSide == "left" || coordinateSide == "right" {
-            return coordinateSide
+        // The bug you were seeing is usually caused by the model using the
+        // physical car side (driver/passenger side) instead of IMAGE coordinates.
+        // So the final decision now gives authority to objective bonnet/front
+        // position evidence and never lets detectedAngle alone pass a side photo.
+        let primarySignals = [coordinateSide, originalBonnetSide, mirrorInferredOriginalSide].filter { $0 != "unknown" }
+
+        let auxiliarySignals = [textSide, cameraSide, boolSide, angleSide]
+        let leftVotes = auxiliarySignals.filter { $0 == "left" }.count
+        let rightVotes = auxiliarySignals.filter { $0 == "right" }.count
+
+        if !primarySignals.isEmpty {
+            let leftPrimary = primarySignals.filter { $0 == "left" }.count
+            let rightPrimary = primarySignals.filter { $0 == "right" }.count
+
+            // If original/mirrored/coordinate evidence agrees, trust it.
+            if leftPrimary > rightPrimary {
+                if primarySignals.count == 1 && rightVotes >= 2 && leftVotes == 0 { return "unknown" }
+                return "left"
+            }
+            if rightPrimary > leftPrimary {
+                if primarySignals.count == 1 && leftVotes >= 2 && rightVotes == 0 { return "unknown" }
+                return "right"
+            }
+
+            // A primary tie means the model contradicted itself on the actual front position.
+            return "unknown"
         }
 
-        // Vote only from explicit image-coordinate fields.
-        // Do NOT let expected slot bias this. Do NOT pass if left and right conflict.
-        let signals = [textSide, cameraSide, boolSide].filter { $0 == "left" || $0 == "right" }
-        let leftCount = signals.filter { $0 == "left" }.count
-        let rightCount = signals.filter { $0 == "right" }.count
+        // If no primary signal is available, fall back to auxiliary fields,
+        // but require multiple corroborating signals. A lone detectedAngle is
+        // specifically NOT enough because that is the field most likely to be
+        // confused by real-world left/right terminology.
 
-        if leftCount >= 2 && rightCount == 0 { return "left" }
-        if rightCount >= 2 && leftCount == 0 { return "right" }
+        if leftVotes >= 2 && rightVotes == 0 { return "left" }
+        if rightVotes >= 2 && leftVotes == 0 { return "right" }
 
-        // Last fallback: detectedAngle only if at least one explicit field agrees.
-        // This prevents Left slot from accepting right-side images just because the model said "matchesExpectedAngle".
-        if angleSide == "left" && leftCount == 1 && rightCount == 0 { return "left" }
-        if angleSide == "right" && rightCount == 1 && leftCount == 0 { return "right" }
+        // Strong mirror check can rescue one missing coordinate field only if
+        // the model explicitly says the mirror relationship is consistent.
+        if mirrorCheckPasses == true {
+            if leftVotes >= 2 && leftVotes > rightVotes { return "left" }
+            if rightVotes >= 2 && rightVotes > leftVotes { return "right" }
+        }
 
         return "unknown"
     }
@@ -607,18 +668,21 @@ struct GeminiAngleService {
         bootEndX: Double?
     ) -> String {
         // Prefer bonnet/boot wording because "front" can be ambiguous.
+        // If bonnet/boot are too close to call, don't give up yet — try front/rear too.
         if let bonnetEndX, let bootEndX {
             let bonnet = clamp100(bonnetEndX)
             let boot = clamp100(bootEndX)
-            guard abs(bonnet - boot) >= 12 else { return "unknown" }
-            return bonnet < boot ? "left" : "right"
+            if abs(bonnet - boot) >= 12 {
+                return bonnet < boot ? "left" : "right"
+            }
         }
 
         if let frontEndX, let rearEndX {
             let front = clamp100(frontEndX)
             let rear = clamp100(rearEndX)
-            guard abs(front - rear) >= 12 else { return "unknown" }
-            return front < rear ? "left" : "right"
+            if abs(front - rear) >= 12 {
+                return front < rear ? "left" : "right"
+            }
         }
 
         return "unknown"
@@ -670,6 +734,55 @@ struct GeminiAngleService {
         if clean.contains("bonnet_on_image_right") || clean.contains("front_on_image_right") || clean.contains("bonnet on image right") || clean.contains("front on image right") {
             return "right"
         }
+        return "unknown"
+    }
+
+    private static func normalizeBonnetPosition(_ value: String?) -> String {
+        let clean = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if clean == "image_left" ||
+            clean == "left" ||
+            clean == "bonnet_left" ||
+            clean == "hood_left" ||
+            clean == "front_left" ||
+            clean == "bonnet_on_image_left" ||
+            clean == "hood_on_image_left" ||
+            clean == "front_on_image_left" ||
+            clean.contains("image left") ||
+            clean.contains("bonnet left") ||
+            clean.contains("hood left") ||
+            clean.contains("front left") ||
+            clean.contains("bonnet on the left") ||
+            clean.contains("hood on the left") ||
+            clean.contains("front on the left") {
+            return "left"
+        }
+
+        if clean == "image_right" ||
+            clean == "right" ||
+            clean == "bonnet_right" ||
+            clean == "hood_right" ||
+            clean == "front_right" ||
+            clean == "bonnet_on_image_right" ||
+            clean == "hood_on_image_right" ||
+            clean == "front_on_image_right" ||
+            clean.contains("image right") ||
+            clean.contains("bonnet right") ||
+            clean.contains("hood right") ||
+            clean.contains("front right") ||
+            clean.contains("bonnet on the right") ||
+            clean.contains("hood on the right") ||
+            clean.contains("front on the right") {
+            return "right"
+        }
+
+        return "unknown"
+    }
+
+    private static func inferOriginalSideFromMirrorBonnetPosition(_ mirrorBonnetSide: String) -> String {
+        // IMAGE B is a horizontal mirror of IMAGE A, so its bonnet position must be opposite.
+        if mirrorBonnetSide == "left" { return "right" }
+        if mirrorBonnetSide == "right" { return "left" }
         return "unknown"
     }
 
@@ -794,12 +907,42 @@ struct GeminiAngleService {
 }
 
 private extension UIImage {
+    func normalizedForAngleValidation() -> UIImage {
+        // Force the pixels to match the visual orientation shown in the app.
+        // This avoids EXIF orientation metadata causing the model to see a
+        // different left/right layout from what the user sees.
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+
     func resized(toMaxDimension maxDim: CGFloat) -> UIImage {
         let scale = maxDim / max(size.width, size.height)
         guard scale < 1 else { return self }
         let newSize = CGSize(width: size.width * scale, height: size.height * scale)
-        return UIGraphicsImageRenderer(size: newSize).image { _ in
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+
+        return UIGraphicsImageRenderer(size: newSize, format: format).image { _ in
             draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+
+    func horizontallyMirroredForAngleValidation() -> UIImage {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = true
+
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            context.cgContext.translateBy(x: size.width, y: 0)
+            context.cgContext.scaleBy(x: -1, y: 1)
+            draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }
