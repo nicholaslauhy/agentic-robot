@@ -412,12 +412,23 @@ struct LoggedInView: View {
         .navigationBarTitleDisplayMode(.inline)
         .tint(HTXTheme.primaryPurple)
         .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button("Logout") {
-                    auth.logout()
+            if #available(iOS 26.0, *) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Logout") {
+                        auth.logout()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.red)
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.red)
+                .sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Logout") {
+                        auth.logout()
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.red)
+                }
             }
         }
 
