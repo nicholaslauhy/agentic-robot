@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Combine
 
 // MARK: - HTX Brand Colors & Theme
 enum HTXTheme {
@@ -348,4 +349,154 @@ struct SubtleHTXGroupBoxStyle: GroupBoxStyle {
 
 extension View {
     func subtleHTXCard() -> some View { modifier(SubtleHTXCardModifier()) }
+}
+
+// MARK: - Long-running operation progress
+
+/// Drives an honest estimated progress display for APIs that do not stream
+/// server-side progress. It stops at 92% until the real request completes.
+@MainActor
+final class HTXProgressTracker: ObservableObject {
+    @Published private(set) var value: Double = 0
+    private var task: Task<Void, Never>?
+
+    func start(estimatedDuration: TimeInterval) {
+        task?.cancel()
+        value = 0
+        let duration = max(estimatedDuration, 1)
+
+        task = Task { [weak self] in
+            let started = Date()
+            while !Task.isCancelled {
+                let elapsed = Date().timeIntervalSince(started)
+                let fraction = min(0.92, (elapsed / duration) * 0.92)
+                self?.value = fraction
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    func complete() {
+        task?.cancel()
+        task = nil
+        value = 1
+    }
+
+    /// Smoothly closes the remaining gap, briefly displays 100%, then reveals
+    /// the real result through `completion`.
+    func completeAnimated(
+        duration: TimeInterval = 0.55,
+        holdAtFull: TimeInterval = 0.25,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        task?.cancel()
+        task = nil
+        let start = value
+        let steps = 12
+
+        task = Task { [weak self] in
+            for step in 1...steps {
+                guard !Task.isCancelled else { return }
+                let fraction = Double(step) / Double(steps)
+                self?.value = start + ((1 - start) * fraction)
+                try? await Task.sleep(for: .seconds(duration / Double(steps)))
+            }
+            guard !Task.isCancelled else { return }
+            self?.value = 1
+            try? await Task.sleep(for: .seconds(holdAtFull))
+            guard !Task.isCancelled else { return }
+            self?.task = nil
+            completion()
+        }
+    }
+
+    func stop() {
+        task?.cancel()
+        task = nil
+        value = 0
+    }
+}
+
+struct HTXProcessingProgressOverlay: View {
+    let title: String
+    let message: String
+    let progress: Double
+    let accentColor: Color
+    let onCancel: (() -> Void)?
+
+    private var percent: Int {
+        Int((min(max(progress, 0), 1) * 100).rounded())
+    }
+
+    private var stageText: String {
+        switch progress {
+        case ..<0.18: return "Preparing request…"
+        case ..<0.55: return "Uploading securely…"
+        case ..<0.92: return "Processing on server…"
+        case ..<1: return "Waiting for final response…"
+        default: return "Complete"
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.42).ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                Image(systemName: "waveform.path.ecg.rectangle.fill")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundColor(accentColor)
+
+                Text(title)
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 8) {
+                    ProgressView(value: progress, total: 1)
+                        .tint(accentColor)
+                        .scaleEffect(x: 1, y: 1.8, anchor: .center)
+
+                    HStack {
+                        Text(stageText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(percent)%")
+                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .foregroundColor(accentColor)
+                            .contentTransition(.numericText())
+                    }
+                }
+
+                if let onCancel {
+                    Button(action: onCancel) {
+                        Label("Cancel Processing", systemImage: "xmark.circle.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.red)
+                    .background(Color.red.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: 370)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(accentColor.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 20, y: 8)
+            .padding(.horizontal, 24)
+        }
+        .transition(.opacity)
+    }
 }

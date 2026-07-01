@@ -531,6 +531,12 @@ final class DamageAnalysisService {
             print("No backend or local benchmark found. Treating this as first scan.")
             return compared.results
         } catch {
+            if Task.isCancelled ||
+                error is CancellationError ||
+                (error as? URLError)?.code == .cancelled {
+                throw CancellationError()
+            }
+
             if !localBaseline.isEmpty {
                 print("Compared analysis failed, but local benchmark exists. Falling back to normal analysis + local benchmark:", error)
                 let normalResults = try await analyze(images: images, angleIndices: angleIndices)

@@ -47,6 +47,7 @@ struct ScratchScanView: View {
     var initialImages: [UIImage] = []
     var startOnReviewScreen: Bool = false
     var onScanComplete: ([UIImage], [Int], @escaping () -> Void) -> Void
+    var onCancelAnalysis: () -> Void
 
     @State private var currentAngleIndex: Int
     @State private var capturedImages: [UIImage?]
@@ -57,6 +58,10 @@ struct ScratchScanView: View {
     @State private var isSubmittingAnalysis = false
     @State private var isValidatingImage = false
     @State private var angleFailureContext: AngleFailureContext? = nil
+    @State private var angleValidationTask: URLSessionDataTask? = nil
+    @State private var angleValidationID: UUID? = nil
+    @StateObject private var angleProgress = HTXProgressTracker()
+    @StateObject private var damageProgress = HTXProgressTracker()
 
     // Replace flow — single source of truth
     @State private var replacingIndex: Int? = nil
@@ -77,7 +82,8 @@ struct ScratchScanView: View {
         onBackToPlateResult: @escaping () -> Void,
         initialImages: [UIImage] = [],
         startOnReviewScreen: Bool = false,
-        onScanComplete: @escaping ([UIImage], [Int], @escaping () -> Void) -> Void
+        onScanComplete: @escaping ([UIImage], [Int], @escaping () -> Void) -> Void,
+        onCancelAnalysis: @escaping () -> Void = {}
     ) {
         self.plate = plate
         self.carType = carType
@@ -86,6 +92,7 @@ struct ScratchScanView: View {
         self.initialImages = initialImages
         self.startOnReviewScreen = startOnReviewScreen
         self.onScanComplete = onScanComplete
+        self.onCancelAnalysis = onCancelAnalysis
 
         var imageSlots: [UIImage?] = Array(repeating: nil, count: 4)
         for index in 0..<min(initialImages.count, 4) {
@@ -113,14 +120,20 @@ struct ScratchScanView: View {
         }
         .overlay {
             if isSubmittingAnalysis {
-                BlockingLoadingOverlay(
+                HTXProcessingProgressOverlay(
                     title: "Analyzing damage…",
-                    message: "Checking your pictures for dents, scratches, and visible damage."
+                    message: "Checking all four views for new and existing dents or scratches.",
+                    progress: damageProgress.value,
+                    accentColor: HTXTheme.primaryPurple,
+                    onCancel: cancelDamageAnalysis
                 )
             } else if isValidatingImage {
-                BlockingLoadingOverlay(
+                HTXProcessingProgressOverlay(
                     title: "Processing image…",
-                    message: "Checking whether the photo contains a full car, matches the required angle, and is straight enough for calibration."
+                    message: "Checking the vehicle angle, visibility, and camera alignment.",
+                    progress: angleProgress.value,
+                    accentColor: HTXTheme.primaryPurple,
+                    onCancel: cancelAngleValidation
                 )
             }
         }
@@ -354,31 +367,59 @@ struct ScratchScanView: View {
         localErrorMessage = nil
         angleFailureContext = nil
         isValidatingImage = true
+        let validationID = UUID()
+        angleValidationID = validationID
+        angleProgress.start(estimatedDuration: 12)
 
         guard let expectedAngle = GeminiAngleService.DetectedAngle(rawValue: expectedWord) else {
             isValidatingImage = false
+            angleProgress.stop()
             localErrorMessage = "Could not determine expected angle. Please try again."
             selectedPhotoItem = nil
             return
         }
 
-        GeminiAngleService.validateExpectedAngle(image: image, expectedAngle: expectedAngle) { result in
-            isValidatingImage = false
+        angleValidationTask = GeminiAngleService.validateExpectedAngle(image: image, expectedAngle: expectedAngle) { result in
+            guard angleValidationID == validationID else { return }
+            angleValidationTask = nil
             selectedPhotoItem = nil
 
-            if result.isAccepted {
-                localErrorMessage = nil
-                onSuccess()
-                return
-            }
+            angleProgress.completeAnimated {
+                guard angleValidationID == validationID else { return }
+                angleValidationID = nil
+                isValidatingImage = false
+                angleProgress.stop()
 
-            angleFailureContext = AngleFailureContext(
-                image: image,
-                expectedIndex: expectedIndex,
-                result: result,
-                isReplacement: isReplacement
-            )
+                if result.isAccepted {
+                    localErrorMessage = nil
+                    onSuccess()
+                } else {
+                    angleFailureContext = AngleFailureContext(
+                        image: image,
+                        expectedIndex: expectedIndex,
+                        result: result,
+                        isReplacement: isReplacement
+                    )
+                }
+            }
         }
+    }
+
+    private func cancelAngleValidation() {
+        angleValidationID = nil
+        angleValidationTask?.cancel()
+        angleValidationTask = nil
+        angleProgress.stop()
+        isValidatingImage = false
+        selectedPhotoItem = nil
+        localErrorMessage = "Photo verification was cancelled."
+    }
+
+    private func cancelDamageAnalysis() {
+        onCancelAnalysis()
+        damageProgress.stop()
+        isSubmittingAnalysis = false
+        localErrorMessage = "Damage analysis was cancelled."
     }
 
     private func overrideFailedAngle() {
@@ -726,6 +767,7 @@ struct ScratchScanView: View {
 
                 Button {
                     isSubmittingAnalysis = true
+                    damageProgress.start(estimatedDuration: 75)
                     let orderedPairs = capturedImages.enumerated().compactMap { slot, image -> (Int, UIImage)? in
                         guard let image else { return nil }
                         return (slot, image)
@@ -733,7 +775,10 @@ struct ScratchScanView: View {
                     let orderedImages = orderedPairs.map { $0.1 }
                     let angleIndices = orderedPairs.map { $0.0 }
                     onScanComplete(orderedImages, angleIndices) {
-                        isSubmittingAnalysis = false
+                        damageProgress.completeAnimated {
+                            isSubmittingAnalysis = false
+                            damageProgress.stop()
+                        }
                     }
                 } label: {
                     Text("Submit for Analysis")
@@ -1213,6 +1258,12 @@ final class MagnifierCameraViewController: UIViewController {
     // Angle verification overlay (shown after shutter)
     private var verifyingOverlay: UIView?
     private var pendingOverrideImage: UIImage?
+    private var angleValidationTask: URLSessionDataTask?
+    private var verificationTimer: Timer?
+    private var verificationProgress: UIProgressView?
+    private var verificationStageLabel: UILabel?
+    private var verificationPercentLabel: UILabel?
+    private var verificationID: UUID?
 
     // Keep shutter ref so we can enable/disable it
     private var shutterButton: UIButton?
@@ -1483,36 +1534,124 @@ final class MagnifierCameraViewController: UIViewController {
 
     // MARK: – Angle verification overlays
 
-    private func showAngleVerifying() {
+    @discardableResult
+    private func showAngleVerifying() -> UUID {
+        verificationTimer?.invalidate()
+        let requestID = UUID()
+        verificationID = requestID
+
         let overlay = UIView(frame: view.bounds)
         overlay.backgroundColor = UIColor.black.withAlphaComponent(0.65)
 
+        let card = UIView()
+        card.backgroundColor = .systemBackground
+        card.layer.cornerRadius = 22
+        card.translatesAutoresizingMaskIntoConstraints = false
+
         let stack = UIStackView()
         stack.axis = .vertical
-        stack.spacing = 12
-        stack.alignment = .center
+        stack.spacing = 14
+        stack.alignment = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let spinner = UIActivityIndicatorView(style: .large)
-        spinner.color = .white
-        spinner.startAnimating()
+        let icon = UIImageView(image: UIImage(systemName: "waveform.path.ecg.rectangle.fill"))
+        icon.tintColor = UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1)
+        icon.contentMode = .scaleAspectFit
+        icon.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let label = UILabel()
         label.text = "Processing image…"
-        label.textColor = .white
-        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        label.textColor = .label
+        label.font = .systemFont(ofSize: 19, weight: .bold)
+        label.textAlignment = .center
 
-        stack.addArrangedSubview(spinner)
+        let detail = UILabel()
+        detail.text = "Checking vehicle angle, visibility, and camera alignment."
+        detail.textColor = .secondaryLabel
+        detail.font = .systemFont(ofSize: 14)
+        detail.numberOfLines = 0
+        detail.textAlignment = .center
+
+        let progress = UIProgressView(progressViewStyle: .default)
+        progress.progressTintColor = UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1)
+        progress.trackTintColor = UIColor.systemGray5
+        progress.progress = 0
+        progress.transform = CGAffineTransform(scaleX: 1, y: 2)
+
+        let stageLabel = UILabel()
+        stageLabel.text = "Preparing request…"
+        stageLabel.textColor = .secondaryLabel
+        stageLabel.font = .systemFont(ofSize: 13)
+
+        let percent = UILabel()
+        percent.text = "0%"
+        percent.textColor = UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1)
+        percent.font = .monospacedDigitSystemFont(ofSize: 14, weight: .bold)
+        percent.textAlignment = .right
+
+        let progressLabels = UIStackView(arrangedSubviews: [stageLabel, percent])
+        progressLabels.axis = .horizontal
+        progressLabels.distribution = .fill
+
+        let cancel = UIButton(type: .system)
+        cancel.setTitle("Cancel Processing", for: .normal)
+        cancel.setTitleColor(.systemRed, for: .normal)
+        cancel.backgroundColor = UIColor.systemRed.withAlphaComponent(0.08)
+        cancel.layer.cornerRadius = 12
+        cancel.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        cancel.heightAnchor.constraint(equalToConstant: 46).isActive = true
+        cancel.addTarget(self, action: #selector(cancelAngleVerification), for: .touchUpInside)
+
+        stack.addArrangedSubview(icon)
         stack.addArrangedSubview(label)
-        overlay.addSubview(stack)
+        stack.addArrangedSubview(detail)
+        stack.addArrangedSubview(progress)
+        stack.addArrangedSubview(progressLabels)
+        stack.addArrangedSubview(cancel)
+        card.addSubview(stack)
+        overlay.addSubview(card)
 
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            card.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+            card.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+            card.widthAnchor.constraint(equalToConstant: 350),
+            stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 24),
+            stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 22),
+            stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -22),
+            stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -24),
         ])
 
         view.addSubview(overlay)
         verifyingOverlay = overlay
+        verificationProgress = progress
+        verificationStageLabel = stageLabel
+        verificationPercentLabel = percent
+
+        let started = Date()
+        verificationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] timer in
+            guard let self, self.verificationID == requestID else {
+                timer.invalidate()
+                return
+            }
+            let value = min(0.92, Float(Date().timeIntervalSince(started) / 12.0) * 0.92)
+            self.verificationProgress?.setProgress(value, animated: true)
+            let stage = value < 0.18 ? "Preparing request…" : value < 0.55 ? "Uploading securely…" : value < 0.92 ? "Processing on server…" : "Waiting for response…"
+            self.verificationStageLabel?.text = stage
+            self.verificationPercentLabel?.text = "\(Int((value * 100).rounded()))%"
+        }
+
+        return requestID
+    }
+
+    @objc private func cancelAngleVerification() {
+        verificationID = nil
+        angleValidationTask?.cancel()
+        angleValidationTask = nil
+        verificationTimer?.invalidate()
+        verificationTimer = nil
+        verifyingOverlay?.removeFromSuperview()
+        verifyingOverlay = nil
+        isCapturing = false
     }
 
     private func showAngleError(detected: GeminiAngleService.DetectedAngle,
@@ -1524,6 +1663,9 @@ final class MagnifierCameraViewController: UIViewController {
                                 canOverride: Bool) {
         verifyingOverlay?.removeFromSuperview()
         verifyingOverlay = nil
+        verificationTimer?.invalidate()
+        verificationTimer = nil
+        angleValidationTask = nil
         pendingOverrideImage = capturedImage
 
         let overlay = UIView(frame: view.bounds)
@@ -1717,7 +1859,7 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
         else { isCapturing = false; return }
 
         // Show "Checking photo…" spinner
-        showAngleVerifying()
+        let verificationID = showAngleVerifying()
 
         // Map angleId label to the single word the validator returns
         let label = scanAngles[min(angleId, scanAngles.count - 1)].label
@@ -1739,22 +1881,37 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        GeminiAngleService.validateExpectedAngle(image: image, expectedAngle: expectedAngle) { [weak self] result in
-            guard let self else { return }
+        angleValidationTask = GeminiAngleService.validateExpectedAngle(image: image, expectedAngle: expectedAngle) { [weak self] result in
+            guard let self, self.verificationID == verificationID else { return }
+            self.verificationTimer?.invalidate()
+            self.verificationTimer = nil
+            self.verificationID = nil
+            self.angleValidationTask = nil
 
-            if result.isAccepted {
-                self.verifyingOverlay?.removeFromSuperview()
-                self.verifyingOverlay = nil
-                self.onPick?(image)
-                self.dismiss(animated: true)
-            } else {
-                self.showAngleError(detected: result.detectedAngle,
-                                    expected: expectedWord,
-                                    capturedImage: image,
-                                    reason: result.reason,
-                                    confidence: result.confidence,
-                                    debugSummary: result.debugSummary,
-                                    canOverride: true)
+            self.verificationStageLabel?.text = "Finalizing…"
+            UIView.animate(withDuration: 0.55) {
+                self.verificationProgress?.setProgress(1, animated: true)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                self.verificationStageLabel?.text = "Complete"
+                self.verificationPercentLabel?.text = "100%"
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.80) {
+                if result.isAccepted {
+                    self.verifyingOverlay?.removeFromSuperview()
+                    self.verifyingOverlay = nil
+                    self.onPick?(image)
+                    self.dismiss(animated: true)
+                } else {
+                    self.showAngleError(detected: result.detectedAngle,
+                                        expected: expectedWord,
+                                        capturedImage: image,
+                                        reason: result.reason,
+                                        confidence: result.confidence,
+                                        debugSummary: result.debugSummary,
+                                        canOverride: true)
+                }
             }
         }
     }

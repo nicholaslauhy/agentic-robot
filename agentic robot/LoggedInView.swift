@@ -37,6 +37,7 @@ struct LoggedInView: View {
     @State private var showButtons = false
     @State private var localErrorMessage: String? = nil
     @State private var anprUploadTask: URLSessionUploadTask? = nil
+    @StateObject private var anprProgress = HTXProgressTracker()
 
     private let anprServerURLString = "http://192.168.86.229:8000/detect"
     private let anprRequestTimeout: TimeInterval = 15
@@ -153,9 +154,11 @@ struct LoggedInView: View {
             }
 
             DispatchQueue.main.async {
-                self.isSubmitting = false
-                self.plateResult = plate.uppercased()
-                self.navigateToResultPage = true
+                self.anprProgress.completeAnimated {
+                    self.isSubmitting = false
+                    self.plateResult = plate.uppercased()
+                    self.navigateToResultPage = true
+                }
             }
         }
 
@@ -389,18 +392,19 @@ struct LoggedInView: View {
             }
 
             // MARK: - Loading overlay
-            if isSubmitting || isLookingUpIU {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .scaleEffect(1.3)
-
-                    Text(isLookingUpIU ? "Looking up IU barcode…" : "Processing image…")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                }
+            if isSubmitting {
+                HTXProcessingProgressOverlay(
+                    title: "Detecting licence plate…",
+                    message: "Uploading the image and reading the vehicle registration number.",
+                    progress: anprProgress.value,
+                    accentColor: HTXTheme.primaryPurple,
+                    onCancel: cancelANPRProcessing
+                )
+            } else if isLookingUpIU {
+                Color.black.opacity(0.4).ignoresSafeArea()
+                ProgressView("Looking up IU barcode…")
+                    .tint(.white)
+                    .foregroundColor(.white)
             }
         }
 
@@ -412,11 +416,17 @@ struct LoggedInView: View {
                 Button("Logout") {
                     auth.logout()
                 }
+                .buttonStyle(.plain)
                 .foregroundColor(.red)
             }
         }
 
         .padding(.top)
+        .onChange(of: isSubmitting) { _, isActive in
+            if !isActive && anprProgress.value < 1 {
+                anprProgress.stop()
+            }
+        }
 
         // MARK: - Typewriter (runs once)
         .onAppear {
@@ -695,6 +705,7 @@ struct LoggedInView: View {
                     self.anprUploadTask?.cancel()
                     self.anprUploadTask = nil
                     self.isSubmitting = false
+                    self.anprProgress.stop()
                     self.selectedImage = nil
                     self.localErrorMessage = nil
                 } label: {
@@ -714,6 +725,7 @@ struct LoggedInView: View {
                     guard !isSubmitting else { return }
                     localErrorMessage = nil
                     isSubmitting = true
+                    anprProgress.start(estimatedDuration: 10)
                     sendToANPRServer(image: image)
                 } label: {
                     HStack {
@@ -734,6 +746,14 @@ struct LoggedInView: View {
         .padding(20)
         .subtleHTXCard()
         .padding(.horizontal)
+    }
+
+    private func cancelANPRProcessing() {
+        anprUploadTask?.cancel()
+        anprUploadTask = nil
+        anprProgress.stop()
+        isSubmitting = false
+        localErrorMessage = "Licence plate detection was cancelled."
     }
 
     @ViewBuilder

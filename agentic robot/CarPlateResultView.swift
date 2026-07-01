@@ -21,6 +21,8 @@ struct CarPlateResultView: View {
     @State private var analysisErrorMessage: String? = nil
     @State private var damageDetections: [DamageDetection] = []
     @State private var navigateToDamageResults = false
+    @State private var damageAnalysisTask: Task<Void, Never>? = nil
+    @StateObject private var damageProgress = HTXProgressTracker()
     
     @State private var didRunTypewriter = false
 
@@ -166,7 +168,8 @@ struct CarPlateResultView: View {
                             carType: carType,
                             finishLoading: finishLoading
                         )
-                    }
+                    },
+                    onCancelAnalysis: cancelDamageAnalysis
                 )
             }
         }
@@ -256,29 +259,13 @@ struct CarPlateResultView: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
 
-            VStack(spacing: 14) {
-                ProgressView()
-                    .scaleEffect(1.3)
-
-                Text("Analyzing your pictures for new and existing dents or scratches...")
-                    .font(.headline)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-
-                if let analysisErrorMessage {
-                    Text(analysisErrorMessage)
-                        .font(.footnote)
-                        .foregroundColor(.red)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-            }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 18))
-            .shadow(radius: 12)
-            .padding(.horizontal, 28)
+            HTXProcessingProgressOverlay(
+                title: "Analyzing vehicle damage…",
+                message: "Comparing all vehicle views with previous damage records.",
+                progress: damageProgress.value,
+                accentColor: HTXTheme.primaryPurple,
+                onCancel: cancelDamageAnalysis
+            )
         }
     }
 
@@ -294,38 +281,57 @@ struct CarPlateResultView: View {
 
         isAnalyzing = true
         analysisErrorMessage = nil
+        damageProgress.start(estimatedDuration: 75)
 
-        Task {
+        damageAnalysisTask = Task {
             do {
                 let results = try await damageAnalysisService.analyzeForPlate(plate: editablePlate, images: images, angleIndices: angleIndices)
                 
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     print("Damage analysis succeeded")
                     print("Result count:", results.count)
-                    
-                    scannedImages = images
-                    damageDetections = results
-                    isAnalyzing = false
-                    finishLoading()
-                    
-                    navigateToScratchScan = false
-                }
-                
-                try? await Task.sleep(nanoseconds: 300_000_000)
 
-                await MainActor.run {
-                    navigateToDamageResults = true
+                    damageProgress.completeAnimated {
+                        scannedImages = images
+                        damageDetections = results
+                        isAnalyzing = false
+                        damageAnalysisTask = nil
+                        finishLoading()
+
+                        // ScratchScanView also animates its visible progress bar
+                        // to 100% before this navigation occurs.
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(900))
+                            navigateToScratchScan = false
+                            navigateToDamageResults = true
+                        }
+                    }
                 }
 
             } catch {
                 await MainActor.run {
                     print("Damage analysis failed:", error)
 
+                    damageProgress.stop()
                     isAnalyzing = false
-                    analysisErrorMessage = "Damage analysis failed: \(error.localizedDescription)"
+                    damageAnalysisTask = nil
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                        analysisErrorMessage = "Damage analysis was cancelled."
+                    } else {
+                        analysisErrorMessage = "Damage analysis failed: \(error.localizedDescription)"
+                    }
                     finishLoading()
                 }
             }
         }
+    }
+
+    private func cancelDamageAnalysis() {
+        damageAnalysisTask?.cancel()
+        damageAnalysisTask = nil
+        damageProgress.stop()
+        isAnalyzing = false
+        analysisErrorMessage = "Damage analysis was cancelled."
     }
 }

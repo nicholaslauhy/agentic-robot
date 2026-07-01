@@ -148,7 +148,7 @@ struct GeminiAngleService {
     }
 
     static func detectAngleDetailed(image: UIImage, completion: @escaping (AngleDetectionResult) -> Void) {
-        sendAngleRequest(image: image, expectedAngle: nil) { result in
+        _ = sendAngleRequest(image: image, expectedAngle: nil) { result in
             completion(AngleDetectionResult(angle: result.detectedAngle,
                                             confidence: result.confidence,
                                             reason: result.reason,
@@ -156,11 +156,12 @@ struct GeminiAngleService {
         }
     }
 
+    @discardableResult
     static func validateExpectedAngle(
         image: UIImage,
         expectedAngle: DetectedAngle,
         completion: @escaping (AngleValidationResult) -> Void
-    ) {
+    ) -> URLSessionDataTask? {
         sendAngleRequest(image: image, expectedAngle: expectedAngle, completion: completion)
     }
 
@@ -170,7 +171,7 @@ struct GeminiAngleService {
         image: UIImage,
         expectedAngle: DetectedAngle?,
         completion: @escaping (AngleValidationResult) -> Void
-    ) {
+    ) -> URLSessionDataTask? {
         // Normalize first so the JPEG pixels match what the user sees in SwiftUI.
         // Send one image only: including a mirrored duplicate gives the model two
         // contradictory vehicle orientations and makes every classification less reliable.
@@ -179,7 +180,7 @@ struct GeminiAngleService {
 
         guard let jpeg = resized.jpegData(compressionQuality: 0.90) else {
             completion(failureResult(expectedAngle: expectedAngle, reason: "Could not convert image to JPEG."))
-            return
+            return nil
         }
 
         let originalBase64 = jpeg.base64EncodedString()
@@ -190,10 +191,10 @@ struct GeminiAngleService {
             expectedAngle: expectedAngle ?? .unknown
         ) else {
             completion(failureResult(expectedAngle: expectedAngle, reason: "Could not build the vehicle validation request."))
-            return
+            return nil
         }
 
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 DispatchQueue.main.async {
                     completion(failureResult(expectedAngle: expectedAngle, reason: error.localizedDescription))
@@ -217,7 +218,9 @@ struct GeminiAngleService {
             }
 
             handleResponse(data: data, expectedAngle: expectedAngle, completion: completion)
-        }.resume()
+        }
+        task.resume()
+        return task
     }
 
     private static func buildURLRequest(originalBase64: String, expectedAngle: DetectedAngle) -> URLRequest? {
