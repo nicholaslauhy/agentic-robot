@@ -124,6 +124,8 @@ struct GeminiAngleService {
         let farEndSizePercent: Double?
         let wheelsAppearSimilarSize: Bool?
         let cameraPerpendicularToSide: Bool?
+        let visibleEndFace: String?
+        let estimatedSideYawDegrees: Double?
 
         let reason: String?
     }
@@ -406,8 +408,6 @@ struct GeminiAngleService {
         let textSide = normalizeSideFrontPosition(decoded.sideFrontPosition)
         let cameraSide = normalizeCameraSideDirection(decoded.cameraSideDirection)
         let originalBonnetSide = normalizeBonnetPosition(decoded.originalBonnetPosition)
-        let mirrorBonnetSide = normalizeBonnetPosition(decoded.mirrorBonnetPosition)
-        let mirrorInferredOriginalSide = inferOriginalSideFromMirrorBonnetPosition(mirrorBonnetSide)
         let boolSide = inferSideFromBooleans(left: decoded.frontIsOnImageLeft,
                                              right: decoded.frontIsOnImageRight)
         let angleSide = sideFromDetectedAngle(rawDetected)
@@ -415,8 +415,6 @@ struct GeminiAngleService {
         let finalSide = decideFinalSideStrict(
             coordinateSide: coordinateSide,
             originalBonnetSide: originalBonnetSide,
-            mirrorInferredOriginalSide: mirrorInferredOriginalSide,
-            mirrorCheckPasses: decoded.mirrorCheckPasses,
             textSide: textSide,
             cameraSide: cameraSide,
             boolSide: boolSide,
@@ -424,7 +422,7 @@ struct GeminiAngleService {
         )
 
         debugLog("""
-            Side vote breakdown -> coordinate=\(coordinateSide) originalBonnet=\(originalBonnetSide) mirrorBonnet=\(mirrorBonnetSide) mirrorInferredOriginal=\(mirrorInferredOriginalSide) mirrorCheck=\(decoded.mirrorCheckPasses?.description ?? "nil") text=\(textSide) camera=\(cameraSide) bool=\(boolSide) angle=\(angleSide) => final=\(finalSide)
+            Side vote breakdown -> coordinate=\(coordinateSide) originalBonnet=\(originalBonnetSide) text=\(textSide) camera=\(cameraSide) bool=\(boolSide) angle=\(angleSide) => final=\(finalSide)
             frontEndX=\(decoded.frontEndX?.description ?? "nil") rearEndX=\(decoded.rearEndX?.description ?? "nil") bonnetEndX=\(decoded.bonnetEndX?.description ?? "nil") bootEndX=\(decoded.bootEndX?.description ?? "nil")
             sideFrontPosition=\(decoded.sideFrontPosition ?? "nil") cameraSideDirection=\(decoded.cameraSideDirection ?? "nil") originalBonnetPosition=\(decoded.originalBonnetPosition ?? "nil") mirrorBonnetPosition=\(decoded.mirrorBonnetPosition ?? "nil") frontIsOnImageLeft=\(decoded.frontIsOnImageLeft?.description ?? "nil") frontIsOnImageRight=\(decoded.frontIsOnImageRight?.description ?? "nil")
             frontCues=\(decoded.frontCues ?? "nil") rearCues=\(decoded.rearCues ?? "nil")
@@ -484,15 +482,27 @@ struct GeminiAngleService {
         }
 
         let endSizeMismatch = hasEndSizeMismatch(near: decoded.nearEndSizePercent, far: decoded.farEndSizePercent)
-        let wheelsMismatch = decoded.wheelsAppearSimilarSize == false
-        let notPerpendicular = decoded.cameraPerpendicularToSide == false
         let threeQuarter = decoded.isThreeQuarterSideView == true
+        let visibleEndFace = (decoded.visibleEndFace ?? "none")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let endFaceVisible = visibleEndFace == "front" ||
+                             visibleEndFace == "rear" ||
+                             visibleEndFace == "both"
+        let sideYaw = abs(decoded.estimatedSideYawDegrees ?? 0)
+        let excessiveSideYaw = sideYaw > 22
+        let clearThreeQuarter = threeQuarter &&
+                                (endFaceVisible || sideYaw > 16 || endSizeMismatch)
+        let clearCornerView = endFaceVisible && sideYaw > 16
 
         let hardPerspectiveReject: Bool
         if expected == .rear {
             hardPerspectiveReject = containsHardRearPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
         } else if expected == .left || expected == .right {
-            hardPerspectiveReject = threeQuarter || endSizeMismatch || wheelsMismatch || notPerpendicular || containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
+            hardPerspectiveReject = clearThreeQuarter ||
+                                    clearCornerView ||
+                                    excessiveSideYaw ||
+                                    containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
         } else {
             hardPerspectiveReject = containsHardPerspectiveReject(reason: modelReason, perspectiveIssue: perspectiveIssue)
         }
@@ -501,13 +511,13 @@ struct GeminiAngleService {
         let isStraight: Bool
         switch expected {
         case .left, .right:
-            // Keep angled-car catching strict.
-            // Correct side must still fail if it is diagonal/3-quarter.
+            // Allow small hand-held perspective differences, but still reject
+            // a clear corner/three-quarter view.
             straightnessScore = sideProfileScore > 0 ? min(rawStraightnessScore, sideProfileScore) : rawStraightnessScore
             isStraight = !hardPerspectiveReject &&
-                         (decoded.isStraightEnough == true || rawStraightnessScore >= 0.72) &&
-                         rawStraightnessScore >= 0.66 &&
-                         (sideProfileScore == 0 || sideProfileScore >= 0.62)
+                         (decoded.isStraightEnough == true || rawStraightnessScore >= 0.55) &&
+                         rawStraightnessScore >= 0.50 &&
+                         (sideProfileScore == 0 || sideProfileScore >= 0.52)
         case .rear:
             straightnessScore = rawStraightnessScore
             isStraight = !hardPerspectiveReject && (decoded.isStraightEnough == true || rawStraightnessScore >= 0.35)
@@ -608,55 +618,28 @@ struct GeminiAngleService {
     private static func decideFinalSideStrict(
         coordinateSide: String,
         originalBonnetSide: String,
-        mirrorInferredOriginalSide: String,
-        mirrorCheckPasses: Bool?,
         textSide: String,
         cameraSide: String,
         boolSide: String,
         angleSide: String
     ) -> String {
-        // The bug you were seeing is usually caused by the model using the
-        // physical car side (driver/passenger side) instead of IMAGE coordinates.
-        // So the final decision now gives authority to objective bonnet/front
-        // position evidence and never lets detectedAngle alone pass a side photo.
-        let primarySignals = [coordinateSide, originalBonnetSide, mirrorInferredOriginalSide].filter { $0 != "unknown" }
-
-        let auxiliarySignals = [textSide, cameraSide, boolSide, angleSide]
-        let leftVotes = auxiliarySignals.filter { $0 == "left" }.count
-        let rightVotes = auxiliarySignals.filter { $0 == "right" }.count
-
-        if !primarySignals.isEmpty {
-            let leftPrimary = primarySignals.filter { $0 == "left" }.count
-            let rightPrimary = primarySignals.filter { $0 == "right" }.count
-
-            // If original/mirrored/coordinate evidence agrees, trust it.
-            if leftPrimary > rightPrimary {
-                if primarySignals.count == 1 && rightVotes >= 2 && leftVotes == 0 { return "unknown" }
-                return "left"
-            }
-            if rightPrimary > leftPrimary {
-                if primarySignals.count == 1 && leftVotes >= 2 && rightVotes == 0 { return "unknown" }
-                return "right"
-            }
-
-            // A primary tie means the model contradicted itself on the actual front position.
-            return "unknown"
+        // Side identity and camera straightness are separate questions. The
+        // side code is determined only by where the bonnet sits in the image:
+        // bonnet-left = Left, bonnet-right = Right. Perspective must never flip it.
+        if coordinateSide == "left" || coordinateSide == "right" {
+            return coordinateSide
+        }
+        if originalBonnetSide == "left" || originalBonnetSide == "right" {
+            return originalBonnetSide
         }
 
-        // If no primary signal is available, fall back to auxiliary fields,
-        // but require multiple corroborating signals. A lone detectedAngle is
-        // specifically NOT enough because that is the field most likely to be
-        // confused by real-world left/right terminology.
-
-        if leftVotes >= 2 && rightVotes == 0 { return "left" }
-        if rightVotes >= 2 && leftVotes == 0 { return "right" }
-
-        // Strong mirror check can rescue one missing coordinate field only if
-        // the model explicitly says the mirror relationship is consistent.
-        if mirrorCheckPasses == true {
-            if leftVotes >= 2 && leftVotes > rightVotes { return "left" }
-            if rightVotes >= 2 && rightVotes > leftVotes { return "right" }
-        }
+        // Fall back to redundant image-coordinate fields only when at least two
+        // agree. Never use a lone generic detectedAngle label as authority.
+        let signals = [textSide, cameraSide, boolSide, angleSide]
+        let leftVotes = signals.filter { $0 == "left" }.count
+        let rightVotes = signals.filter { $0 == "right" }.count
+        if leftVotes >= 2 && leftVotes > rightVotes { return "left" }
+        if rightVotes >= 2 && rightVotes > leftVotes { return "right" }
 
         return "unknown"
     }
@@ -804,7 +787,7 @@ struct GeminiAngleService {
 
     private static func hasEndSizeMismatch(near: Double?, far: Double?) -> Bool {
         guard let near, let far else { return false }
-        return abs(near - far) > 12.0
+        return abs(near - far) > 20.0
     }
 
     private static func containsHardRearPerspectiveReject(reason: String, perspectiveIssue: String) -> Bool {
@@ -821,7 +804,8 @@ struct GeminiAngleService {
         let combined = "\(reason) \(perspectiveIssue)".lowercased()
 
         let mildTerms = [
-            "none", "slight", "slightly", "minor", "small", "off-centre", "off center", "hand-held", "handheld"
+            "none", "slight", "slightly", "minor", "small", "moderate", "moderately",
+            "off-centre", "off center", "hand-held", "handheld"
         ]
         let hardTerms = [
             "obvious 3/4", "clear 3/4", "three-quarter", "three quarter",
