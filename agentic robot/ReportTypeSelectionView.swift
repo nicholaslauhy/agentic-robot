@@ -111,11 +111,12 @@ struct ReportTypeSelectionView: View {
                 }
             }
         }
+        .requiresRole(.member)
     }
 }
 
 // MARK: - Card
-private struct ReportTypeCard: View {
+struct ReportTypeCard: View {
     let type: ReportType
     let action: () -> Void
 

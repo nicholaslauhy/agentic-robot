@@ -256,6 +256,7 @@ struct ReportScannerView: View {
             guard let newItem else { return }
             readBarcodeFromPhoto(newItem)
         }
+        .requiresRole(.admin)
     }
 
     // MARK: - Firestore Lookup
