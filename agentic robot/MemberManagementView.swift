@@ -277,6 +277,7 @@ struct MemberManagementView: View {
                 : "This user will regain access to the application."
             )
         }
+        .requiresRole(.admin)
     }
 
     private func usernameEditor(for member: MemberEntry) -> some View {

@@ -8,8 +8,15 @@ struct HomeView: View {
     @State private var showSubtitle = false
     @State private var showButtons = false
     @State private var typewriterTask: Task<Void, Never>? = nil
+    @State private var navigateToNP299 = false
+    @State private var navigateToSecCom = false
+    @State private var navigateToFuel = false
 
-    private let fullText = "What do you want to do today?"
+    private var fullText: String {
+        auth.isAdmin
+        ? "What would you like to manage?"
+        : "What report would you like to submit?"
+    }
 
     var body: some View {
         ZStack {
@@ -90,8 +97,8 @@ struct HomeView: View {
                 if showButtons && !auth.isLoadingRole {
                     VStack(spacing: 14) {
 
-                        // Admin only: Manage Accounts
                         if auth.isAdmin {
+                            // Administrator actions
                             NavigationLink {
                                 MemberManagementView()
                             } label: {
@@ -103,46 +110,43 @@ struct HomeView: View {
                             }
                             .buttonStyle(.plain)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
 
-                        // Everyone: Report Generation
-                        NavigationLink {
-                            ReportTypeSelectionView()
-                        } label: {
-                            HomeActionRow(
-                                icon: "doc.text.magnifyingglass",
-                                title: "Report Generation",
-                                subtitle: "Scan licence plate and generate report"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            NavigationLink {
+                                ReportScannerView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "barcode.viewfinder",
+                                    title: "Scan Report Barcode",
+                                    subtitle: "Retrieve a report using its barcode"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
 
-                        // Everyone: Scan Barcode
-                        NavigationLink {
-                            ReportScannerView()
-                        } label: {
-                            HomeActionRow(
-                                icon: "barcode.viewfinder",
-                                title: "Scan Report Barcode",
-                                subtitle: "Point camera at a report barcode"
-                            )
+                            NavigationLink {
+                                ReportsListView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "folder.fill",
+                                    title: "View Existing Reports",
+                                    subtitle: "Browse and search submitted reports"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        } else {
+                            // Member report forms
+                            ForEach(ReportType.allCases) { type in
+                                ReportTypeCard(type: type) {
+                                    switch type {
+                                    case .np299: navigateToNP299 = true
+                                    case .secCom: navigateToSecCom = true
+                                    case .fuelRefuel: navigateToFuel = true
+                                    }
+                                }
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-
-                        // Everyone: View All Reports
-                        NavigationLink {
-                            ReportsListView()
-                        } label: {
-                            HomeActionRow(
-                                icon: "folder.fill",
-                                title: "View Existing Reports",
-                                subtitle: "Browse and search all generated reports"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                     .padding(.horizontal)
                 }
@@ -153,9 +157,23 @@ struct HomeView: View {
         .navigationBarBackButtonHidden(true)
         .tint(HTXTheme.primaryPurple)
         .onAppear { startTypewriter() }
+        .onChange(of: auth.role) { _, _ in startTypewriter() }
         .onDisappear {
             typewriterTask?.cancel()
             typewriterTask = nil
+        }
+        .navigationDestination(isPresented: $navigateToNP299) {
+            LoggedInView()
+        }
+        .navigationDestination(isPresented: $navigateToSecCom) {
+            SecComPreDrivingChecklistView {
+                navigateToSecCom = false
+            }
+        }
+        .navigationDestination(isPresented: $navigateToFuel) {
+            FuelRefuelView {
+                navigateToFuel = false
+            }
         }
     }
 

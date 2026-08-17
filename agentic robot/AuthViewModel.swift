@@ -50,7 +50,11 @@ final class AuthViewModel: ObservableObject {
     }
 
     var isAdmin: Bool {
-        Self.normalizedRole(from: role) == "admin"
+        role == RequiredAppRole.admin.rawValue
+    }
+
+    var isMember: Bool {
+        role == RequiredAppRole.member.rawValue
     }
 
     var currentUsername: String {
@@ -65,11 +69,15 @@ final class AuthViewModel: ObservableObject {
         profile?.hasUsername == true
     }
 
-    private static func normalizedRole(from rawRole: String?) -> String {
+    private static func normalizedRole(from rawRole: String?) -> String? {
         let normalized = rawRole?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
-        return normalized == "admin" ? "admin" : "member"
+        guard normalized == RequiredAppRole.admin.rawValue ||
+                normalized == RequiredAppRole.member.rawValue else {
+            return nil
+        }
+        return normalized
     }
 
     private func handleAuthStateChange(_ newUser: FirebaseAuth.User?) {
@@ -122,7 +130,12 @@ final class AuthViewModel: ObservableObject {
                         return
                     }
 
-                    let resolvedRole = Self.normalizedRole(from: data["role"] as? String)
+                    guard let resolvedRole = Self.normalizedRole(from: data["role"] as? String) else {
+                        self.rejectCurrentSession(
+                            message: "Your account does not have a valid role. Please contact an administrator."
+                        )
+                        return
+                    }
                     let resolvedEmail = (data["email"] as? String)?
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     let resolvedUsername = Self.profileUsername(from: data)

@@ -196,6 +196,7 @@ struct ReportsListView: View {
         .sheet(item: $selectedPDFURL) { url in
             ReportPDFPreviewView(url: url)
         }
+        .requiresRole(.admin)
     }
 
     // MARK: - Category Tab Button
