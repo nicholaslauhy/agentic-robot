@@ -8,14 +8,12 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if auth.user != nil {
-                if auth.isLoadingRole || auth.role == nil {
-                    ProgressView("Loading account…")
-                        .tint(HTXTheme.primaryPurple)
-                } else {
-                    NavigationStack {
-                        HomeView()
-                    }
+            if auth.isLoadingRole {
+                ProgressView("Loading account…")
+                    .tint(HTXTheme.primaryPurple)
+            } else if auth.user != nil, auth.profile != nil, auth.role != nil {
+                NavigationStack {
+                    HomeView()
                 }
             } else {
                 // No Register flow here — admins add members from within the app

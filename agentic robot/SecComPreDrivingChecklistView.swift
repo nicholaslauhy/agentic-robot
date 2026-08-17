@@ -8,8 +8,8 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
-import FirebaseFirestore
 import FirebaseAuth
+import FirebaseFirestore
 
 // MARK: - Vehicle Catalogue
 
@@ -75,7 +75,6 @@ struct SecComPreDrivingChecklistView: View {
     // Basic fields
     @State private var date: Date = Date()
     @State private var time: Date = Date()
-    @State private var driverName: String = ""
     @State private var workContact: String = ""
 
     // Vehicle picker
@@ -124,6 +123,10 @@ struct SecComPreDrivingChecklistView: View {
                        : (selectedGroup?.groupName ?? "")
     }
 
+    private var driverName: String {
+        auth.currentUsername
+    }
+
     private var dateString: String {
         let f = DateFormatter(); f.dateFormat = "dd/MM/yyyy"
         return f.string(from: date)
@@ -155,9 +158,16 @@ struct SecComPreDrivingChecklistView: View {
                         }
                         Divider()
                         formRow(label: "Driver Name") {
-                            TextField("Full name", text: $driverName)
+                            HStack(spacing: 6) {
+                                Text(driverName.isEmpty ? "Username not set" : driverName)
+                                    .foregroundColor(driverName.isEmpty ? .orange : .primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                                Image(systemName: "lock.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                                 .multilineTextAlignment(.trailing)
-                                .autocorrectionDisabled()
                         }
                         Divider()
                         formRow(label: "Work Contact") {
@@ -601,7 +611,10 @@ struct SecComPreDrivingChecklistView: View {
             "equipment":        selectedEquipment.map { $0.rawValue },
             "bodyworkAllInOrder": bodyworkAllInOrder,
             "bodyworkDetails":  bodyworkAllInOrder ? "" : bodyworkOtherDetail,
-            "generatedBy":      Auth.auth().currentUser?.email ?? "Unknown",
+            "createdByUid":     auth.user?.uid ?? "",
+            "createdByName":    name,
+            "createdByEmail":   auth.currentEmail,
+            "generatedBy":      name,
             "detectionCount":   damageImages.count,
             "createdAt":        FieldValue.serverTimestamp()
         ]

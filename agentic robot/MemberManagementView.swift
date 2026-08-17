@@ -7,6 +7,7 @@ struct MemberManagementView: View {
     @EnvironmentObject var auth: AuthViewModel
 
     // Add member form
+    @State private var newUsername = ""
     @State private var newEmail = ""
     @State private var newPassword = ""
     @State private var isPasswordVisible = false
@@ -24,13 +25,24 @@ struct MemberManagementView: View {
     @State private var memberToDelete: MemberEntry? = nil
     @State private var showDeleteConfirm = false
 
+    // Username editor
+    @State private var memberToEdit: MemberEntry? = nil
+    @State private var usernameDraft = ""
+    @State private var usernameEditError: String? = nil
+    @State private var isSavingUsername = false
+
     private let apiKey = "AIzaSyCDs7rIGPLFs4JySTcIw5E2cusYSLlGiHM"
 
     struct MemberEntry: Identifiable {
         let id: String       // Firebase Auth UID = Firestore doc ID
         let email: String
+        var username: String
         var role: String     // "admin" or "member"
         var active: Bool
+
+        var hasUsername: Bool {
+            !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
     }
 
     var body: some View {
@@ -40,12 +52,17 @@ struct MemberManagementView: View {
             ScrollView {
             VStack(alignment: .leading, spacing: 28) {
 
-                // ── Add Member ──────────────────────────────────────────
+                // ── Add Account ─────────────────────────────────────────
                 GroupBox {
                     VStack(alignment: .leading, spacing: 14) {
 
-                        Text("Add New Member")
+                        Text("Add New Account")
                             .font(.headline)
+
+                        TextField("Full name / username", text: $newUsername)
+                            .textFieldStyle(.roundedBorder)
+                            .textContentType(.name)
+                            .autocorrectionDisabled()
 
                         TextField("Email", text: $newEmail)
                             .textFieldStyle(.roundedBorder)
@@ -111,12 +128,12 @@ struct MemberManagementView: View {
                 }
                 .padding(.horizontal)
 
-                // ── Member List ─────────────────────────────────────────
+                // ── Account List ────────────────────────────────────────
                 GroupBox {
                     VStack(alignment: .leading, spacing: 12) {
 
                         HStack {
-                            Text("All Members")
+                            Text("All Accounts")
                                 .font(.headline)
                             Spacer()
                             Button { fetchMembers() } label: {
@@ -129,7 +146,7 @@ struct MemberManagementView: View {
                         } else if let listError {
                             Text(listError).foregroundColor(.red).font(.footnote)
                         } else if members.isEmpty {
-                            Text("No members yet.")
+                            Text("No accounts yet.")
                                 .font(.subheadline)
                                 .foregroundColor(.secondary)
                         } else {
@@ -137,11 +154,18 @@ struct MemberManagementView: View {
                                 VStack(spacing: 0) {
                                     HStack(spacing: 12) {
 
-                                        // Email + role badge
+                                        // Username, email + role badge
                                         VStack(alignment: .leading, spacing: 3) {
+                                            Text(member.hasUsername ? member.username : "Username missing")
+                                                .font(.subheadline.weight(.semibold))
+                                                .foregroundColor(
+                                                    member.hasUsername
+                                                    ? (member.active ? .primary : .gray)
+                                                    : .orange
+                                                )
                                             Text(member.email)
-                                                .font(.subheadline)
-                                                .foregroundColor(member.active ? .primary : .gray)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
                                             HStack(spacing: 6) {
                                                 Text(member.role.capitalized)
                                                     .font(.caption)
@@ -158,6 +182,18 @@ struct MemberManagementView: View {
                                         }
 
                                         Spacer()
+
+                                        Button {
+                                            usernameDraft = member.username
+                                            usernameEditError = nil
+                                            memberToEdit = member
+                                        } label: {
+                                            Image(systemName: "person.text.rectangle")
+                                                .foregroundColor(HTXTheme.primaryPurple)
+                                                .imageScale(.large)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Edit username for \(member.email)")
 
                                         // ── Action buttons (only for others, not yourself) ──
                                         if member.id != auth.user?.uid {
@@ -214,9 +250,13 @@ struct MemberManagementView: View {
         .groupBoxStyle(SubtleHTXGroupBoxStyle())
         .tint(HTXTheme.primaryPurple)
         }
-        .navigationTitle("Add Member")
+        .navigationTitle("Manage Accounts")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { fetchMembers() }
+        .sheet(item: $memberToEdit) { member in
+            usernameEditor(for: member)
+                .interactiveDismissDisabled(isSavingUsername)
+        }
         // Deactivation / Reactivation confirmation alert
         .alert(
             memberToDelete?.active == true
@@ -237,6 +277,100 @@ struct MemberManagementView: View {
                 : "This user will regain access to the application."
             )
         }
+    }
+
+    private func usernameEditor(for member: MemberEntry) -> some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Account")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    Text(member.email)
+                        .font(.headline)
+                }
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("Full name / username")
+                        .font(.subheadline.weight(.semibold))
+                    TextField("Enter the user's full name", text: $usernameDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .textContentType(.name)
+                        .autocorrectionDisabled()
+                }
+
+                Text("This name will be inserted automatically into forms completed by this account.")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+
+                if let usernameEditError {
+                    Text(usernameEditError)
+                        .font(.footnote)
+                        .foregroundColor(.red)
+                }
+
+                Spacer()
+
+                Button {
+                    saveUsername(for: member)
+                } label: {
+                    if isSavingUsername {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Text("Save Username")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(HTXTheme.primaryPurple)
+                .disabled(isSavingUsername)
+            }
+            .padding()
+            .navigationTitle(member.hasUsername ? "Edit Username" : "Add Username")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { memberToEdit = nil }
+                        .disabled(isSavingUsername)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func saveUsername(for member: MemberEntry) {
+        let username = usernameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !username.isEmpty else {
+            usernameEditError = "Username cannot be empty."
+            return
+        }
+
+        isSavingUsername = true
+        usernameEditError = nil
+
+        Firestore.firestore()
+            .collection("users")
+            .document(member.id)
+            .updateData([
+                "username": username,
+                "updatedAt": FieldValue.serverTimestamp()
+            ]) { error in
+                DispatchQueue.main.async {
+                    self.isSavingUsername = false
+                    if let error {
+                        self.usernameEditError = "Could not save username: \(error.localizedDescription)"
+                        return
+                    }
+
+                    if let index = self.members.firstIndex(where: { $0.id == member.id }) {
+                        self.members[index].username = username
+                    }
+                    self.memberToEdit = nil
+                    self.usernameDraft = ""
+                }
+            }
     }
 
     // MARK: - Toggle active status
@@ -261,11 +395,12 @@ struct MemberManagementView: View {
 
     // MARK: - Add member via REST (keeps admin session intact)
     private func addMemberViaREST() {
+        let username = newUsername.trimmingCharacters(in: .whitespacesAndNewlines)
         let email = newEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         let password = newPassword.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !email.isEmpty, !password.isEmpty else {
-            addError = "Please fill in both fields."
+        guard !username.isEmpty, !email.isEmpty, !password.isEmpty else {
+            addError = "Please fill in the username, email and temporary password."
             return
         }
 
@@ -326,8 +461,11 @@ struct MemberManagementView: View {
             // Write Firestore record
             Firestore.firestore().collection("users").document(newUid).setData([
                 "email": email,
+                "username": username,
                 "role": self.selectedRole,
-                "active": true
+                "active": true,
+                "createdAt": FieldValue.serverTimestamp(),
+                "updatedAt": FieldValue.serverTimestamp()
             ]) { err in
                 DispatchQueue.main.async {
                     self.isAdding = false
@@ -336,6 +474,7 @@ struct MemberManagementView: View {
                     } else {
                         self.sendPasswordResetEmail(to: email)
                         self.addSuccess = "\(email) added successfully. Password reset email sent to user."
+                        self.newUsername = ""
                         self.newEmail = ""
                         self.newPassword = ""
                         self.selectedRole = "member"
@@ -358,6 +497,7 @@ struct MemberManagementView: View {
                             self.members[idx] = MemberEntry(
                                 id: member.id,
                                 email: member.email,
+                                username: member.username,
                                 role: newRole,
                                 active: member.active
                             )
@@ -382,11 +522,26 @@ struct MemberManagementView: View {
                 }
                 self.members = (snapshot?.documents ?? []).compactMap { doc in
                     guard let email = doc.data()["email"] as? String else { return nil }
+                    let username = (doc.data()["username"] as? String
+                                    ?? doc.data()["displayName"] as? String
+                                    ?? doc.data()["name"] as? String
+                                    ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
                     let role = doc.data()["role"] as? String ?? "member"
                     let active = doc.data()["active"] as? Bool ?? true
-                    return MemberEntry(id: doc.documentID, email: email, role: role, active: active)
+                    return MemberEntry(
+                        id: doc.documentID,
+                        email: email,
+                        username: username,
+                        role: role,
+                        active: active
+                    )
                 }
-                .sorted { $0.email < $1.email }
+                .sorted {
+                    let left = $0.hasUsername ? $0.username : $0.email
+                    let right = $1.hasUsername ? $1.username : $1.email
+                    return left.localizedCaseInsensitiveCompare(right) == .orderedAscending
+                }
             }
         }
     }
