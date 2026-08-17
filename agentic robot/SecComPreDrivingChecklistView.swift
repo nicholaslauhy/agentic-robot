@@ -6,8 +6,8 @@
 //
 
 import SwiftUI
+import UIKit
 import PhotosUI
-import UniformTypeIdentifiers
 import FirebaseAuth
 import FirebaseFirestore
 
@@ -63,6 +63,105 @@ enum VehicleEquipment: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+struct ChecklistDamagePhoto: Identifiable {
+    let id: UUID
+    let image: UIImage
+    let angleIndex: Int
+    let guideCarType: CarType
+    let confirmedRegions: [ChecklistDamageRegion]
+
+    init(
+        id: UUID = UUID(),
+        image: UIImage,
+        angleIndex: Int,
+        guideCarType: CarType,
+        confirmedRegions: [ChecklistDamageRegion] = []
+    ) {
+        self.id = id
+        self.image = image
+        self.angleIndex = angleIndex
+        self.guideCarType = guideCarType
+        self.confirmedRegions = confirmedRegions
+    }
+
+    var angleLabel: String {
+        scanAngles[min(max(angleIndex, 0), scanAngles.count - 1)].label
+    }
+}
+
+struct ChecklistDamageRegion: Identifiable {
+    let id: UUID
+    var damageType: String
+    var confidence: Double
+    var normalizedBBox: CGRect?
+    var cropImage: UIImage?
+    var explanation: String
+    var isManuallyAdded: Bool
+
+    init(
+        id: UUID = UUID(),
+        damageType: String,
+        confidence: Double,
+        normalizedBBox: CGRect?,
+        cropImage: UIImage?,
+        explanation: String,
+        isManuallyAdded: Bool
+    ) {
+        self.id = id
+        self.damageType = damageType
+        self.confidence = confidence
+        self.normalizedBBox = normalizedBBox
+        self.cropImage = cropImage
+        self.explanation = explanation
+        self.isManuallyAdded = isManuallyAdded
+    }
+
+    init(detection: DamageDetection, sourceImage: UIImage) {
+        let normalizedImage = sourceImage.htxNormalizedImage()
+        let sourceWidth = CGFloat(detection.imageWidth ?? Int(normalizedImage.size.width))
+        let sourceHeight = CGFloat(detection.imageHeight ?? Int(normalizedImage.size.height))
+
+        let box: CGRect?
+        if let x1 = detection.x1,
+           let y1 = detection.y1,
+           let x2 = detection.x2,
+           let y2 = detection.y2,
+           sourceWidth > 0,
+           sourceHeight > 0,
+           x2 > x1,
+           y2 > y1 {
+            let nx1 = max(0, min(1, CGFloat(x1) / sourceWidth))
+            let ny1 = max(0, min(1, CGFloat(y1) / sourceHeight))
+            let nx2 = max(0, min(1, CGFloat(x2) / sourceWidth))
+            let ny2 = max(0, min(1, CGFloat(y2) / sourceHeight))
+            box = nx2 > nx1 && ny2 > ny1
+                ? CGRect(x: nx1, y: ny1, width: nx2 - nx1, height: ny2 - ny1)
+                : nil
+        } else {
+            box = nil
+        }
+
+        self.init(
+            id: detection.id,
+            damageType: detection.damageType,
+            confidence: detection.confidence,
+            normalizedBBox: box,
+            cropImage: detection.cropImage,
+            explanation: detection.explanation,
+            isManuallyAdded: false
+        )
+    }
+}
+
+private struct ChecklistDamageReviewSession: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let angleIndex: Int
+    let guideCarType: CarType
+    let replacementID: UUID?
+    let detectedRegions: [ChecklistDamageRegion]
+}
+
 // MARK: - Main Form View
 
 struct SecComPreDrivingChecklistView: View {
@@ -96,12 +195,28 @@ struct SecComPreDrivingChecklistView: View {
     @State private var bodyworkAllInOrder: Bool = true
     @State private var bodyworkOtherDetail: String = ""
 
-    // Damage images
-    @State private var damageImages: [UIImage] = []
+    // Optional, guided damage photos
+    @State private var damagePhotos: [ChecklistDamagePhoto] = []
+    @State private var showDamageCaptureSetup = false
+    @State private var damageCaptureAngleIndex = 0
+    @State private var damageCaptureCarType: CarType = .sedan
+    @State private var selectedDamagePhoto: ChecklistDamagePhoto?
+    @State private var damagePhotoBeingReplacedID: UUID?
     @State private var showDamagePicker = false
     @State private var showDamageCamera = false
-    @State private var showDamageFileImporter = false
     @State private var selectedDamagePhotoItem: PhotosPickerItem?
+    @State private var isValidatingDamagePhoto = false
+    @State private var damageValidationTask: URLSessionDataTask?
+    @State private var damageValidationID: UUID?
+    @State private var rejectedDamagePhoto: UIImage?
+    @State private var rejectedDamageResult: GeminiAngleService.AngleValidationResult?
+    @StateObject private var damageAngleProgress = HTXProgressTracker()
+    @State private var damageAnalysisTask: Task<Void, Never>?
+    @State private var isAnalyzingDamagePhoto = false
+    @State private var pendingAnalysisImage: UIImage?
+    @State private var damageAnalysisError: String?
+    @State private var damageReviewSession: ChecklistDamageReviewSession?
+    @StateObject private var damageAnalysisProgress = HTXProgressTracker()
 
     // Submission
     @State private var isSubmitting = false
@@ -125,6 +240,17 @@ struct SecComPreDrivingChecklistView: View {
 
     private var driverName: String {
         auth.currentUsername
+    }
+
+    private var inferredDamageCarType: CarType {
+        let name = effectiveCarType.lowercased()
+        if name.contains("suv") || name.contains("pajero") || name.contains("land cruiser") || name.contains("xc 90") {
+            return .suv
+        }
+        if name.contains("mpv") || name.contains("van") || name.contains("transporter") || name.contains("cau") {
+            return .mpv
+        }
+        return .sedan
     }
 
     private var dateString: String {
@@ -280,48 +406,86 @@ struct SecComPreDrivingChecklistView: View {
 
                     // Damage photos (optional)
                     sectionCard(title: "New Damage Detected (Optional)", icon: "camera.fill") {
-                        if damageImages.isEmpty {
-                            damagePhotoMenu {
-                                HStack {
-                                    Image(systemName: "plus.circle.fill")
-                                        .foregroundColor(HTXTheme.primaryPurple)
-                                    Text("Add Photo")
-                                        .foregroundColor(HTXTheme.primaryPurple)
-                                        .font(.subheadline.weight(.semibold))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(HTXTheme.primaryPurple.opacity(0.07))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
+                        Text("Only add a photo when you notice new damage. Select the vehicle angle first so the photo can be checked before it is attached.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        if damagePhotos.isEmpty {
+                            addDamagePhotoButton
                         } else {
                             ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 10) {
-                                    ForEach(damageImages.indices, id: \.self) { idx in
-                                        ZStack(alignment: .topTrailing) {
-                                            Image(uiImage: damageImages[idx])
-                                                .resizable()
-                                                .scaledToFill()
-                                                .frame(width: 90, height: 90)
-                                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                                            Button {
-                                                damageImages.remove(at: idx)
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .foregroundColor(.red)
-                                                    .background(Color.white.clipShape(Circle()))
+                                HStack(spacing: 12) {
+                                    ForEach(damagePhotos) { photo in
+                                        VStack(alignment: .leading, spacing: 7) {
+                                            ZStack(alignment: .topTrailing) {
+                                                Button {
+                                                    selectedDamagePhoto = photo
+                                                } label: {
+                                                    Image(uiImage: photo.image)
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 140, height: 95)
+                                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                        .overlay(alignment: .bottomTrailing) {
+                                                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                                                .font(.caption.weight(.bold))
+                                                                .foregroundColor(.white)
+                                                                .padding(6)
+                                                                .background(Color.black.opacity(0.55))
+                                                                .clipShape(Circle())
+                                                                .padding(6)
+                                                        }
+                                                }
+                                                .buttonStyle(.plain)
+
+                                                Button {
+                                                    damagePhotos.removeAll { $0.id == photo.id }
+                                                } label: {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                        .foregroundColor(.red)
+                                                        .background(Color.white.clipShape(Circle()))
+                                                }
+                                                .offset(x: 6, y: -6)
                                             }
-                                            .offset(x: 6, y: -6)
+
+                                            Text(photo.angleLabel)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundColor(HTXTheme.primaryPurple)
+                                            Text("\(photo.guideCarType.rawValue) guide")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                            Text("\(photo.confirmedRegions.count) confirmed")
+                                                .font(.caption2.weight(.semibold))
+                                                .foregroundColor(.green)
                                         }
+                                        .frame(width: 140, alignment: .leading)
                                     }
-                                    damagePhotoMenu {
-                                        Image(systemName: "plus")
-                                            .font(.title2)
-                                            .foregroundColor(HTXTheme.primaryPurple)
-                                            .frame(width: 90, height: 90)
+
+                                    Button {
+                                        prepareDamageCapture()
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 7) {
+                                            VStack(spacing: 7) {
+                                                Image(systemName: "plus")
+                                                    .font(.title2)
+                                                Text("Add another")
+                                                    .font(.caption.weight(.semibold))
+                                            }
+                                            .frame(width: 140, height: 95)
                                             .background(HTXTheme.primaryPurple.opacity(0.08))
                                             .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                            Text("New photo")
+                                                .font(.caption.weight(.semibold))
+                                            Text("Choose angle")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                        .frame(width: 140, alignment: .leading)
                                     }
+                                    .buttonStyle(.plain)
                                 }
                                 .padding(.vertical, 4)
                             }
@@ -381,9 +545,57 @@ struct SecComPreDrivingChecklistView: View {
                 useOther: $useOtherVehicle
             )
         }
-        // Damage image options dialog moved to button level for correct anchor positioning
-        .sheet(isPresented: $showDamageCamera) {
-            ImagePicker(sourceType: .camera) { img in damageImages.append(img) }
+        .sheet(isPresented: $showDamageCaptureSetup) {
+            ChecklistDamageCaptureSetupSheet(
+                vehicleName: effectiveCarType,
+                angleIndex: $damageCaptureAngleIndex,
+                guideCarType: $damageCaptureCarType,
+                onCancel: {
+                    damagePhotoBeingReplacedID = nil
+                },
+                onTakePhoto: {
+                    showDamageCaptureSetup = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        showDamageCamera = true
+                    }
+                },
+                onChoosePhoto: {
+                    showDamageCaptureSetup = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        showDamagePicker = true
+                    }
+                }
+            )
+        }
+        .fullScreenCover(item: $selectedDamagePhoto) { photo in
+            ChecklistDamagePhotoViewer(
+                photo: photo,
+                onClose: { selectedDamagePhoto = nil },
+                onReplace: { prepareDamagePhotoReplacement(photo) },
+                onDelete: { deleteDamagePhoto(photo) }
+            )
+        }
+        .fullScreenCover(item: $damageReviewSession) { session in
+            ChecklistDamageReviewView(
+                session: session,
+                onCancel: {
+                    damageReviewSession = nil
+                    damagePhotoBeingReplacedID = nil
+                },
+                onConfirm: { regions in
+                    attachReviewedDamagePhoto(from: session, regions: regions)
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showDamageCamera) {
+            CameraOverlayImagePicker(
+                carType: damageCaptureCarType,
+                angleId: damageCaptureAngleIndex
+            ) { image in
+                showDamageCamera = false
+                beginDamageAnalysis(image)
+            }
+            .ignoresSafeArea()
         }
         .photosPicker(isPresented: $showDamagePicker, selection: $selectedDamagePhotoItem, matching: .images)
         .onChange(of: selectedDamagePhotoItem) { _, item in
@@ -391,24 +603,12 @@ struct SecComPreDrivingChecklistView: View {
             Task {
                 if let data = try? await item.loadTransferable(type: Data.self),
                    let img = UIImage(data: data) {
-                    await MainActor.run { damageImages.append(img) }
-                }
-                await MainActor.run { selectedDamagePhotoItem = nil }
-            }
-        }
-        .fileImporter(
-            isPresented: $showDamageFileImporter,
-            allowedContentTypes: [.jpeg, .png],
-            allowsMultipleSelection: true
-        ) { result in
-            if case .success(let urls) = result {
-                for url in urls {
-                    if url.startAccessingSecurityScopedResource(),
-                       let data = try? Data(contentsOf: url),
-                       let img = UIImage(data: data) {
-                        damageImages.append(img)
+                    await MainActor.run { validateDamagePhoto(img) }
+                } else {
+                    await MainActor.run {
+                        selectedDamagePhotoItem = nil
+                        submitError = "The selected damage photo could not be opened. Please choose another image."
                     }
-                    url.stopAccessingSecurityScopedResource()
                 }
             }
         }
@@ -431,7 +631,12 @@ struct SecComPreDrivingChecklistView: View {
                 selectedEquipment: selectedEquipment,
                 bodyworkAllInOrder: bodyworkAllInOrder,
                 bodyworkDetails: bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines),
-                damageImageCount: damageImages.count,
+                damagePhotoSummaries: damagePhotos.map { photo in
+                    let types = photo.confirmedRegions
+                        .map { $0.damageType.capitalized }
+                        .joined(separator: ", ")
+                    return "\(photo.angleLabel) · \(types)"
+                },
                 isSubmitting: isSubmitting,
                 onGenerate: { showGenerateConfirmation = true }
             )
@@ -447,34 +652,278 @@ struct SecComPreDrivingChecklistView: View {
         } message: {
             Text("Please confirm that the details are correct before generating the report.")
         }
+        .overlay {
+            if isValidatingDamagePhoto {
+                HTXProcessingProgressOverlay(
+                    title: "Checking damage photo…",
+                    message: "Verifying the selected vehicle angle and camera alignment.",
+                    progress: damageAngleProgress.value,
+                    accentColor: HTXTheme.primaryPurple,
+                    onCancel: cancelDamagePhotoValidation
+                )
+            }
+        }
+        .overlay {
+            if isAnalyzingDamagePhoto {
+                HTXProcessingProgressOverlay(
+                    title: "Analysing damage…",
+                    message: "Checking the vehicle image for scratches, dents and other visible damage.",
+                    progress: damageAnalysisProgress.value,
+                    accentColor: HTXTheme.primaryPurple,
+                    onCancel: cancelDamageAnalysis
+                )
+            }
+        }
+        .overlay {
+            if let rejectedDamageResult {
+                AngleFailurePopup(
+                    expected: expectedDamageAngle.rawValue,
+                    detected: rejectedDamageResult.detectedAngle.rawValue,
+                    confidence: rejectedDamageResult.confidence,
+                    reason: rejectedDamageResult.reason,
+                    canOverride: true,
+                    onRetake: discardRejectedDamagePhoto,
+                    onOverride: overrideRejectedDamagePhoto
+                )
+            }
+        }
+        .alert("Damage analysis could not be completed", isPresented: Binding(
+            get: { damageAnalysisError != nil },
+            set: { if !$0 { damageAnalysisError = nil } }
+        )) {
+            if pendingAnalysisImage != nil {
+                Button("Try Again") {
+                    if let image = pendingAnalysisImage {
+                        beginDamageAnalysis(image)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingAnalysisImage = nil
+                damagePhotoBeingReplacedID = nil
+            }
+        } message: {
+            Text(damageAnalysisError ?? "Please try again.")
+        }
     }
 
     // MARK: - Helpers
 
-    @ViewBuilder
-    private func damagePhotoMenu<LabelContent: View>(@ViewBuilder label: () -> LabelContent) -> some View {
-        Menu {
-            Button {
-                showDamageCamera = true
-            } label: {
-                Label("Take Photo", systemImage: "camera.fill")
-            }
-
-            Button {
-                showDamagePicker = true
-            } label: {
-                Label("Choose from Library", systemImage: "photo.on.rectangle")
-            }
-
-            Button {
-                showDamageFileImporter = true
-            } label: {
-                Label("Upload JPG/PNG File", systemImage: "doc.badge.plus")
-            }
+    private var addDamagePhotoButton: some View {
+        Button {
+            prepareDamageCapture()
         } label: {
-            label()
+            HStack {
+                Image(systemName: "plus.circle.fill")
+                Text("Add Damage Photo")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundColor(HTXTheme.primaryPurple)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(HTXTheme.primaryPurple.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+    }
+
+    private var expectedDamageAngle: GeminiAngleService.DetectedAngle {
+        switch damageCaptureAngleIndex {
+        case 0: return .front
+        case 1: return .rear
+        case 2: return .left
+        case 3: return .right
+        default: return .unknown
+        }
+    }
+
+    private func prepareDamageCapture() {
+        guard !effectivePlate.isEmpty, !effectiveCarType.isEmpty else {
+            submitError = "Select the vehicle before adding a damage photo."
+            return
+        }
+
+        submitError = nil
+        damagePhotoBeingReplacedID = nil
+        damageCaptureAngleIndex = 0
+        damageCaptureCarType = inferredDamageCarType
+        rejectedDamagePhoto = nil
+        rejectedDamageResult = nil
+        showDamageCaptureSetup = true
+    }
+
+    private func beginDamageAnalysis(_ image: UIImage) {
+        damageAnalysisTask?.cancel()
+        pendingAnalysisImage = image
+        damageAnalysisError = nil
+        selectedDamagePhotoItem = nil
+        rejectedDamagePhoto = nil
+        rejectedDamageResult = nil
+        isAnalyzingDamagePhoto = true
+        damageAnalysisProgress.start(estimatedDuration: 35)
+
+        let angleIndex = damageCaptureAngleIndex
+        let guideCarType = damageCaptureCarType
+        let replacementID = damagePhotoBeingReplacedID
+        let plate = effectivePlate
+
+        damageAnalysisTask = Task {
+            do {
+                let results = try await DamageAnalysisService.shared.analyzeForPlate(
+                    plate: plate,
+                    images: [image],
+                    angleIndices: [angleIndex]
+                )
+                try Task.checkCancellation()
+
+                // Stored baseline regions are useful to the comparison algorithm but
+                // are not new defects for the driver to submit again.
+                let newRegions = results
+                    .filter { !($0.isBaseline ?? false) }
+                    .map { ChecklistDamageRegion(detection: $0, sourceImage: image) }
+
+                await MainActor.run {
+                    damageAnalysisProgress.completeAnimated {
+                        guard !Task.isCancelled else { return }
+                        isAnalyzingDamagePhoto = false
+                        damageAnalysisProgress.stop()
+                        pendingAnalysisImage = nil
+                        damageAnalysisTask = nil
+                        damageReviewSession = ChecklistDamageReviewSession(
+                            image: image,
+                            angleIndex: angleIndex,
+                            guideCarType: guideCarType,
+                            replacementID: replacementID,
+                            detectedRegions: newRegions
+                        )
+                    }
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    isAnalyzingDamagePhoto = false
+                    damageAnalysisProgress.stop()
+                    damageAnalysisTask = nil
+                }
+            } catch {
+                await MainActor.run {
+                    isAnalyzingDamagePhoto = false
+                    damageAnalysisProgress.stop()
+                    damageAnalysisTask = nil
+                    damageAnalysisError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func attachReviewedDamagePhoto(
+        from session: ChecklistDamageReviewSession,
+        regions: [ChecklistDamageRegion]
+    ) {
+        let acceptedPhoto = ChecklistDamagePhoto(
+            id: session.replacementID ?? UUID(),
+            image: session.image,
+            angleIndex: session.angleIndex,
+            guideCarType: session.guideCarType,
+            confirmedRegions: regions
+        )
+
+        if let replacementID = session.replacementID,
+           let index = damagePhotos.firstIndex(where: { $0.id == replacementID }) {
+            damagePhotos[index] = acceptedPhoto
+        } else {
+            damagePhotos.append(acceptedPhoto)
+        }
+
+        damageReviewSession = nil
+        damagePhotoBeingReplacedID = nil
+        bodyworkAllInOrder = false
+        rejectedDamagePhoto = nil
+        rejectedDamageResult = nil
+    }
+
+    private func prepareDamagePhotoReplacement(_ photo: ChecklistDamagePhoto) {
+        damagePhotoBeingReplacedID = photo.id
+        damageCaptureAngleIndex = photo.angleIndex
+        damageCaptureCarType = photo.guideCarType
+        selectedDamagePhoto = nil
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            showDamageCaptureSetup = true
+        }
+    }
+
+    private func deleteDamagePhoto(_ photo: ChecklistDamagePhoto) {
+        damagePhotos.removeAll { $0.id == photo.id }
+        selectedDamagePhoto = nil
+        if damagePhotoBeingReplacedID == photo.id {
+            damagePhotoBeingReplacedID = nil
+        }
+    }
+
+    private func validateDamagePhoto(_ image: UIImage) {
+        let validationID = UUID()
+        damageValidationID = validationID
+        rejectedDamagePhoto = nil
+        rejectedDamageResult = nil
+        isValidatingDamagePhoto = true
+        damageAngleProgress.start(estimatedDuration: 12)
+
+        damageValidationTask = GeminiAngleService.validateExpectedAngle(
+            image: image,
+            expectedAngle: expectedDamageAngle
+        ) { result in
+            guard damageValidationID == validationID else { return }
+            damageValidationTask = nil
+
+            damageAngleProgress.completeAnimated {
+                guard damageValidationID == validationID else { return }
+                damageValidationID = nil
+                isValidatingDamagePhoto = false
+                damageAngleProgress.stop()
+                selectedDamagePhotoItem = nil
+
+                if result.isAccepted {
+                    beginDamageAnalysis(image)
+                } else {
+                    rejectedDamagePhoto = image
+                    rejectedDamageResult = result
+                }
+            }
+        }
+    }
+
+    private func cancelDamagePhotoValidation() {
+        damageValidationID = nil
+        damageValidationTask?.cancel()
+        damageValidationTask = nil
+        damageAngleProgress.stop()
+        isValidatingDamagePhoto = false
+        selectedDamagePhotoItem = nil
+        submitError = "Damage photo verification was cancelled."
+    }
+
+    private func discardRejectedDamagePhoto() {
+        rejectedDamagePhoto = nil
+        rejectedDamageResult = nil
+        selectedDamagePhotoItem = nil
+        DispatchQueue.main.async {
+            showDamageCaptureSetup = true
+        }
+    }
+
+    private func overrideRejectedDamagePhoto() {
+        guard let image = rejectedDamagePhoto else { return }
+        beginDamageAnalysis(image)
+    }
+
+    private func cancelDamageAnalysis() {
+        damageAnalysisTask?.cancel()
+        damageAnalysisTask = nil
+        damageAnalysisProgress.stop()
+        isAnalyzingDamagePhoto = false
+        pendingAnalysisImage = nil
+        damagePhotoBeingReplacedID = nil
+        submitError = "Damage analysis was cancelled. The photo was not attached."
     }
 
     @ViewBuilder
@@ -562,7 +1011,9 @@ struct SecComPreDrivingChecklistView: View {
               !cleanMileage.isEmpty,
               !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !selectedEquipment.isEmpty,
-              bodyworkAllInOrder || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              bodyworkAllInOrder
+                || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !damagePhotos.isEmpty
         else {
             showValidationError = true
             return
@@ -585,7 +1036,9 @@ struct SecComPreDrivingChecklistView: View {
               !cleanMileage.isEmpty,
               !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !selectedEquipment.isEmpty,
-              bodyworkAllInOrder || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              bodyworkAllInOrder
+                || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !damagePhotos.isEmpty
         else {
             showValidationError = true
             return
@@ -615,7 +1068,8 @@ struct SecComPreDrivingChecklistView: View {
             "createdByName":    name,
             "createdByEmail":   auth.currentEmail,
             "generatedBy":      name,
-            "detectionCount":   damageImages.count,
+            "damageImageCount": damagePhotos.count,
+            "detectionCount":   damagePhotos.reduce(0) { $0 + $1.confirmedRegions.count },
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
@@ -636,17 +1090,24 @@ struct SecComPreDrivingChecklistView: View {
                 }
         }
 
-        func uploadDamageImages(_ images: [UIImage], index: Int = 0, paths: [String] = []) {
-            guard index < images.count else {
+        func uploadDamageImages(
+            _ photos: [ChecklistDamagePhoto],
+            index: Int = 0,
+            paths: [String] = [],
+            metadata: [[String: Any]] = []
+        ) {
+            guard index < photos.count else {
                 var finalData = data
                 if !paths.isEmpty {
                     finalData["damageImageStoragePaths"] = paths
+                    finalData["damagePhotos"] = metadata
                 }
                 saveFirestore(finalData)
                 return
             }
 
-            guard let imageData = images[index].jpegData(compressionQuality: 0.82) else {
+            let photo = photos[index]
+            guard let imageData = photo.image.jpegData(compressionQuality: 0.82) else {
                 DispatchQueue.main.async {
                     isSubmitting = false
                     submitError = "Could not read damage image \(index + 1). Please try again."
@@ -659,7 +1120,36 @@ struct SecComPreDrivingChecklistView: View {
                 DispatchQueue.main.async {
                     switch result {
                     case .success(let path):
-                        uploadDamageImages(images, index: index + 1, paths: paths + [path])
+                        let confirmedDamage = photo.confirmedRegions.map { region -> [String: Any] in
+                            var value: [String: Any] = [
+                                "damageType": region.damageType,
+                                "confidence": region.confidence,
+                                "explanation": region.explanation,
+                                "source": region.isManuallyAdded ? "manual" : "ai_confirmed"
+                            ]
+                            if let box = region.normalizedBBox {
+                                value["boundingBox"] = [
+                                    "x": Double(box.minX),
+                                    "y": Double(box.minY),
+                                    "width": Double(box.width),
+                                    "height": Double(box.height)
+                                ]
+                            }
+                            return value
+                        }
+                        let photoMetadata: [String: Any] = [
+                            "storagePath": path,
+                            "angle": photo.angleLabel,
+                            "angleIndex": photo.angleIndex,
+                            "guideVehicleType": photo.guideCarType.rawValue,
+                            "confirmedDamage": confirmedDamage
+                        ]
+                        uploadDamageImages(
+                            photos,
+                            index: index + 1,
+                            paths: paths + [path],
+                            metadata: metadata + [photoMetadata]
+                        )
                     case .failure(let error):
                         isSubmitting = false
                         submitError = "Failed to upload damage image \(index + 1) to Firebase Storage: \(error.localizedDescription)"
@@ -668,7 +1158,776 @@ struct SecComPreDrivingChecklistView: View {
             }
         }
 
-        uploadDamageImages(damageImages)
+        uploadDamageImages(damagePhotos)
+    }
+}
+
+
+// MARK: - Driver Damage Review
+
+private let checklistDamageTypes = [
+    "scratch", "dent", "paint chip", "crack",
+    "broken glass", "lamp broken", "tire flat", "other"
+]
+
+private enum ChecklistDamageDecision {
+    case undecided
+    case confirmed
+    case rejected
+}
+
+private struct ChecklistDamageCandidate: Identifiable {
+    let id: UUID
+    var region: ChecklistDamageRegion
+    var decision: ChecklistDamageDecision
+
+    init(region: ChecklistDamageRegion, decision: ChecklistDamageDecision = .undecided) {
+        self.id = region.id
+        self.region = region
+        self.decision = decision
+    }
+}
+
+private struct ChecklistDamageReviewView: View {
+    let session: ChecklistDamageReviewSession
+    let onCancel: () -> Void
+    let onConfirm: ([ChecklistDamageRegion]) -> Void
+
+    @State private var candidates: [ChecklistDamageCandidate]
+    @State private var showManualEditor = false
+    @State private var showCancelConfirmation = false
+
+    init(
+        session: ChecklistDamageReviewSession,
+        onCancel: @escaping () -> Void,
+        onConfirm: @escaping ([ChecklistDamageRegion]) -> Void
+    ) {
+        self.session = session
+        self.onCancel = onCancel
+        self.onConfirm = onConfirm
+        _candidates = State(initialValue: session.detectedRegions.map { ChecklistDamageCandidate(region: $0) })
+    }
+
+    private var confirmedRegions: [ChecklistDamageRegion] {
+        candidates.filter { $0.decision == .confirmed }.map(\.region)
+    }
+
+    private var hasUndecidedDetections: Bool {
+        candidates.contains { $0.decision == .undecided }
+    }
+
+    private var visibleRegions: [ChecklistDamageRegion] {
+        candidates.filter { $0.decision != .rejected }.map(\.region)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SubtleHTXBackground().ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Confirm the damage in this photo")
+                                .font(.title3.bold())
+                            Text("Select Yes or No for every suggested area. If the system missed something, draw the area and choose its damage type.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(.horizontal)
+
+                        ChecklistDamageAnnotatedImage(
+                            image: session.image,
+                            regions: visibleRegions,
+                            showLabels: true
+                        )
+                        .frame(height: 330)
+                        .background(Color.black.opacity(0.04))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .padding(.horizontal)
+
+                        if candidates.isEmpty {
+                            VStack(spacing: 10) {
+                                Image(systemName: "viewfinder.circle")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(HTXTheme.primaryPurple)
+                                Text("No damage was found automatically")
+                                    .font(.headline)
+                                Text("If there is visible damage in the photo, add it manually before attaching the photo.")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(22)
+                            .subtleHTXCard()
+                            .padding(.horizontal)
+                        } else {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Suggested damage areas")
+                                    .font(.headline)
+                                    .padding(.horizontal)
+
+                                ForEach(Array(candidates.indices), id: \.self) { index in
+                                    damageCandidateCard(index: index)
+                                }
+                            }
+                        }
+
+                        Button {
+                            showManualEditor = true
+                        } label: {
+                            Label("Draw a Missed Damage Area", systemImage: "square.dashed")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(HTXTheme.primaryPurple)
+                        .padding(.horizontal)
+
+                        if hasUndecidedDetections {
+                            Label("Answer Yes or No for every suggested area.", systemImage: "exclamationmark.circle.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(.orange)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.horizontal)
+                        } else if confirmedRegions.isEmpty {
+                            Label("Confirm at least one area or add the damage manually.", systemImage: "exclamationmark.circle.fill")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundColor(.orange)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .padding(.horizontal)
+                        }
+
+                        Button {
+                            onConfirm(confirmedRegions)
+                        } label: {
+                            Text("Attach \(confirmedRegions.count) Confirmed Damage Area\(confirmedRegions.count == 1 ? "" : "s")")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                        }
+                        .background(canAttach ? HTXTheme.primaryPurple : Color.gray.opacity(0.45))
+                        .foregroundColor(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .disabled(!canAttach)
+                        .padding(.horizontal)
+                        .padding(.bottom, 28)
+                    }
+                    .padding(.top, 16)
+                }
+            }
+            .navigationTitle("Review Damage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { showCancelConfirmation = true }
+                }
+            }
+            .sheet(isPresented: $showManualEditor) {
+                ChecklistManualDamageEditor(image: session.image) { region in
+                    candidates.append(ChecklistDamageCandidate(region: region, decision: .confirmed))
+                }
+            }
+            .confirmationDialog(
+                "Discard this damage photo?",
+                isPresented: $showCancelConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Discard Photo", role: .destructive, action: onCancel)
+                Button("Continue Reviewing", role: .cancel) {}
+            } message: {
+                Text("The photo and your damage decisions will not be attached to the checklist.")
+            }
+        }
+    }
+
+    private var canAttach: Bool {
+        !hasUndecidedDetections && !confirmedRegions.isEmpty
+    }
+
+    @ViewBuilder
+    private func damageCandidateCard(index: Int) -> some View {
+        let candidate = candidates[index]
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                if let crop = candidate.region.cropImage
+                    ?? checklistDamageCrop(image: session.image, bbox: candidate.region.normalizedBBox) {
+                    Image(uiImage: crop)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 112, height: 82)
+                        .clipped()
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Menu {
+                        ForEach(checklistDamageTypes, id: \.self) { type in
+                            Button(type.capitalized) {
+                                candidates[index].region.damageType = type
+                                candidates[index].region.explanation = "\(type.capitalized) identified on the \(angleLabel(for: session.angleIndex))."
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(candidate.region.damageType.capitalized)
+                                .font(.headline)
+                            Image(systemName: "chevron.down")
+                                .font(.caption.bold())
+                        }
+                        .foregroundColor(HTXTheme.primaryPurple)
+                    }
+
+                    Text(candidate.region.isManuallyAdded
+                         ? "Added manually"
+                         : "AI confidence: \(Int((candidate.region.confidence * 100).rounded()))%")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    if !candidate.region.explanation.isEmpty {
+                        Text(candidate.region.explanation)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer()
+
+                if candidate.region.isManuallyAdded {
+                    Button(role: .destructive) {
+                        candidates.remove(at: index)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                }
+            }
+
+            if candidate.region.isManuallyAdded {
+                Label("Confirmed by driver", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.green)
+            } else {
+                Text("Is this the damage you are reporting?")
+                    .font(.subheadline.weight(.semibold))
+
+                HStack(spacing: 12) {
+                    decisionButton(
+                        title: "Yes",
+                        icon: "checkmark.circle.fill",
+                        selected: candidate.decision == .confirmed,
+                        color: .green
+                    ) {
+                        candidates[index].decision = .confirmed
+                    }
+
+                    decisionButton(
+                        title: "No",
+                        icon: "xmark.circle.fill",
+                        selected: candidate.decision == .rejected,
+                        color: .red
+                    ) {
+                        candidates[index].decision = .rejected
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .subtleHTXCard()
+        .padding(.horizontal)
+    }
+
+    private func decisionButton(
+        title: String,
+        icon: String,
+        selected: Bool,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(selected ? color : Color(.secondarySystemBackground))
+                .foregroundColor(selected ? .white : color)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(color.opacity(selected ? 0 : 0.4), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ChecklistManualDamageEditor: View {
+    let image: UIImage
+    let onAdd: (ChecklistDamageRegion) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var damageType = checklistDamageTypes[0]
+    @State private var normalizedBBox: CGRect?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text("Choose the damage type, then drag a box tightly around the damaged area.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        ForEach(checklistDamageTypes, id: \.self) { type in
+                            Button {
+                                damageType = type
+                            } label: {
+                                Text(type.capitalized)
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 11)
+                                    .background(damageType == type ? HTXTheme.primaryPurple : Color(.secondarySystemBackground))
+                                    .foregroundColor(damageType == type ? .white : .primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    BoundingBoxOverlayView(
+                        image: image,
+                        normalizedBBox: $normalizedBBox,
+                        accentColor: .orange,
+                        isInteractive: true
+                    )
+                    .frame(height: 480)
+                    .background(Color.black.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding(.horizontal)
+
+                    if normalizedBBox == nil {
+                        Label("Draw a boundary before adding this damage.", systemImage: "hand.draw")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundColor(.orange)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+                .padding(.vertical)
+            }
+            .navigationTitle("Add Missed Damage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        let region = ChecklistDamageRegion(
+                            damageType: damageType,
+                            confidence: 1,
+                            normalizedBBox: normalizedBBox,
+                            cropImage: checklistDamageCrop(image: image, bbox: normalizedBBox),
+                            explanation: "\(damageType.capitalized) marked by the driver.",
+                            isManuallyAdded: true
+                        )
+                        onAdd(region)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(normalizedBBox == nil)
+                }
+            }
+        }
+    }
+}
+
+private struct ChecklistDamageAnnotatedImage: View {
+    let image: UIImage
+    let regions: [ChecklistDamageRegion]
+    let showLabels: Bool
+
+    var body: some View {
+        GeometryReader { geometry in
+            let imageRect = fittedImageRect(in: geometry.size)
+
+            ZStack(alignment: .topLeading) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: imageRect.width, height: imageRect.height)
+                    .position(x: imageRect.midX, y: imageRect.midY)
+
+                ForEach(Array(regions.enumerated()), id: \.element.id) { index, region in
+                    if let box = region.normalizedBBox {
+                        let rect = CGRect(
+                            x: imageRect.minX + box.minX * imageRect.width,
+                            y: imageRect.minY + box.minY * imageRect.height,
+                            width: box.width * imageRect.width,
+                            height: box.height * imageRect.height
+                        )
+
+                        Rectangle()
+                            .stroke(Color.orange, lineWidth: 2.5)
+                            .frame(width: rect.width, height: rect.height)
+                            .offset(x: rect.minX, y: rect.minY)
+
+                        if showLabels {
+                            Text("D\(index + 1): \(region.damageType.capitalized)")
+                                .font(.caption2.bold())
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(Color.orange)
+                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                                .offset(
+                                    x: min(max(imageRect.minX, rect.minX), max(imageRect.minX, imageRect.maxX - 130)),
+                                    y: max(imageRect.minY, rect.minY - 24)
+                                )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func fittedImageRect(in container: CGSize) -> CGRect {
+        guard image.size.width > 0, image.size.height > 0, container.width > 0, container.height > 0 else {
+            return .zero
+        }
+        let scale = min(container.width / image.size.width, container.height / image.size.height)
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        return CGRect(
+            x: (container.width - size.width) / 2,
+            y: (container.height - size.height) / 2,
+            width: size.width,
+            height: size.height
+        )
+    }
+}
+
+private func checklistDamageCrop(image: UIImage, bbox: CGRect?) -> UIImage? {
+    guard let bbox else { return nil }
+    let normalized = image.htxNormalizedImage()
+    guard let cgImage = normalized.cgImage else { return nil }
+
+    let paddingX = bbox.width * 0.25
+    let paddingY = bbox.height * 0.25
+    let padded = CGRect(
+        x: max(0, bbox.minX - paddingX),
+        y: max(0, bbox.minY - paddingY),
+        width: min(1, bbox.maxX + paddingX) - max(0, bbox.minX - paddingX),
+        height: min(1, bbox.maxY + paddingY) - max(0, bbox.minY - paddingY)
+    )
+    let pixelRect = CGRect(
+        x: padded.minX * CGFloat(cgImage.width),
+        y: padded.minY * CGFloat(cgImage.height),
+        width: padded.width * CGFloat(cgImage.width),
+        height: padded.height * CGFloat(cgImage.height)
+    ).integral
+
+    guard pixelRect.width > 1,
+          pixelRect.height > 1,
+          let cropped = cgImage.cropping(to: pixelRect) else { return nil }
+    return UIImage(cgImage: cropped, scale: 1, orientation: .up)
+}
+
+private func angleLabel(for index: Int) -> String {
+    guard scanAngles.indices.contains(index) else { return "vehicle" }
+    return scanAngles[index].label
+}
+
+
+// MARK: - Damage Photo Viewer
+
+private struct ChecklistDamagePhotoViewer: View {
+    let photo: ChecklistDamagePhoto
+    let onClose: () -> Void
+    let onReplace: () -> Void
+    let onDelete: () -> Void
+
+    @State private var scale: CGFloat = 1
+    @State private var previousScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var previousOffset: CGSize = .zero
+    @State private var showDeleteConfirmation = false
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            GeometryReader { geometry in
+                ChecklistDamageAnnotatedImage(
+                    image: photo.image,
+                    regions: photo.confirmedRegions,
+                    showLabels: true
+                )
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        SimultaneousGesture(
+                            MagnificationGesture()
+                                .onChanged { value in
+                                    scale = min(max(previousScale * value, 1), 6)
+                                    if scale == 1 { offset = .zero }
+                                }
+                                .onEnded { _ in
+                                    previousScale = scale
+                                    if scale == 1 {
+                                        offset = .zero
+                                        previousOffset = .zero
+                                    }
+                                },
+                            DragGesture()
+                                .onChanged { value in
+                                    guard scale > 1 else { return }
+                                    offset = CGSize(
+                                        width: previousOffset.width + value.translation.width,
+                                        height: previousOffset.height + value.translation.height
+                                    )
+                                }
+                                .onEnded { _ in
+                                    previousOffset = offset
+                                }
+                        )
+                    )
+                    .onTapGesture(count: 2) {
+                        withAnimation(.spring(response: 0.3)) {
+                            if scale > 1 {
+                                scale = 1
+                                previousScale = 1
+                                offset = .zero
+                                previousOffset = .zero
+                            } else {
+                                scale = 2.5
+                                previousScale = 2.5
+                            }
+                        }
+                    }
+            }
+
+            VStack {
+                HStack {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.white)
+                            .frame(width: 42, height: 42)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Circle())
+                    }
+
+                    Spacer()
+
+                    Text("Pinch or double-tap to zoom")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.55))
+                        .clipShape(Capsule())
+                }
+                .padding()
+
+                Spacer()
+
+                VStack(spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(photo.angleLabel)
+                                .font(.headline)
+                            Text("\(photo.guideCarType.rawValue) silhouette")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+
+                    HStack(spacing: 12) {
+                        Button(action: onReplace) {
+                            Label("Replace", systemImage: "arrow.triangle.2.circlepath.camera")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(HTXTheme.primaryPurple)
+
+                        Button {
+                            showDeleteConfirmation = true
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .padding()
+            }
+        }
+        .alert("Delete this damage photo?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive, action: onDelete)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The photo will be removed from this checklist.")
+        }
+    }
+}
+
+// MARK: - Guided Damage Capture Setup
+
+private struct ChecklistDamageCaptureSetupSheet: View {
+    let vehicleName: String
+    @Binding var angleIndex: Int
+    @Binding var guideCarType: CarType
+    let onCancel: () -> Void
+    let onTakePhoto: () -> Void
+    let onChoosePhoto: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let guideTypes: [CarType] = [.sedan, .suv, .mpv]
+    private let columns = [GridItem(.flexible()), GridItem(.flexible())]
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                SubtleHTXBackground().ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Selected Vehicle")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
+                            Text(vehicleName)
+                                .font(.headline)
+                                .foregroundColor(HTXTheme.primaryPurple)
+                        }
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Which angle shows the damage?")
+                                .font(.headline)
+
+                            LazyVGrid(columns: columns, spacing: 10) {
+                                ForEach(scanAngles) { angle in
+                                    Button {
+                                        angleIndex = angle.id
+                                    } label: {
+                                        VStack(spacing: 7) {
+                                            Image(systemName: angle.iconName)
+                                                .font(.title3)
+                                            Text(angle.label)
+                                                .font(.subheadline.weight(.semibold))
+                                        }
+                                        .foregroundColor(angleIndex == angle.id ? .white : HTXTheme.primaryPurple)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 14)
+                                        .background(angleIndex == angle.id ? HTXTheme.primaryPurple : Color(.systemBackground))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(HTXTheme.primaryPurple.opacity(0.35), lineWidth: 1.5)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+
+                            Text(scanAngles[angleIndex].instruction)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Vehicle silhouette")
+                                .font(.headline)
+                            Text("Choose the outline that most closely matches the vehicle.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+
+                            HStack(spacing: 10) {
+                                ForEach(guideTypes) { type in
+                                    Button {
+                                        guideCarType = type
+                                    } label: {
+                                        VStack(spacing: 7) {
+                                            Image(systemName: type.icon)
+                                                .font(.title3)
+                                            Text(type.rawValue)
+                                                .font(.caption.weight(.semibold))
+                                        }
+                                        .foregroundColor(guideCarType == type ? .white : HTXTheme.primaryPurple)
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 13)
+                                        .background(guideCarType == type ? HTXTheme.primaryPurple : Color(.systemBackground))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12)
+                                                .stroke(HTXTheme.primaryPurple.opacity(0.35), lineWidth: 1.5)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+
+                        VStack(spacing: 10) {
+                            Button(action: onTakePhoto) {
+                                Label("Open Guided Camera", systemImage: "camera.fill")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                            }
+                            .background(HTXTheme.primaryPurple)
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                            .opacity(UIImagePickerController.isSourceTypeAvailable(.camera) ? 1 : 0.5)
+
+                            Button(action: onChoosePhoto) {
+                                Label("Choose Existing Photo", systemImage: "photo.on.rectangle")
+                                    .font(.subheadline.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(HTXTheme.primaryPurple)
+
+                            if !UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                Text("The simulator has no camera. Choose a photo to test the same angle validation.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Add Damage Photo")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.large])
     }
 }
 
@@ -687,7 +1946,7 @@ private struct SecComChecklistReviewSheet: View {
     let selectedEquipment: Set<VehicleEquipment>
     let bodyworkAllInOrder: Bool
     let bodyworkDetails: String
-    let damageImageCount: Int
+    let damagePhotoSummaries: [String]
     let isSubmitting: Bool
     let onGenerate: () -> Void
 
@@ -739,7 +1998,10 @@ private struct SecComChecklistReviewSheet: View {
                         }
 
                         reviewCard(title: "New Damage Detected", icon: "camera.fill") {
-                            reviewRow("Images Attached", "\(damageImageCount)")
+                            reviewRow("Images Attached", "\(damagePhotoSummaries.count)")
+                            ForEach(Array(damagePhotoSummaries.enumerated()), id: \.offset) { index, summary in
+                                reviewRow("Photo \(index + 1)", summary)
+                            }
                         }
 
                         Button {

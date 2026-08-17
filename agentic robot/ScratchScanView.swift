@@ -830,7 +830,7 @@ private struct BlockingLoadingOverlay: View {
     }
 }
 
-private struct AngleFailurePopup: View {
+struct AngleFailurePopup: View {
     let expected: String
     let detected: String
     let confidence: Double
