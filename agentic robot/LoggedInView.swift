@@ -39,7 +39,7 @@ struct LoggedInView: View {
     @State private var anprUploadTask: URLSessionUploadTask? = nil
     @StateObject private var anprProgress = HTXProgressTracker()
 
-    private let anprServerURLString = "http://192.168.86.229:8000/detect"
+    private let anprServerURLString = "http://10.10.9.49:8000/detect"
     private let anprRequestTimeout: TimeInterval = 15
     private let anprResourceTimeout: TimeInterval = 20
 

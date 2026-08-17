@@ -340,10 +340,29 @@ struct DamageDetection: Codable, Identifiable {
 
 extension UIImage {
     func htxNormalizedImage() -> UIImage {
-        if imageOrientation == .up { return self }
-        let renderer = UIGraphicsImageRenderer(size: size)
+        // Always return an orientation-up, scale-1 image whose CGSize is the
+        // true pixel size. Baseline boxes and backend image dimensions are both
+        // expressed in pixels; retaining a 2x/3x UIImage scale caused the saved
+        // metadata to describe UIKit points while jpegData stored twice or
+        // three times as many pixels.
+        let pixelSize = CGSize(
+            width: max(1, (size.width * scale).rounded()),
+            height: max(1, (size.height * scale).rounded())
+        )
+
+        if imageOrientation == .up,
+           scale == 1,
+           Int(size.width.rounded()) == (cgImage?.width ?? 0),
+           Int(size.height.rounded()) == (cgImage?.height ?? 0) {
+            return self
+        }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: pixelSize, format: format)
         return renderer.image { _ in
-            draw(in: CGRect(origin: .zero, size: size))
+            draw(in: CGRect(origin: .zero, size: pixelSize))
         }
     }
 
@@ -392,28 +411,23 @@ extension UIImage {
     func htxReferenceTemplateBase64(region: ConfirmBaselineRegion) -> (base64: String, templateX1: Int, templateY1: Int, templateX2: Int, templateY2: Int)? {
         let normalized = htxNormalizedImage()
         let scale = normalized.scale
-        let imageSize = normalized.size          // UIKit POINTS (pixels / scale)
+        let imageSize = normalized.size          // scale-1 pixel dimensions
         let imageRect = CGRect(origin: .zero, size: imageSize)
 
-        // region.x1/y1/x2/y2 come from the backend in full-res PIXEL space.
-        // region.imageWidth/imageHeight are also in pixels.
-        // imageSize is in UIKit POINTS. We must convert coords to points before
-        // doing any CGRect geometry, otherwise the damageRect sits outside
-        // imageRect and the intersection returns an empty rect -> nil return ->
-        // no reference crop saved -> template matching always fails.
+        // region.x1/y1/x2/y2 and imageWidth/imageHeight are in pixels.
+        // htxNormalizedImage() also returns a scale-1 pixel image, so this
+        // conversion is normally 1:1 and remains safe for migrated records.
         let coordScale: CGFloat = {
             if let iw = region.imageWidth, iw > 0 {
-                // Backend pixel width -> point width conversion factor
                 return imageSize.width / CGFloat(iw)
             }
-            // If imageWidth is missing, try the scale factor directly.
-            return 1.0 / scale
+            return 1
         }()
         let coordScaleY: CGFloat = {
             if let ih = region.imageHeight, ih > 0 {
                 return imageSize.height / CGFloat(ih)
             }
-            return 1.0 / scale
+            return 1
         }()
 
         let damageRect = CGRect(
@@ -490,7 +504,7 @@ final class DamageAnalysisService {
 
     private init() {}
 
-    private let baseURLString = "http://192.168.86.229:8000"
+    private let baseURLString = "http://10.10.9.49:8000"
 
     /// Smart NP299 analysis.
     /// Always asks the backend comparison endpoint first. If the backend has no
