@@ -12,7 +12,7 @@ struct GeminiAngleService {
 
     // The OpenAI key must stay on the server. This endpoint belongs to the same
     // private backend used by licence-plate and damage analysis.
-    private static let endpoint = "http://192.168.86.229:8000/validate-vehicle-angle"
+    private static let endpoint = "http://10.10.9.49:8000/validate-vehicle-angle"
 
     enum DetectedAngle: String {
         case front   = "Front"

@@ -55,7 +55,7 @@ struct LoginView: View {
                             }
 
                             HTXTextField(
-                                label: "Username",
+                                label: "Email",
                                 placeholder: "Enter your email",
                                 text: $email,
                                 keyboardType: .emailAddress

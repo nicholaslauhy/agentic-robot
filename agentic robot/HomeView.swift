@@ -20,9 +20,11 @@ struct HomeView: View {
                 // MARK: - Header
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Welcome")
+                        Text(auth.hasUsername ? "Welcome, \(auth.currentUsername)" : "Welcome")
                             .font(.largeTitle.weight(.bold))
                             .foregroundColor(HTXTheme.primaryPurple)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
 
                         Text(auth.isAdmin ? "Administrator" : "Member")
                             .font(.subheadline.weight(.semibold))
@@ -39,6 +41,25 @@ struct HomeView: View {
                 }
                 .padding(.horizontal)
                 .padding(.top)
+
+                if !auth.hasUsername {
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.crop.circle.badge.exclamationmark")
+                            .foregroundColor(.orange)
+                        Text(
+                            auth.isAdmin
+                            ? "Your username has not been set. Add it in Manage Accounts before submitting a form."
+                            : "Your username has not been set. Ask an administrator to update your account before submitting a form."
+                        )
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal)
+                }
 
                 Spacer()
 
@@ -69,14 +90,14 @@ struct HomeView: View {
                 if showButtons && !auth.isLoadingRole {
                     VStack(spacing: 14) {
 
-                        // Admin only: Add Member
+                        // Admin only: Manage Accounts
                         if auth.isAdmin {
                             NavigationLink {
                                 MemberManagementView()
                             } label: {
                                 HomeActionRow(
                                     icon: "person.badge.plus.fill",
-                                    title: "Add Member",
+                                    title: "Manage Accounts",
                                     subtitle: "Create and manage team accounts"
                                 )
                             }

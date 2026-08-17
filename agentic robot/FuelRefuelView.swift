@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 import PhotosUI
 import UniformTypeIdentifiers
-import FirebaseFirestore
 import FirebaseAuth
+import FirebaseFirestore
 
 struct FuelRefuelView: View {
 
@@ -13,7 +13,6 @@ struct FuelRefuelView: View {
     @Environment(\.dismiss) private var dismiss
 
     // Fields
-    @State private var driverName: String = ""
     @State private var refuelDate: Date = Date()
     @State private var refuelTime: Date = Date()
     @State private var vehicleNumber: String = ""
@@ -55,6 +54,10 @@ struct FuelRefuelView: View {
                         : (selectedGroup?.groupName ?? "")
     }
 
+    private var driverName: String {
+        auth.currentUsername
+    }
+
     private var dateString: String {
         let f = DateFormatter(); f.dateFormat = "dd/MM/yyyy"
         return f.string(from: refuelDate)
@@ -75,9 +78,16 @@ struct FuelRefuelView: View {
                     // Basic info
                     sectionCard(title: "Driver Information", icon: "person.fill") {
                         formRow(label: "Name") {
-                            TextField("Full name", text: $driverName)
+                            HStack(spacing: 6) {
+                                Text(driverName.isEmpty ? "Username not set" : driverName)
+                                    .foregroundColor(driverName.isEmpty ? .orange : .primary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                                Image(systemName: "lock.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
                                 .multilineTextAlignment(.trailing)
-                                .autocorrectionDisabled()
                         }
                     }
 
@@ -494,7 +504,10 @@ struct FuelRefuelView: View {
             "odometer":         cleanOdometer,
             "usedMastercard":   usedMastercard ?? false,
             "mastercardNumber":  usedMastercard == true ? mastercardNumber.filter { $0.isNumber } : "",
-            "generatedBy":      Auth.auth().currentUser?.email ?? "Unknown",
+            "createdByUid":     auth.user?.uid ?? "",
+            "createdByName":    name,
+            "createdByEmail":   auth.currentEmail,
+            "generatedBy":      name,
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
