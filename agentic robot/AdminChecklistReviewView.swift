@@ -480,6 +480,8 @@ private struct AdminChecklistReviewDetail: View {
 
     @State private var reviewStatus: ChecklistAdminReviewStatus
     @State private var reviewNotes: String
+    @State private var reviewedByName: String
+    @State private var reviewedAt: Date?
     @State private var loadedPhotos: [LoadedAdminDamagePhoto] = []
     @State private var isLoadingPhotos = false
     @State private var photoError: String?
@@ -499,6 +501,10 @@ private struct AdminChecklistReviewDetail: View {
         self.onSaved = onSaved
         _reviewStatus = State(initialValue: record.status)
         _reviewNotes = State(initialValue: record.raw["adminReviewNotes"] as? String ?? "")
+        _reviewedByName = State(initialValue: record.raw["adminReviewedByName"] as? String ?? "")
+        _reviewedAt = State(
+            initialValue: (record.raw["adminReviewedAt"] as? Timestamp)?.dateValue()
+        )
     }
 
     private var data: [String: Any] { record.raw }
@@ -616,9 +622,20 @@ private struct AdminChecklistReviewDetail: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
 
-            if let reviewer = data["adminReviewedByName"] as? String, !reviewer.isEmpty {
+            if !reviewedByName.isEmpty || reviewedAt != nil {
                 Divider().padding(.horizontal, 16)
-                adminDetailRow("Reviewed By", reviewer)
+                if !reviewedByName.isEmpty {
+                    adminDetailRow("Reviewed By", reviewedByName)
+                }
+                if !reviewedByName.isEmpty, reviewedAt != nil {
+                    Divider().padding(.horizontal, 16)
+                }
+                if let reviewedAt {
+                    adminDetailRow(
+                        "Reviewed On",
+                        reviewedAt.formatted(date: .abbreviated, time: .shortened)
+                    )
+                }
             }
         }
     }
@@ -895,6 +912,8 @@ private struct AdminChecklistReviewDetail: View {
                         return
                     }
                     reviewStatus = status
+                    reviewedByName = auth.currentUsername
+                    reviewedAt = Date()
                     onSaved()
                     if status == .escalationRequired {
                         openNP299Workflow()
