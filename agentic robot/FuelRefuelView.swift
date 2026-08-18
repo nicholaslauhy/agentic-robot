@@ -5,6 +5,13 @@ import UniformTypeIdentifiers
 import FirebaseAuth
 import FirebaseFirestore
 
+private enum FuelRefuelField: Hashable {
+    case otherVehicleNumber
+    case otherVehicleType
+    case odometer
+    case mastercardNumber
+}
+
 struct FuelRefuelView: View {
 
     var onReportGenerated: () -> Void = {}
@@ -19,7 +26,7 @@ struct FuelRefuelView: View {
     @State private var odometer: String = ""
     @State private var usedMastercard: Bool? = nil
     @State private var mastercardNumber: String = ""
-    @FocusState private var isMastercardFieldFocused: Bool
+    @FocusState private var focusedField: FuelRefuelField?
 
     // Vehicle picker (reuse same groups)
     @State private var selectedGroup: VehicleGroup? = nil
@@ -135,12 +142,14 @@ struct FuelRefuelView: View {
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
+                                    .focused($focusedField, equals: .otherVehicleNumber)
                             }
                             Divider()
                             formRow(label: "Vehicle Type", required: true) {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
+                                    .focused($focusedField, equals: .otherVehicleType)
                             }
                         }
 
@@ -149,6 +158,7 @@ struct FuelRefuelView: View {
                             TextField("Numbers only, e.g. 12345", text: $odometer)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focusedField, equals: .odometer)
                         }
                     }
 
@@ -171,7 +181,7 @@ struct FuelRefuelView: View {
                                     .keyboardType(.numberPad)
                                     .textContentType(.creditCardNumber)
                                     .multilineTextAlignment(.trailing)
-                                    .focused($isMastercardFieldFocused)
+                                    .focused($focusedField, equals: .mastercardNumber)
                             }
                         }
                     }
@@ -326,7 +336,7 @@ struct FuelRefuelView: View {
             }
 
             if digitsOnly.count == 16 {
-                isMastercardFieldFocused = false
+                focusedField = nil
             }
         }
         .sheet(isPresented: $showReviewSheet) {
@@ -390,6 +400,7 @@ struct FuelRefuelView: View {
     @ViewBuilder
     private func mastercardOption(label: String, value: Bool) -> some View {
         Button {
+            focusedField = nil
             usedMastercard = value
             if value == false { mastercardNumber = "" }
         } label: {
