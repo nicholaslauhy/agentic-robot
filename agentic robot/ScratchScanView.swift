@@ -1168,13 +1168,22 @@ private func scratchNormalizedImage(_ image: UIImage) -> UIImage {
 struct CameraOverlayImagePicker: View {
     let carType: CarType
     let angleId: Int
+    var usesDamageWorkflowProgress: Bool = false
     var onPick:  (UIImage) -> Void
 
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         Color.black.ignoresSafeArea()
-            .onAppear  { MagnifierWindowManager.shared.open(carType: carType, angleId: angleId, onPick: { img in onPick(img); dismiss() }, onCancel: { dismiss() }) }
+            .onAppear  {
+                MagnifierWindowManager.shared.open(
+                    carType: carType,
+                    angleId: angleId,
+                    usesDamageWorkflowProgress: usesDamageWorkflowProgress,
+                    onPick: { img in onPick(img); dismiss() },
+                    onCancel: { dismiss() }
+                )
+            }
             .onDisappear { MagnifierWindowManager.shared.close() }
     }
 }
@@ -1187,7 +1196,13 @@ final class MagnifierWindowManager {
 
     private var cameraWindow: UIWindow?
 
-    func open(carType: CarType, angleId: Int, onPick: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
+    func open(
+        carType: CarType,
+        angleId: Int,
+        usesDamageWorkflowProgress: Bool = false,
+        onPick: @escaping (UIImage) -> Void,
+        onCancel: @escaping () -> Void
+    ) {
         guard let scene = UIApplication.shared.connectedScenes
                 .compactMap({ $0 as? UIWindowScene }).first
         else { return }
@@ -1197,6 +1212,7 @@ final class MagnifierWindowManager {
         vc.onCancel   = { [weak self] in self?.close(); onCancel() }
         vc.carType    = carType
         vc.angleId    = angleId
+        vc.usesDamageWorkflowProgress = usesDamageWorkflowProgress
 
         let win = UIWindow(windowScene: scene)
         win.windowLevel          = .alert + 1
@@ -1219,6 +1235,7 @@ final class MagnifierCameraViewController: UIViewController {
     var onCancel: (() -> Void)?
     var carType:  CarType = .sedan
     var angleId:  Int = 0
+    var usesDamageWorkflowProgress = false
 
     // AVFoundation
     private let session      = AVCaptureSession()
@@ -1560,13 +1577,15 @@ final class MagnifierCameraViewController: UIViewController {
         icon.heightAnchor.constraint(equalToConstant: 36).isActive = true
 
         let label = UILabel()
-        label.text = "Processing image…"
+        label.text = usesDamageWorkflowProgress ? "Inspecting Vehicle Photo" : "Processing image…"
         label.textColor = .label
         label.font = .systemFont(ofSize: 19, weight: .bold)
         label.textAlignment = .center
 
         let detail = UILabel()
-        detail.text = "Checking vehicle angle, visibility, and camera alignment."
+        detail.text = usesDamageWorkflowProgress
+            ? "Step 1 of 2: checking the vehicle angle, visibility, and camera alignment."
+            : "Checking vehicle angle, visibility, and camera alignment."
         detail.textColor = .secondaryLabel
         detail.font = .systemFont(ofSize: 14)
         detail.numberOfLines = 0
@@ -1593,6 +1612,21 @@ final class MagnifierCameraViewController: UIViewController {
         progressLabels.axis = .horizontal
         progressLabels.distribution = .fill
 
+        let firstStep = UILabel()
+        firstStep.text = "●  Step 1  Validate vehicle angle"
+        firstStep.textColor = UIColor(red: 0.44, green: 0.18, blue: 0.82, alpha: 1)
+        firstStep.font = .systemFont(ofSize: 14, weight: .semibold)
+
+        let secondStep = UILabel()
+        secondStep.text = "○  Step 2  Analyse visible damage"
+        secondStep.textColor = .secondaryLabel
+        secondStep.font = .systemFont(ofSize: 14, weight: .semibold)
+
+        let workflowSteps = UIStackView(arrangedSubviews: [firstStep, secondStep])
+        workflowSteps.axis = .vertical
+        workflowSteps.spacing = 8
+        workflowSteps.alignment = .leading
+
         let cancel = UIButton(type: .system)
         cancel.setTitle("Cancel Processing", for: .normal)
         cancel.setTitleColor(.systemRed, for: .normal)
@@ -1605,6 +1639,9 @@ final class MagnifierCameraViewController: UIViewController {
         stack.addArrangedSubview(icon)
         stack.addArrangedSubview(label)
         stack.addArrangedSubview(detail)
+        if usesDamageWorkflowProgress {
+            stack.addArrangedSubview(workflowSteps)
+        }
         stack.addArrangedSubview(progress)
         stack.addArrangedSubview(progressLabels)
         stack.addArrangedSubview(cancel)
@@ -1634,10 +1671,13 @@ final class MagnifierCameraViewController: UIViewController {
                 return
             }
             let value = min(0.92, Float(Date().timeIntervalSince(started) / 12.0) * 0.92)
-            self.verificationProgress?.setProgress(value, animated: true)
+            let displayedValue = self.usesDamageWorkflowProgress ? value * 0.35 : value
+            self.verificationProgress?.setProgress(displayedValue, animated: true)
             let stage = value < 0.18 ? "Preparing request…" : value < 0.55 ? "Uploading securely…" : value < 0.92 ? "Processing on server…" : "Waiting for response…"
-            self.verificationStageLabel?.text = stage
-            self.verificationPercentLabel?.text = "\(Int((value * 100).rounded()))%"
+            self.verificationStageLabel?.text = self.usesDamageWorkflowProgress
+                ? "Step 1 of 2 · \(stage)"
+                : stage
+            self.verificationPercentLabel?.text = "\(Int((displayedValue * 100).rounded()))%"
         }
 
         return requestID
@@ -1888,13 +1928,18 @@ extension MagnifierCameraViewController: AVCapturePhotoCaptureDelegate {
             self.verificationID = nil
             self.angleValidationTask = nil
 
-            self.verificationStageLabel?.text = "Finalizing…"
+            let completedProgress: Float = self.usesDamageWorkflowProgress ? 0.35 : 1
+            self.verificationStageLabel?.text = self.usesDamageWorkflowProgress
+                ? "Step 1 of 2 · Finalizing angle check…"
+                : "Finalizing…"
             UIView.animate(withDuration: 0.55) {
-                self.verificationProgress?.setProgress(1, animated: true)
+                self.verificationProgress?.setProgress(completedProgress, animated: true)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-                self.verificationStageLabel?.text = "Complete"
-                self.verificationPercentLabel?.text = "100%"
+                self.verificationStageLabel?.text = self.usesDamageWorkflowProgress
+                    ? "Step 1 complete · Starting damage analysis…"
+                    : "Complete"
+                self.verificationPercentLabel?.text = self.usesDamageWorkflowProgress ? "35%" : "100%"
             }
 
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.80) {

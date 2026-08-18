@@ -162,6 +162,11 @@ private struct ChecklistDamageReviewSession: Identifiable {
     let detectedRegions: [ChecklistDamageRegion]
 }
 
+private enum ChecklistDamageProcessingStage: Equatable {
+    case angleValidation
+    case damageAnalysis
+}
+
 // MARK: - Main Form View
 
 struct SecComPreDrivingChecklistView: View {
@@ -240,6 +245,19 @@ struct SecComPreDrivingChecklistView: View {
 
     private var driverName: String {
         auth.currentUsername
+    }
+
+    private var damageProcessingStage: ChecklistDamageProcessingStage {
+        isAnalyzingDamagePhoto ? .damageAnalysis : .angleValidation
+    }
+
+    /// Angle validation occupies the first 35% of the overall operation. Damage
+    /// analysis continues from 35% to 100%, so the user sees one continuous bar.
+    private var overallDamageProcessingProgress: Double {
+        if isAnalyzingDamagePhoto {
+            return 0.35 + (min(max(damageAnalysisProgress.value, 0), 1) * 0.65)
+        }
+        return min(max(damageAngleProgress.value, 0), 1) * 0.35
     }
 
     private var inferredDamageCarType: CarType {
@@ -590,7 +608,8 @@ struct SecComPreDrivingChecklistView: View {
         .fullScreenCover(isPresented: $showDamageCamera) {
             CameraOverlayImagePicker(
                 carType: damageCaptureCarType,
-                angleId: damageCaptureAngleIndex
+                angleId: damageCaptureAngleIndex,
+                usesDamageWorkflowProgress: true
             ) { image in
                 showDamageCamera = false
                 beginDamageAnalysis(image)
@@ -653,24 +672,11 @@ struct SecComPreDrivingChecklistView: View {
             Text("Please confirm that the details are correct before generating the report.")
         }
         .overlay {
-            if isValidatingDamagePhoto {
-                HTXProcessingProgressOverlay(
-                    title: "Checking damage photo…",
-                    message: "Verifying the selected vehicle angle and camera alignment.",
-                    progress: damageAngleProgress.value,
-                    accentColor: HTXTheme.primaryPurple,
-                    onCancel: cancelDamagePhotoValidation
-                )
-            }
-        }
-        .overlay {
-            if isAnalyzingDamagePhoto {
-                HTXProcessingProgressOverlay(
-                    title: "Analysing damage…",
-                    message: "Checking the vehicle image for scratches, dents and other visible damage.",
-                    progress: damageAnalysisProgress.value,
-                    accentColor: HTXTheme.primaryPurple,
-                    onCancel: cancelDamageAnalysis
+            if isValidatingDamagePhoto || isAnalyzingDamagePhoto {
+                ChecklistDamageProcessingOverlay(
+                    stage: damageProcessingStage,
+                    overallProgress: overallDamageProcessingProgress,
+                    onCancel: cancelCurrentDamageProcessing
                 )
             }
         }
@@ -878,13 +884,17 @@ struct SecComPreDrivingChecklistView: View {
             damageAngleProgress.completeAnimated {
                 guard damageValidationID == validationID else { return }
                 damageValidationID = nil
-                isValidatingDamagePhoto = false
-                damageAngleProgress.stop()
                 selectedDamagePhotoItem = nil
 
                 if result.isAccepted {
                     beginDamageAnalysis(image)
+                    // Keep the unified overlay visible while its active step
+                    // changes from angle validation to damage analysis.
+                    isValidatingDamagePhoto = false
+                    damageAngleProgress.stop()
                 } else {
+                    isValidatingDamagePhoto = false
+                    damageAngleProgress.stop()
                     rejectedDamagePhoto = image
                     rejectedDamageResult = result
                 }
@@ -924,6 +934,14 @@ struct SecComPreDrivingChecklistView: View {
         pendingAnalysisImage = nil
         damagePhotoBeingReplacedID = nil
         submitError = "Damage analysis was cancelled. The photo was not attached."
+    }
+
+    private func cancelCurrentDamageProcessing() {
+        if isAnalyzingDamagePhoto {
+            cancelDamageAnalysis()
+        } else {
+            cancelDamagePhotoValidation()
+        }
     }
 
     @ViewBuilder
@@ -1162,6 +1180,149 @@ struct SecComPreDrivingChecklistView: View {
     }
 }
 
+
+// MARK: - Multi-step Damage Processing
+
+private struct ChecklistDamageProcessingOverlay: View {
+    let stage: ChecklistDamageProcessingStage
+    let overallProgress: Double
+    let onCancel: () -> Void
+
+    private var clampedProgress: Double {
+        min(max(overallProgress, 0), 1)
+    }
+
+    private var percent: Int {
+        Int((clampedProgress * 100).rounded())
+    }
+
+    private var currentMessage: String {
+        switch stage {
+        case .angleValidation:
+            return "Checking the selected vehicle side, visibility and camera alignment."
+        case .damageAnalysis:
+            return "The photo passed the angle check. Now checking for scratches, dents and other visible damage."
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.42).ignoresSafeArea()
+
+            VStack(spacing: 17) {
+                Image(systemName: "car.side.and.exclamationmark")
+                    .font(.system(size: 34, weight: .semibold))
+                    .foregroundColor(HTXTheme.primaryPurple)
+
+                Text("Inspecting Vehicle Photo")
+                    .font(.title3.bold())
+
+                Text(currentMessage)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                VStack(spacing: 10) {
+                    processingStep(
+                        number: 1,
+                        title: "Validate vehicle angle",
+                        detail: stage == .angleValidation ? "In progress" : "Completed",
+                        isActive: stage == .angleValidation,
+                        isComplete: stage == .damageAnalysis
+                    )
+
+                    Rectangle()
+                        .fill(stage == .damageAnalysis ? Color.green : Color(.systemGray4))
+                        .frame(width: 2, height: 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 15)
+
+                    processingStep(
+                        number: 2,
+                        title: "Analyse visible damage",
+                        detail: stage == .damageAnalysis ? "In progress" : "Waiting",
+                        isActive: stage == .damageAnalysis,
+                        isComplete: false
+                    )
+                }
+                .padding(13)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                VStack(spacing: 8) {
+                    ProgressView(value: clampedProgress, total: 1)
+                        .tint(HTXTheme.primaryPurple)
+                        .scaleEffect(x: 1, y: 1.8, anchor: .center)
+
+                    HStack {
+                        Text(stage == .angleValidation ? "Step 1 of 2" : "Step 2 of 2")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(percent)%")
+                            .font(.system(.subheadline, design: .rounded).weight(.bold))
+                            .foregroundColor(HTXTheme.primaryPurple)
+                            .contentTransition(.numericText())
+                    }
+                }
+
+                Button(action: onCancel) {
+                    Label("Cancel Processing", systemImage: "xmark.circle.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.red)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(24)
+            .frame(maxWidth: 390)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: .black.opacity(0.18), radius: 24, y: 12)
+            .padding(.horizontal, 24)
+        }
+        .transition(.opacity)
+    }
+
+    private func processingStep(
+        number: Int,
+        title: String,
+        detail: String,
+        isActive: Bool,
+        isComplete: Bool
+    ) -> some View {
+        HStack(spacing: 11) {
+            ZStack {
+                Circle()
+                    .fill(isComplete ? Color.green : isActive ? HTXTheme.primaryPurple : Color(.systemGray4))
+                    .frame(width: 30, height: 30)
+
+                if isComplete {
+                    Image(systemName: "checkmark")
+                        .font(.caption.bold())
+                        .foregroundColor(.white)
+                } else {
+                    Text("\(number)")
+                        .font(.caption.bold())
+                        .foregroundColor(isActive ? .white : .secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(isActive || isComplete ? .primary : .secondary)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundColor(isComplete ? .green : isActive ? HTXTheme.primaryPurple : .secondary)
+            }
+            Spacer()
+        }
+    }
+}
 
 // MARK: - Driver Damage Review
 
