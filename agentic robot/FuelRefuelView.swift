@@ -74,10 +74,15 @@ struct FuelRefuelView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
+                    Text("* Required field")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal)
 
                     // Basic info
                     sectionCard(title: "Driver Information", icon: "person.fill") {
-                        formRow(label: "Name") {
+                        formRow(label: "Name", required: true) {
                             HStack(spacing: 6) {
                                 Text(driverName.isEmpty ? "Username not set" : driverName)
                                     .foregroundColor(driverName.isEmpty ? .orange : .primary)
@@ -93,13 +98,13 @@ struct FuelRefuelView: View {
 
                     // Refuel details
                     sectionCard(title: "Refuel Details", icon: "fuelpump.fill") {
-                        formRow(label: "Date of Refuel") {
+                        formRow(label: "Date of Refuel", required: true) {
                             DatePicker("", selection: $refuelDate, displayedComponents: .date)
                                 .labelsHidden()
                                 .tint(HTXTheme.fuelOrange)
                         }
                         Divider()
-                        formRow(label: "Time of Refuel") {
+                        formRow(label: "Time of Refuel", required: true) {
                             DatePicker("", selection: $refuelTime, displayedComponents: .hourAndMinute)
                                 .labelsHidden()
                                 .tint(HTXTheme.fuelOrange)
@@ -110,9 +115,7 @@ struct FuelRefuelView: View {
                             showVehiclePicker = true
                         } label: {
                             HStack {
-                                Text("Vehicle Number")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
+                                HTXFieldLabel(text: "Vehicle Number", required: true)
                                 Spacer()
                                 Text(useOtherVehicle ? "Other" : (selectedPlate.isEmpty ? "Select…" : selectedPlate))
                                     .font(.subheadline.weight(.semibold))
@@ -127,14 +130,14 @@ struct FuelRefuelView: View {
 
                         if useOtherVehicle {
                             Divider()
-                            formRow(label: "Vehicle Number") {
+                            formRow(label: "Vehicle Number", required: true) {
                                 TextField("e.g. QX909B", text: $otherPlate)
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
                             }
                             Divider()
-                            formRow(label: "Vehicle Type") {
+                            formRow(label: "Vehicle Type", required: true) {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
@@ -142,7 +145,7 @@ struct FuelRefuelView: View {
                         }
 
                         Divider()
-                        formRow(label: "Odometer") {
+                        formRow(label: "Odometer", required: true) {
                             TextField("Numbers only, e.g. 12345", text: $odometer)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
@@ -151,13 +154,19 @@ struct FuelRefuelView: View {
 
                     // Mastercard
                     sectionCard(title: "Mastercard Usage", icon: "creditcard.fill") {
+                        HTXFieldLabel(
+                            text: "Was a Mastercard used?",
+                            required: true,
+                            color: .secondary,
+                            font: .caption.weight(.semibold)
+                        )
                         HStack(spacing: 12) {
                             mastercardOption(label: "Yes", value: true)
                             mastercardOption(label: "No",  value: false)
                         }
                         if usedMastercard == true {
                             Divider()
-                            formRow(label: "Mastercard Number") {
+                            formRow(label: "Mastercard Number", required: true) {
                                 TextField("1234 5678 9012 3456", text: $mastercardNumber)
                                     .keyboardType(.numberPad)
                                     .textContentType(.creditCardNumber)
@@ -168,7 +177,7 @@ struct FuelRefuelView: View {
                     }
 
                     // Receipt
-                    sectionCard(title: "Fuel Receipt", icon: "doc.text.fill") {
+                    sectionCard(title: "Fuel Receipt (Optional)", icon: "doc.text.fill") {
                         if let receiptImage {
                             VStack(spacing: 10) {
                                 Image(uiImage: receiptImage)
@@ -222,13 +231,20 @@ struct FuelRefuelView: View {
                     }
 
                     if showValidationError {
-                        Text(usedMastercard == true && mastercardNumber.filter { $0.isNumber }.count != 16
-                            ? "Please enter a valid 16-digit Mastercard number."
-                            : "Please fill in all required fields.")
-                            .font(.footnote)
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("Please complete the following required fields:")
+                                .font(.footnote.weight(.semibold))
+                            ForEach(validationIssues, id: \.self) { issue in
+                                Label(issue, systemImage: "exclamationmark.circle.fill")
+                                    .font(.footnote)
+                            }
+                        }
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.red.opacity(0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal)
                     }
 
                     if let submitError {
@@ -357,11 +373,13 @@ struct FuelRefuelView: View {
     }
 
     @ViewBuilder
-    private func formRow<Trailing: View>(label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+    private func formRow<Trailing: View>(
+        label: String,
+        required: Bool = false,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundColor(.primary)
+            HTXFieldLabel(text: label, required: required)
             Spacer()
             trailing()
                 .font(.subheadline)
@@ -394,6 +412,22 @@ struct FuelRefuelView: View {
         odometer.filter { $0.isNumber }
     }
 
+    private var validationIssues: [String] {
+        var issues: [String] = []
+        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cardDigits = mastercardNumber.filter { $0.isNumber }
+
+        if name.isEmpty { issues.append("Name — ask an administrator to set the account username") }
+        if effectiveVehicleNumber.isEmpty { issues.append("Vehicle Number") }
+        if effectiveCarType.isEmpty { issues.append(useOtherVehicle ? "Vehicle Type" : "Vehicle selection") }
+        if cleanOdometer.isEmpty { issues.append("Odometer") }
+        if usedMastercard == nil { issues.append("Mastercard Usage — select Yes or No") }
+        if usedMastercard == true, cardDigits.count != 16 {
+            issues.append("Mastercard Number — enter all 16 digits")
+        }
+        return issues
+    }
+
     private func formatMastercardNumber(_ digits: String) -> String {
         let limitedDigits = String(digits.filter { $0.isNumber }.prefix(16))
 
@@ -416,16 +450,7 @@ struct FuelRefuelView: View {
         submitError = nil
         odometer = cleanOdometer
 
-        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let vehicleNumber = effectiveVehicleNumber
-
-        let cardNumTrimmed = mastercardNumber.filter { $0.isNumber }
-        guard !name.isEmpty,
-              !vehicleNumber.isEmpty,
-              !cleanOdometer.isEmpty,
-              usedMastercard != nil,
-              usedMastercard == false || cardNumTrimmed.count == 16
-        else {
+        guard validationIssues.isEmpty else {
             showValidationError = true
             return
         }
@@ -476,13 +501,7 @@ struct FuelRefuelView: View {
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
         let vehicleNumber = effectiveVehicleNumber
 
-        let cardNumTrimmed = mastercardNumber.filter { $0.isNumber }
-        guard !name.isEmpty,
-              !vehicleNumber.isEmpty,
-              !cleanOdometer.isEmpty,
-              usedMastercard != nil,
-              usedMastercard == false || cardNumTrimmed.count == 16
-        else {
+        guard validationIssues.isEmpty else {
             showValidationError = true
             return
         }

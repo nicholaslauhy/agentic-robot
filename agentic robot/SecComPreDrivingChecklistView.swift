@@ -287,21 +287,26 @@ struct SecComPreDrivingChecklistView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
+                    Text("* Required field")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal)
 
                     sectionCard(title: "Basic Information", icon: "info.circle.fill") {
-                        formRow(label: "Date") {
+                        formRow(label: "Date", required: true) {
                             DatePicker("", selection: $date, displayedComponents: .date)
                                 .labelsHidden()
                                 .tint(HTXTheme.primaryPurple)
                         }
                         Divider()
-                        formRow(label: "Time") {
+                        formRow(label: "Time", required: true) {
                             DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                                 .labelsHidden()
                                 .tint(HTXTheme.primaryPurple)
                         }
                         Divider()
-                        formRow(label: "Driver Name") {
+                        formRow(label: "Driver Name", required: true) {
                             HStack(spacing: 6) {
                                 Text(driverName.isEmpty ? "Username not set" : driverName)
                                     .foregroundColor(driverName.isEmpty ? .orange : .primary)
@@ -314,7 +319,7 @@ struct SecComPreDrivingChecklistView: View {
                                 .multilineTextAlignment(.trailing)
                         }
                         Divider()
-                        formRow(label: "Work Contact") {
+                        formRow(label: "Work Contact", required: true) {
                             TextField("Contact number", text: $workContact)
                                 .keyboardType(.phonePad)
                                 .multilineTextAlignment(.trailing)
@@ -327,9 +332,7 @@ struct SecComPreDrivingChecklistView: View {
                             showVehiclePicker = true
                         } label: {
                             HStack {
-                                Text("Vehicle Number")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
+                                HTXFieldLabel(text: "Vehicle Number", required: true)
                                 Spacer()
                                 Text(useOtherVehicle ? "Other" : (selectedPlate.isEmpty ? "Select…" : selectedPlate))
                                     .font(.subheadline.weight(.semibold))
@@ -344,7 +347,7 @@ struct SecComPreDrivingChecklistView: View {
 
                         if let grp = selectedGroup, !useOtherVehicle {
                             Divider()
-                            formRow(label: "Vehicle Type") {
+                            formRow(label: "Vehicle Type", required: true) {
                                 Text(grp.groupName)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(.secondary)
@@ -353,14 +356,14 @@ struct SecComPreDrivingChecklistView: View {
 
                         if useOtherVehicle {
                             Divider()
-                            formRow(label: "Car Plate") {
+                            formRow(label: "Car Plate", required: true) {
                                 TextField("e.g. SBA1234A", text: $otherPlate)
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
                             }
                             Divider()
-                            formRow(label: "Car Type") {
+                            formRow(label: "Car Type", required: true) {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
@@ -368,13 +371,13 @@ struct SecComPreDrivingChecklistView: View {
                         }
 
                         Divider()
-                        formRow(label: "Mileage") {
+                        formRow(label: "Mileage", required: true) {
                             TextField("Numbers only, e.g. 12345", text: $mileage)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                         }
                         Divider()
-                        formRow(label: "Purpose") {
+                        formRow(label: "Purpose", required: true) {
                             TextField("Reason for trip", text: $purpose)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
@@ -410,9 +413,12 @@ struct SecComPreDrivingChecklistView: View {
                         if !bodyworkAllInOrder {
                             Divider()
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Details")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(.secondary)
+                                HTXFieldLabel(
+                                    text: "Details or damage photo",
+                                    required: true,
+                                    color: .secondary,
+                                    font: .caption.weight(.semibold)
+                                )
                                 TextEditor(text: $bodyworkOtherDetail)
                                     .frame(minHeight: 80)
                                     .padding(8)
@@ -517,15 +523,20 @@ struct SecComPreDrivingChecklistView: View {
 
                     // Validation error
                     if showValidationError {
-                        Text(
-                            (!bodyworkAllInOrder && bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && damagePhotos.isEmpty)
-                            ? "Please describe the body work defect details."
-                            : "Please fill in all required fields and select a vehicle."
-                        )
-                            .font(.footnote)
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("Please complete the following required fields:")
+                                .font(.footnote.weight(.semibold))
+                            ForEach(validationIssues, id: \.self) { issue in
+                                Label(issue, systemImage: "exclamationmark.circle.fill")
+                                    .font(.footnote)
+                            }
+                        }
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.red.opacity(0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal)
                     }
 
                     if let submitError {
@@ -958,11 +969,13 @@ struct SecComPreDrivingChecklistView: View {
     }
 
     @ViewBuilder
-    private func formRow<Trailing: View>(label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+    private func formRow<Trailing: View>(
+        label: String,
+        required: Bool = false,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundColor(.primary)
+            HTXFieldLabel(text: label, required: required)
             Spacer()
             trailing()
                 .font(.subheadline)
@@ -1016,22 +1029,31 @@ struct SecComPreDrivingChecklistView: View {
         mileage.filter { $0.isNumber }
     }
 
+    private var validationIssues: [String] {
+        var issues: [String] = []
+        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if name.isEmpty { issues.append("Driver Name — ask an administrator to set the account username") }
+        if contact.isEmpty { issues.append("Work Contact") }
+        if effectivePlate.isEmpty { issues.append(useOtherVehicle ? "Car Plate" : "Vehicle Number") }
+        if effectiveCarType.isEmpty { issues.append(useOtherVehicle ? "Car Type" : "Vehicle Type") }
+        if cleanMileage.isEmpty { issues.append("Mileage") }
+        if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Purpose") }
+        if !bodyworkAllInOrder,
+           bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           damagePhotos.isEmpty {
+            issues.append("Body Work Details or a damage photo")
+        }
+        return issues
+    }
+
     private func validateAndShowReview() {
         showValidationError = false
         submitError = nil
         mileage = cleanMileage
 
-        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !name.isEmpty, !contact.isEmpty,
-              !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
-              !cleanMileage.isEmpty,
-              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              bodyworkAllInOrder
-                || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !damagePhotos.isEmpty
-        else {
+        guard validationIssues.isEmpty else {
             showValidationError = true
             return
         }
@@ -1048,14 +1070,7 @@ struct SecComPreDrivingChecklistView: View {
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
         let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !name.isEmpty, !contact.isEmpty,
-              !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
-              !cleanMileage.isEmpty,
-              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              bodyworkAllInOrder
-                || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !damagePhotos.isEmpty
-        else {
+        guard validationIssues.isEmpty else {
             showValidationError = true
             return
         }
