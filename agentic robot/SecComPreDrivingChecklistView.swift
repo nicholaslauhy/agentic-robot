@@ -227,6 +227,7 @@ struct SecComPreDrivingChecklistView: View {
     @State private var isSubmitting = false
     @State private var submitError: String? = nil
     @State private var submitSuccess = false
+    @State private var submittedReportNumber = ""
     @State private var showReviewSheet = false
 
     // Validation
@@ -685,6 +686,13 @@ struct SecComPreDrivingChecklistView: View {
                 )
             }
         }
+        .overlay {
+            if submitSuccess {
+                ChecklistSubmissionSuccessView(reportNumber: submittedReportNumber)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(20)
+            }
+        }
         .alert("Damage analysis could not be completed", isPresented: Binding(
             get: { damageAnalysisError != nil },
             set: { if !$0 { damageAnalysisError = nil } }
@@ -1092,8 +1100,19 @@ struct SecComPreDrivingChecklistView: View {
                         if let error {
                             submitError = "Failed to save: \(error.localizedDescription)"
                         } else {
+                            submittedReportNumber = reportNo
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                submitSuccess = true
+                            }
                             showReviewSheet = false
-                            onReportGenerated()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    submitSuccess = false
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                                    onReportGenerated()
+                                }
+                            }
                         }
                     }
                 }
@@ -2288,6 +2307,11 @@ private struct SecComChecklistReviewSheet: View {
             } message: {
                 Text("Please confirm that the checklist details are correct before generating the report.")
             }
+            .overlay {
+                if isSubmitting {
+                    ChecklistSubmissionProgressView()
+                }
+            }
         }
     }
 
@@ -2317,6 +2341,93 @@ private struct SecComChecklistReviewSheet: View {
                 .multilineTextAlignment(.leading)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Checklist Submission Transition
+
+private struct ChecklistSubmissionProgressView: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.42).ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(HTXTheme.primaryPurple)
+
+                Text("Submitting Checklist")
+                    .font(.title3.weight(.bold))
+
+                Text("Uploading the report and damage evidence. Please keep the app open.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 26)
+            .frame(maxWidth: 390)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(HTXTheme.primaryPurple.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
+            .padding(24)
+        }
+    }
+}
+
+private struct ChecklistSubmissionSuccessView: View {
+    let reportNumber: String
+
+    var body: some View {
+        ZStack {
+            SubtleHTXBackground().ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 72, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .symbolEffect(.bounce, value: reportNumber)
+
+                Text("Checklist Submitted")
+                    .font(.largeTitle.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text("The checklist has been sent to an administrator for review.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                if !reportNumber.isEmpty {
+                    Text(reportNumber)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(HTXTheme.primaryPurple)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(HTXTheme.primaryPurple.opacity(0.08))
+                        .clipShape(Capsule())
+                }
+
+                HStack(spacing: 9) {
+                    ProgressView()
+                        .tint(HTXTheme.primaryPurple)
+                    Text("Returning to the welcome page…")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 34)
+            .padding(.vertical, 38)
+            .frame(maxWidth: 520)
+            .subtleHTXCard()
+            .padding(28)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Checklist submitted successfully. Returning to the welcome page.")
     }
 }
 
