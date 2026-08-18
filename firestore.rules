@@ -30,7 +30,15 @@ service cloud.firestore {
 
     match /seccom_checklists/{reportId} {
       allow create: if hasActiveProfile();
-      allow read, update, delete: if isAdmin();
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.get("adminReviewStatus", "pending")
+          in ["pending", "escalation_required", "no_escalation"]
+        && (
+          resource.data.get("adminReviewStatus", "pending") == "pending"
+          || request.resource.data.get("adminReviewStatus", "pending")
+            == resource.data.get("adminReviewStatus", "pending")
+        );
     }
 
     match /fuel_refuel_reports/{reportId} {
