@@ -1305,12 +1305,35 @@ private struct VehicleBaselineImage: View {
 private struct VehicleBaselinePreview: View {
     let snapshot: VehicleBaselineSnapshot
     @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var lastScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastOffset: CGSize = .zero
+
+    private let minimumScale: CGFloat = 1
+    private let maximumScale: CGFloat = 6
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
+
             VehicleBaselineImage(snapshot: snapshot)
                 .padding()
+                .scaleEffect(scale)
+                .offset(offset)
+                .contentShape(Rectangle())
+                .gesture(magnificationGesture)
+                .simultaneousGesture(dragGesture)
+                .onTapGesture(count: 2) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        if scale > minimumScale {
+                            resetZoom()
+                        } else {
+                            scale = 2.5
+                            lastScale = 2.5
+                        }
+                    }
+                }
 
             VStack {
                 HStack {
@@ -1335,9 +1358,61 @@ private struct VehicleBaselinePreview: View {
                     }
                 }
                 .padding()
+
                 Spacer()
+
+                Text("Pinch to zoom • Drag to move • Double-tap to reset")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color.black.opacity(0.55), in: Capsule())
+                    .padding(.bottom, 24)
+                    .opacity(scale == minimumScale ? 1 : 0.75)
             }
         }
         .statusBarHidden(true)
+    }
+
+    private var magnificationGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(max(lastScale * value, minimumScale), maximumScale)
+                if scale == minimumScale {
+                    offset = .zero
+                }
+            }
+            .onEnded { _ in
+                if scale <= minimumScale {
+                    resetZoom()
+                } else {
+                    lastScale = scale
+                }
+            }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > minimumScale else { return }
+                offset = CGSize(
+                    width: lastOffset.width + value.translation.width,
+                    height: lastOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                guard scale > minimumScale else {
+                    resetZoom()
+                    return
+                }
+                lastOffset = offset
+            }
+    }
+
+    private func resetZoom() {
+        scale = minimumScale
+        lastScale = minimumScale
+        offset = .zero
+        lastOffset = .zero
     }
 }
