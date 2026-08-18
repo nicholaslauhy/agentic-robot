@@ -234,16 +234,19 @@ struct HomeView: View {
         }
         .navigationDestination(isPresented: $navigateToNP299) {
             LoggedInView()
+                .requiresRole(.member)
         }
         .navigationDestination(isPresented: $navigateToSecCom) {
             SecComPreDrivingChecklistView {
                 navigateToSecCom = false
             }
+            .requiresRole(.member)
         }
         .navigationDestination(isPresented: $navigateToFuel) {
             FuelRefuelView {
                 navigateToFuel = false
             }
+            .requiresRole(.member)
         }
     }
 
