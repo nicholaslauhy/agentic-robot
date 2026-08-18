@@ -504,7 +504,7 @@ final class DamageAnalysisService {
 
     private init() {}
 
-    private let baseURLString = "http://10.10.9.49:8000"
+    private let baseURLString = "http://192.168.86.241:8000"
 
     /// Smart NP299 analysis.
     /// Always asks the backend comparison endpoint first. If the backend has no
