@@ -39,9 +39,12 @@ struct LoggedInView: View {
     @State private var anprUploadTask: URLSessionUploadTask? = nil
     @StateObject private var anprProgress = HTXProgressTracker()
 
-    private let anprServerURLString = "http://192.168.86.241:8000/detect"
     private let anprRequestTimeout: TimeInterval = 15
     private let anprResourceTimeout: TimeInterval = 20
+
+    private var anprServerAddress: String {
+        BackendConfiguration.baseURL?.absoluteString ?? "the configured backend"
+    }
 
     /// Which input mode is selected
     @State private var inputMode: InputMode = .licencePlate
@@ -58,9 +61,9 @@ struct LoggedInView: View {
     func sendToANPRServer(image: UIImage) {
         anprUploadTask?.cancel()
 
-        guard let url = URL(string: anprServerURLString) else {
+        guard let url = BackendConfiguration.endpointURL(path: "detect") else {
             isSubmitting = false
-            localErrorMessage = "Invalid licence plate server URL. Please check the IP address in LoggedInView.swift."
+            localErrorMessage = "The backend address is invalid. Please check HTXBackendBaseURL in the app configuration."
             return
         }
 
@@ -112,7 +115,7 @@ struct LoggedInView: View {
                !(200...299).contains(httpResponse.statusCode) {
                 DispatchQueue.main.async {
                     self.isSubmitting = false
-                    self.localErrorMessage = "Licence plate server responded with HTTP \(httpResponse.statusCode). Please check that the correct backend is running at \(self.anprServerURLString)."
+                    self.localErrorMessage = "Licence plate server responded with HTTP \(httpResponse.statusCode). Please check that the correct backend is running at \(self.anprServerAddress)."
                 }
                 return
             }
@@ -172,7 +175,7 @@ struct LoggedInView: View {
             case .timedOut:
                 return "Licence plate detection took too long and timed out. Please check that the ANPR backend is running and try again."
             case .cannotConnectToHost, .notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .dnsLookupFailed:
-                return "Could not reach the licence plate server at \(anprServerURLString). Please check your Wi-Fi, backend server, and IP address."
+                return "Could not reach the licence plate server at \(anprServerAddress). Please check your network connection and backend configuration."
             case .cancelled:
                 return "Licence plate detection was cancelled. Please try again."
             default:

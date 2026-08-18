@@ -504,8 +504,6 @@ final class DamageAnalysisService {
 
     private init() {}
 
-    private let baseURLString = "http://192.168.86.241:8000"
-
     /// Smart NP299 analysis.
     /// Always asks the backend comparison endpoint first. If the backend has no
     /// benchmark rows yet, the endpoint still returns the normal YOLO detections
@@ -657,8 +655,8 @@ final class DamageAnalysisService {
     }
 
     func getBaseline(plate: String) async throws -> BaselineLookupResponse {
-        let encodedPlate = plate.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? plate
-        guard let url = URL(string: "\(baseURLString)/baseline/\(encodedPlate)") else {
+        let normalizedPlate = PlateNormalizer.normalize(plate)
+        guard let url = BackendConfiguration.endpointURL(path: "baseline/\(normalizedPlate)") else {
             throw URLError(.badURL)
         }
 
@@ -674,8 +672,10 @@ final class DamageAnalysisService {
     }
 
     func analyzeCompared(plate: String, images: [UIImage], angleIndices: [Int]? = nil) async throws -> DamageAnalysisComparedResponse {
-        let encodedPlate = plate.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? plate
-        guard let url = URL(string: "\(baseURLString)/analyze-damage-compared?plate=\(encodedPlate)") else {
+        guard let url = BackendConfiguration.endpointURL(
+            path: "analyze-damage-compared",
+            queryItems: [URLQueryItem(name: "plate", value: PlateNormalizer.normalize(plate))]
+        ) else {
             throw URLError(.badURL)
         }
 
@@ -689,7 +689,7 @@ final class DamageAnalysisService {
     }
 
     func analyze(images: [UIImage], angleIndices: [Int]? = nil) async throws -> [DamageDetection] {
-        guard let url = URL(string: "\(baseURLString)/analyze-damage") else {
+        guard let url = BackendConfiguration.endpointURL(path: "analyze-damage") else {
             throw URLError(.badURL)
         }
 
@@ -718,7 +718,7 @@ final class DamageAnalysisService {
         plate: String,
         angles: [ConfirmBaselineBatchAngle]
     ) async throws {
-        guard let url = URL(string: "\(baseURLString)/confirm-baseline-batch") else {
+        guard let url = BackendConfiguration.endpointURL(path: "confirm-baseline-batch") else {
             throw URLError(.badURL)
         }
 

@@ -2,17 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>HTXBackendBaseURL</key>
+	<string>http://192.168.86.241:8000</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>Allow Local Networking</key>
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
-		<key>NSExceptionDomains</key>
-		<dict>
-			<key>192.168.86.176</key>
-			<string></string>
-			<key>Allow Insecure HTTP methods</key>
-			<true/>
-		</dict>
 	</dict>
 </dict>
 </plist>
