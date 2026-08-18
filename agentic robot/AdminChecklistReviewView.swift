@@ -522,7 +522,7 @@ private struct AdminChecklistReviewDetail: View {
 
     private var checklistCard: some View {
         adminSection(title: "Checklist Summary", icon: "checklist") {
-            adminDetailRow("Items Checked", "\(equipment.count) of \(VehicleEquipment.allCases.count)")
+            adminDetailRow("Equipment Recorded", equipment.isEmpty ? "None" : "\(equipment.count) item\(equipment.count == 1 ? "" : "s")")
             Divider().padding(.horizontal, 16)
             adminDetailRow("Body Work", bodyworkAllInOrder ? "All in order" : "Defects noted")
             if let details = data["bodyworkDetails"] as? String, !details.isEmpty {

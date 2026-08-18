@@ -382,7 +382,12 @@ struct SecComPreDrivingChecklistView: View {
                     }
 
                     // Equipment checklist
-                    sectionCard(title: "Checks & Equipment in Vehicle", icon: "checklist") {
+                    sectionCard(title: "Equipment in Vehicle (Optional)", icon: "checklist") {
+                        Text("Select only the equipment currently in the vehicle. You may leave everything unselected when none of these items are present.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 0) {
                             ForEach(VehicleEquipment.allCases) { item in
                                 equipmentToggle(item)
@@ -513,9 +518,7 @@ struct SecComPreDrivingChecklistView: View {
                     // Validation error
                     if showValidationError {
                         Text(
-                            selectedEquipment.isEmpty
-                            ? "Please check at least one item in the equipment checklist."
-                            : (!bodyworkAllInOrder && bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            (!bodyworkAllInOrder && bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && damagePhotos.isEmpty)
                             ? "Please describe the body work defect details."
                             : "Please fill in all required fields and select a vehicle."
                         )
@@ -1028,7 +1031,6 @@ struct SecComPreDrivingChecklistView: View {
               !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
               !cleanMileage.isEmpty,
               !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !selectedEquipment.isEmpty,
               bodyworkAllInOrder
                 || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !damagePhotos.isEmpty
@@ -1053,7 +1055,6 @@ struct SecComPreDrivingChecklistView: View {
               !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
               !cleanMileage.isEmpty,
               !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !selectedEquipment.isEmpty,
               bodyworkAllInOrder
                 || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !damagePhotos.isEmpty
@@ -2225,21 +2226,24 @@ private struct SecComChecklistReviewSheet: View {
                             reviewRow("Purpose", purpose)
                         }
 
-                        reviewCard(title: "Checks & Equipment", icon: "checklist") {
-                            ForEach(VehicleEquipment.allCases) { item in
-                                let checked = selectedEquipment.contains(item)
+                        reviewCard(title: "Equipment in Vehicle", icon: "checklist") {
+                            if selectedEquipment.isEmpty {
+                                reviewRow("Equipment", "None recorded")
+                            } else {
+                                ForEach(VehicleEquipment.allCases.filter { selectedEquipment.contains($0) }) { item in
                                 HStack(alignment: .top, spacing: 10) {
-                                    Image(systemName: checked ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                        .foregroundColor(checked ? HTXTheme.primaryPurple : .red)
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(HTXTheme.primaryPurple)
                                         .frame(width: 22)
                                     Text(item.rawValue)
                                         .font(.subheadline)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                    Text(checked ? "Checked" : "Missing")
+                                    Text("Present")
                                         .font(.caption.weight(.semibold))
-                                        .foregroundColor(checked ? HTXTheme.primaryPurple : .red)
+                                        .foregroundColor(HTXTheme.primaryPurple)
                                 }
                                 .padding(.vertical, 6)
+                                }
                             }
                         }
 
