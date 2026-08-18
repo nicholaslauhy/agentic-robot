@@ -13,18 +13,33 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
+    function isMember() {
+      return hasActiveProfile()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == "member";
+    }
+
+    function isPDFWithinLimit() {
+      return request.resource.size < 50 * 1024 * 1024
+        && request.resource.contentType == "application/pdf";
+    }
+
+    function isImageWithinLimit() {
+      return request.resource.size < 30 * 1024 * 1024
+        && request.resource.contentType.matches("image/.*");
+    }
+
     match /reports/{reportId}/{fileName} {
-      allow create: if hasActiveProfile();
+      allow create: if hasActiveProfile() && isPDFWithinLimit();
       allow read, update, delete: if isAdmin();
     }
 
     match /fuel_refuel_reports/{reportId}/{fileName} {
-      allow create: if hasActiveProfile();
+      allow create: if isMember() && isImageWithinLimit();
       allow read, update, delete: if isAdmin();
     }
 
     match /seccom_checklists/{reportId}/damage_images/{fileName} {
-      allow create: if hasActiveProfile();
+      allow create: if isMember() && isImageWithinLimit();
       allow read, update, delete: if isAdmin();
     }
   }

@@ -245,6 +245,9 @@ struct ReportStore {
             "plate": plate,
             "carType": carType,
             "generatedBy": generatedBy,
+            "createdByUid": Auth.auth().currentUser?.uid ?? "",
+            "createdByName": generatedBy,
+            "createdByEmail": Auth.auth().currentUser?.email ?? "",
             "detectionCount": detectionCount,
             "createdAt": FieldValue.serverTimestamp(),
             "pdfStoredInFirestore": false

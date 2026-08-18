@@ -129,6 +129,25 @@ async function createAdminNotification(event, reportType) {
   }
 
   const report = snapshot.data();
+  const submitterUid = cleanText(report.createdByUid, "");
+
+  // Administrators can generate an NP299 while escalating a member's
+  // checklist. The original checklist notification already brought that work
+  // to the admin queue, so do not create a second notification for an action
+  // performed by an administrator.
+  if (submitterUid) {
+    const submitterProfile = await getFirestore()
+        .collection("users")
+        .doc(submitterUid)
+        .get();
+    if (submitterProfile.data()?.role === "admin") {
+      console.log(
+          `Skipping ${reportType} notification created by administrator ${submitterUid}.`,
+      );
+      return;
+    }
+  }
+
   const details = notificationDetails(reportType, report);
   const notificationId = `${reportType}_${snapshot.id}`;
   const notificationReference = getFirestore()

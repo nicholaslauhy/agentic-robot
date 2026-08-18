@@ -17,6 +17,16 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
+    function isMember() {
+      return hasActiveProfile()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "member";
+    }
+
+    function isAttributedToCurrentUser() {
+      return request.resource.data.createdByUid is string
+        && request.resource.data.createdByUid == request.auth.uid;
+    }
+
     match /users/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
@@ -40,14 +50,37 @@ service cloud.firestore {
     }
 
     match /reports/{reportId} {
-      allow create: if hasActiveProfile();
-      allow read, update, delete: if isAdmin();
+      allow create: if hasActiveProfile()
+        && isAttributedToCurrentUser()
+        && request.resource.data.reportNo is string
+        && request.resource.data.plate is string;
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "sourceChecklistId",
+          "sourceChecklistReportNo"
+        ]);
     }
 
     match /seccom_checklists/{reportId} {
-      allow create: if hasActiveProfile();
+      allow create: if isMember()
+        && isAttributedToCurrentUser()
+        && request.resource.data.reportType == "seccom_checklist"
+        && request.resource.data.adminReviewStatus == "pending";
       allow read, delete: if isAdmin();
       allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "adminReviewStatus",
+          "policeReportRequired",
+          "adminReviewNotes",
+          "adminReviewedByUid",
+          "adminReviewedByName",
+          "adminReviewedByEmail",
+          "adminReviewedAt",
+          "np299ReportId",
+          "np299ReportNo",
+          "np299GeneratedAt"
+        ])
         && request.resource.data.get("adminReviewStatus", "pending")
           in ["pending", "escalation_required", "no_escalation"]
         && (
@@ -58,10 +91,20 @@ service cloud.firestore {
     }
 
     match /fuel_refuel_reports/{reportId} {
-      allow create: if hasActiveProfile()
+      allow create: if isMember()
+        && isAttributedToCurrentUser()
+        && request.resource.data.reportType == "fuel_refuel"
         && request.resource.data.get("adminFollowUpStatus", "pending") == "pending";
       allow read, delete: if isAdmin();
       allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "adminFollowUpStatus",
+          "adminFollowUpNotes",
+          "adminFollowedUpByUid",
+          "adminFollowedUpByName",
+          "adminFollowedUpByEmail",
+          "adminFollowedUpAt"
+        ])
         && request.resource.data.get("adminFollowUpStatus", "pending")
           in ["pending", "completed"]
         && (
