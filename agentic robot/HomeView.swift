@@ -167,6 +167,18 @@ struct HomeView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
 
                             NavigationLink {
+                                AdminVehicleManagementView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "car.2.fill",
+                                    title: "Vehicle Management",
+                                    subtitle: "Update vehicle status and review vehicle history"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                            NavigationLink {
                                 ReportScannerView()
                             } label: {
                                 HomeActionRow(

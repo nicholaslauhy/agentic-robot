@@ -31,6 +31,14 @@ service cloud.firestore {
         && request.resource.data.readBy is list;
     }
 
+    match /vehicles/{vehicleId} {
+      allow read, create, update, delete: if isAdmin();
+
+      match /statusHistory/{historyId} {
+        allow read, create, update, delete: if isAdmin();
+      }
+    }
+
     match /reports/{reportId} {
       allow create: if hasActiveProfile();
       allow read, update, delete: if isAdmin();
