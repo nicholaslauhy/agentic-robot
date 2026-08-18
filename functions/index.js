@@ -1,7 +1,8 @@
 const {onRequest} = require("firebase-functions/v2/https");
+const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 const {initializeApp} = require("firebase-admin/app");
 const {getAuth} = require("firebase-admin/auth");
-const {getFirestore} = require("firebase-admin/firestore");
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 
 initializeApp();
 
@@ -76,3 +77,90 @@ exports.deleteUser = onRequest(async (request, response) => {
     sendError(response, 500, "The account could not be deleted. Please try again.");
   }
 });
+
+function cleanText(value, fallback = "-") {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const cleaned = value.trim();
+  return cleaned || fallback;
+}
+
+function notificationDetails(reportType, data) {
+  const vehicleNumber = cleanText(
+      data.plate || data.vehicleNumber,
+      "Unknown vehicle",
+  );
+  const submittedBy = cleanText(
+      data.createdByName || data.generatedBy || data.driverName,
+      "A member",
+  );
+
+  switch (reportType) {
+    case "checklist":
+      return {
+        title: "New pre-driving checklist",
+        message: `${submittedBy} submitted a checklist for ${vehicleNumber}.`,
+        vehicleNumber,
+        submittedBy,
+      };
+    case "refuel":
+      return {
+        title: "New refuel form",
+        message: `${submittedBy} submitted a refuel form for ${vehicleNumber}.`,
+        vehicleNumber,
+        submittedBy,
+      };
+    default:
+      return {
+        title: "New NP299 report",
+        message: `${submittedBy} generated an NP299 report for ${vehicleNumber}.`,
+        vehicleNumber,
+        submittedBy,
+      };
+  }
+}
+
+async function createAdminNotification(event, reportType) {
+  const snapshot = event.data;
+  if (!snapshot) {
+    console.log("No report data was provided for the notification trigger.");
+    return;
+  }
+
+  const report = snapshot.data();
+  const details = notificationDetails(reportType, report);
+  const notificationId = `${reportType}_${snapshot.id}`;
+  const notificationReference = getFirestore()
+      .collection("admin_notifications")
+      .doc(notificationId);
+
+  await notificationReference.set({
+    title: details.title,
+    message: details.message,
+    reportType,
+    reportId: snapshot.id,
+    reportNo: cleanText(report.reportNo, ""),
+    vehicleNumber: details.vehicleNumber,
+    submittedBy: details.submittedBy,
+    submittedByUid: cleanText(report.createdByUid, ""),
+    createdAt: report.createdAt || FieldValue.serverTimestamp(),
+    readBy: [],
+  }, {merge: false});
+
+}
+
+exports.notifyChecklistSubmitted = onDocumentCreated(
+    "seccom_checklists/{reportId}",
+    (event) => createAdminNotification(event, "checklist"),
+);
+
+exports.notifyRefuelSubmitted = onDocumentCreated(
+    "fuel_refuel_reports/{reportId}",
+    (event) => createAdminNotification(event, "refuel"),
+);
+
+exports.notifyNP299Submitted = onDocumentCreated(
+    "reports/{reportId}",
+    (event) => createAdminNotification(event, "np299"),
+);

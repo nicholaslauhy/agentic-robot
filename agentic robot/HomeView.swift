@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
 
     @EnvironmentObject var auth: AuthViewModel
+    @ObservedObject private var notificationService = AdminNotificationService.shared
 
     @State private var displayedText = ""
     @State private var showSubtitle = false
@@ -40,11 +41,41 @@ struct HomeView: View {
 
                     Spacer()
 
-                    Button("Logout") {
-                        auth.logout()
+                    HStack(spacing: 12) {
+                        if auth.isAdmin {
+                            NavigationLink {
+                                AdminNotificationsView()
+                            } label: {
+                                ZStack(alignment: .topTrailing) {
+                                    Image(systemName: "bell.fill")
+                                        .font(.headline)
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                        .frame(width: 38, height: 38)
+                                        .background(HTXTheme.primaryPurple.opacity(0.09))
+                                        .clipShape(Circle())
+
+                                    if notificationService.unreadCount > 0 {
+                                        Text(notificationService.unreadCount > 99 ? "99+" : "\(notificationService.unreadCount)")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 5)
+                                            .frame(minWidth: 18, minHeight: 18)
+                                            .background(Color.red)
+                                            .clipShape(Capsule())
+                                            .offset(x: 4, y: -3)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Notifications, \(notificationService.unreadCount) unread")
+                        }
+
+                        Button("Logout") {
+                            auth.logout()
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.red)
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.red)
                 }
                 .padding(.horizontal)
                 .padding(.top)
@@ -116,7 +147,7 @@ struct HomeView: View {
                             } label: {
                                 HomeActionRow(
                                     icon: "checklist.checked",
-                                    title: "Review Checklists",
+                                    title: "Pre-driving Follow-up",
                                     subtitle: "Review damage and decide whether NP299 is required"
                                 )
                             }

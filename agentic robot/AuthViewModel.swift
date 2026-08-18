@@ -154,6 +154,11 @@ final class AuthViewModel: ObservableObject {
                     self.isLoadingRole = false
                     self.errorMessage = nil
                     self.syncFirebaseDisplayName(resolvedUsername, for: firebaseUser)
+                    if resolvedRole == RequiredAppRole.admin.rawValue {
+                        AdminNotificationService.shared.beginAdminSession(uid: firebaseUser.uid)
+                    } else {
+                        AdminNotificationService.shared.endSession()
+                    }
                     self.finishPendingLogin(success: true)
                 }
             }
@@ -326,6 +331,7 @@ final class AuthViewModel: ObservableObject {
 
     func logout() {
         pendingLoginCompletion = nil
+        AdminNotificationService.shared.endSession()
         stopObservingProfile()
         try? Auth.auth().signOut()
         user = nil
