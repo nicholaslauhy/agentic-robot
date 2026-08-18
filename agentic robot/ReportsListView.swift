@@ -551,6 +551,24 @@ struct ReportDetailSheet: View {
 }
 
 // MARK: - SecCom Detail Sheet
+private struct ChecklistHistoryDamageRegion {
+    let damageType: String
+    let normalizedBox: CGRect?
+}
+
+private struct ChecklistHistoryDamagePhoto {
+    let storagePath: String
+    let angle: String
+    let regions: [ChecklistHistoryDamageRegion]
+}
+
+private struct ChecklistHistoryDamageImage: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let angle: String
+    let regionCount: Int
+}
+
 struct SecComDetailSheet: View {
     let doc: RawReportDocument
     @Environment(\.dismiss) var dismiss
@@ -558,7 +576,7 @@ struct SecComDetailSheet: View {
 
     private var d: [String: Any] { doc.raw }
 
-    @State private var damageImages: [UIImage] = []
+    @State private var damageImages: [ChecklistHistoryDamageImage] = []
     @State private var isLoadingDamageImages = false
     @State private var damageImageError: String? = nil
     @State private var selectedDamageImage: ZoomableImageItem? = nil
@@ -576,6 +594,29 @@ struct SecComDetailSheet: View {
     }
     private var damageImageStoragePaths: [String] {
         d["damageImageStoragePaths"] as? [String] ?? []
+    }
+    private var damagePhotoMetadata: [ChecklistHistoryDamagePhoto] {
+        if let rawPhotos = d["damagePhotos"] as? [[String: Any]], !rawPhotos.isEmpty {
+            return rawPhotos.compactMap { rawPhoto in
+                guard let path = rawPhoto["storagePath"] as? String, !path.isEmpty else {
+                    return nil
+                }
+                let rawRegions = rawPhoto["confirmedDamage"] as? [[String: Any]] ?? []
+                return ChecklistHistoryDamagePhoto(
+                    storagePath: path,
+                    angle: rawPhoto["angle"] as? String ?? "Vehicle Image",
+                    regions: rawRegions.map(checklistHistoryRegion)
+                )
+            }
+        }
+
+        return damageImageStoragePaths.enumerated().map { index, path in
+            ChecklistHistoryDamagePhoto(
+                storagePath: path,
+                angle: "Damage Photo \(index + 1)",
+                regions: []
+            )
+        }
     }
     private var bodyworkAllInOrder: Bool { d["bodyworkAllInOrder"] as? Bool ?? true }
     private var bodyworkDetails: String { d["bodyworkDetails"] as? String ?? "" }
@@ -718,25 +759,44 @@ struct SecComDetailSheet: View {
                             }
                         } else if !damageImages.isEmpty {
                             sectionCard(title: "New Damage Detected", icon: "camera.fill", accent: accent) {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 12)], spacing: 12) {
-                                    ForEach(damageImages.indices, id: \.self) { idx in
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                                    ForEach(damageImages) { damageImage in
                                         Button {
-                                            selectedDamageImage = ZoomableImageItem(image: damageImages[idx])
+                                            selectedDamageImage = ZoomableImageItem(image: damageImage.image)
                                         } label: {
-                                            ZStack(alignment: .bottomTrailing) {
-                                                Image(uiImage: damageImages[idx])
-                                                    .resizable()
-                                                    .scaledToFill()
-                                                    .frame(width: 120, height: 120)
-                                                    .clipped()
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                ZStack(alignment: .bottomTrailing) {
+                                                    Color.black.opacity(0.04)
+                                                    Image(uiImage: damageImage.image)
+                                                        .resizable()
+                                                        .scaledToFit()
+                                                        .frame(maxWidth: .infinity)
+                                                        .frame(height: 170)
 
-                                                Image(systemName: "magnifyingglass.circle.fill")
-                                                    .font(.title2)
-                                                    .symbolRenderingMode(.palette)
-                                                    .foregroundStyle(.white, Color.black.opacity(0.55))
-                                                    .padding(7)
+                                                    Image(systemName: "magnifyingglass.circle.fill")
+                                                        .font(.title2)
+                                                        .symbolRenderingMode(.palette)
+                                                        .foregroundStyle(.white, Color.black.opacity(0.55))
+                                                        .padding(8)
+                                                }
+                                                .frame(height: 170)
+                                                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                                HStack(spacing: 8) {
+                                                    Text(damageImage.angle)
+                                                        .font(.subheadline.weight(.semibold))
+                                                        .foregroundColor(.primary)
+                                                        .lineLimit(1)
+                                                    Spacer(minLength: 4)
+                                                    if damageImage.regionCount > 0 {
+                                                        Text("\(damageImage.regionCount) area\(damageImage.regionCount == 1 ? "" : "s")")
+                                                            .font(.caption.weight(.semibold))
+                                                            .foregroundColor(.orange)
+                                                    }
+                                                }
                                             }
-                                            .frame(width: 120, height: 120)
+                                            .padding(9)
+                                            .background(Color(.secondarySystemBackground))
                                             .clipShape(RoundedRectangle(cornerRadius: 12))
                                             .overlay(
                                                 RoundedRectangle(cornerRadius: 12)
@@ -744,7 +804,7 @@ struct SecComDetailSheet: View {
                                             )
                                         }
                                         .buttonStyle(.plain)
-                                        .accessibilityLabel("Open damage image \(idx + 1)")
+                                        .accessibilityLabel("Open \(damageImage.angle) damage image")
                                         .accessibilityHint("Opens a full-screen image that can be zoomed and panned")
                                     }
                                 }
@@ -774,32 +834,56 @@ struct SecComDetailSheet: View {
     private func loadDamageImages() {
         damageImageError = nil
 
-        let paths = damageImageStoragePaths
-        guard !paths.isEmpty else {
-            damageImages = legacyDamageImages
+        let metadata = damagePhotoMetadata
+        guard !metadata.isEmpty else {
+            damageImages = legacyDamageImages.enumerated().map { index, image in
+                ChecklistHistoryDamageImage(
+                    image: image,
+                    angle: "Damage Photo \(index + 1)",
+                    regionCount: 0
+                )
+            }
             return
         }
 
         isLoadingDamageImages = true
-        loadDamageImage(paths: paths, index: 0, loaded: [])
+        loadDamageImage(metadata: metadata, index: 0, loaded: [])
     }
 
-    private func loadDamageImage(paths: [String], index: Int, loaded: [UIImage]) {
-        guard index < paths.count else {
+    private func loadDamageImage(
+        metadata: [ChecklistHistoryDamagePhoto],
+        index: Int,
+        loaded: [ChecklistHistoryDamageImage]
+    ) {
+        guard index < metadata.count else {
             isLoadingDamageImages = false
             damageImages = loaded
             return
         }
 
-        ReportStore.downloadDataFromStorage(path: paths[index], maxSize: 20 * 1024 * 1024) { result in
+        let item = metadata[index]
+        ReportStore.downloadDataFromStorage(path: item.storagePath, maxSize: 25 * 1024 * 1024) { result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let data):
-                    let image = UIImage(data: data)
+                    guard let image = UIImage(data: data) else {
+                        loadDamageImage(metadata: metadata, index: index + 1, loaded: loaded)
+                        return
+                    }
+                    let annotatedImage = checklistHistoryAnnotatedImage(
+                        image: image,
+                        regions: item.regions
+                    )
                     loadDamageImage(
-                        paths: paths,
+                        metadata: metadata,
                         index: index + 1,
-                        loaded: loaded + (image.map { [$0] } ?? [])
+                        loaded: loaded + [
+                            ChecklistHistoryDamageImage(
+                                image: annotatedImage,
+                                angle: item.angle,
+                                regionCount: item.regions.filter { $0.normalizedBox != nil }.count
+                            )
+                        ]
                     )
                 case .failure(let error):
                     isLoadingDamageImages = false
@@ -809,6 +893,104 @@ struct SecComDetailSheet: View {
                         damageImages = loaded
                     }
                 }
+            }
+        }
+    }
+
+    private func checklistHistoryRegion(_ raw: [String: Any]) -> ChecklistHistoryDamageRegion {
+        let boxData = raw["boundingBox"] as? [String: Any]
+        let x = checklistHistoryNumber(boxData?["x"])
+        let y = checklistHistoryNumber(boxData?["y"])
+        let width = checklistHistoryNumber(boxData?["width"])
+        let height = checklistHistoryNumber(boxData?["height"])
+
+        let box: CGRect?
+        if let x, let y, let width, let height, width > 0, height > 0 {
+            let left = min(max(0, x), 1)
+            let top = min(max(0, y), 1)
+            let right = min(max(left, x + width), 1)
+            let bottom = min(max(top, y + height), 1)
+            box = right > left && bottom > top
+                ? CGRect(x: left, y: top, width: right - left, height: bottom - top)
+                : nil
+        } else {
+            box = nil
+        }
+
+        return ChecklistHistoryDamageRegion(
+            damageType: raw["damageType"] as? String ?? "Damage",
+            normalizedBox: box
+        )
+    }
+
+    private func checklistHistoryNumber(_ value: Any?) -> CGFloat? {
+        if let number = value as? NSNumber { return CGFloat(number.doubleValue) }
+        if let value = value as? Double { return CGFloat(value) }
+        if let value = value as? Int { return CGFloat(value) }
+        return nil
+    }
+
+    private func checklistHistoryAnnotatedImage(
+        image: UIImage,
+        regions: [ChecklistHistoryDamageRegion]
+    ) -> UIImage {
+        let drawableRegions = regions.compactMap { region -> (ChecklistHistoryDamageRegion, CGRect)? in
+            guard let box = region.normalizedBox else { return nil }
+            return (region, box)
+        }
+        guard !drawableRegions.isEmpty else { return image }
+
+        let normalizedImage = image.htxNormalizedImage()
+        let imageSize = normalizedImage.size
+        guard imageSize.width > 0, imageSize.height > 0 else { return image }
+
+        let renderer = UIGraphicsImageRenderer(size: imageSize)
+        return renderer.image { context in
+            normalizedImage.draw(in: CGRect(origin: .zero, size: imageSize))
+
+            let lineWidth = max(4, imageSize.width * 0.004)
+            let fontSize = max(18, min(42, imageSize.width * 0.026))
+            let font = UIFont.boldSystemFont(ofSize: fontSize)
+
+            for (index, item) in drawableRegions.enumerated() {
+                let box = item.1
+                let rect = CGRect(
+                    x: box.minX * imageSize.width,
+                    y: box.minY * imageSize.height,
+                    width: box.width * imageSize.width,
+                    height: box.height * imageSize.height
+                ).intersection(CGRect(origin: .zero, size: imageSize))
+                guard rect.width > 0, rect.height > 0 else { continue }
+
+                context.cgContext.setFillColor(UIColor.systemOrange.withAlphaComponent(0.12).cgColor)
+                context.cgContext.fill(rect)
+                context.cgContext.setStrokeColor(UIColor.systemOrange.cgColor)
+                context.cgContext.setLineWidth(lineWidth)
+                context.cgContext.stroke(rect)
+
+                let label = "D\(index + 1): \(item.0.damageType.replacingOccurrences(of: "_", with: " ").capitalized)" as NSString
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: font,
+                    .foregroundColor: UIColor.white
+                ]
+                let textSize = label.size(withAttributes: attributes)
+                let labelWidth = min(imageSize.width, textSize.width + 20)
+                let labelHeight = textSize.height + 12
+                let labelX = min(max(0, rect.minX), max(0, imageSize.width - labelWidth))
+                let labelY = max(0, rect.minY - labelHeight)
+                let labelRect = CGRect(
+                    x: labelX,
+                    y: labelY,
+                    width: labelWidth,
+                    height: labelHeight
+                )
+
+                UIColor.systemOrange.setFill()
+                UIBezierPath(roundedRect: labelRect, cornerRadius: 6).fill()
+                label.draw(
+                    in: labelRect.insetBy(dx: 10, dy: 6),
+                    withAttributes: attributes
+                )
             }
         }
     }
