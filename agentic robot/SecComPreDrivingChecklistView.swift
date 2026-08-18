@@ -228,7 +228,6 @@ struct SecComPreDrivingChecklistView: View {
     @State private var submitError: String? = nil
     @State private var submitSuccess = false
     @State private var showReviewSheet = false
-    @State private var showGenerateConfirmation = false
 
     // Validation
     @State private var showValidationError = false
@@ -660,19 +659,9 @@ struct SecComPreDrivingChecklistView: View {
                     return "\(photo.angleLabel) · \(types)"
                 },
                 isSubmitting: isSubmitting,
-                onGenerate: { showGenerateConfirmation = true }
+                onGenerate: submitForm
             )
             .presentationDetents([.large])
-        }
-        .confirmationDialog(
-            "Generate this checklist report?",
-            isPresented: $showGenerateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Generate Report") { submitForm() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Please confirm that the details are correct before generating the report.")
         }
         .overlay {
             if isValidatingDamagePhoto || isAnalyzingDamagePhoto {
@@ -2205,6 +2194,7 @@ private struct SecComChecklistReviewSheet: View {
     let onGenerate: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showGenerateConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -2262,7 +2252,7 @@ private struct SecComChecklistReviewSheet: View {
                         }
 
                         Button {
-                            onGenerate()
+                            showGenerateConfirmation = true
                         } label: {
                             if isSubmitting {
                                 ProgressView().tint(.white)
@@ -2291,6 +2281,12 @@ private struct SecComChecklistReviewSheet: View {
                         .fontWeight(.semibold)
                         .foregroundColor(HTXTheme.primaryPurple)
                 }
+            }
+            .alert("Generate This Checklist Report?", isPresented: $showGenerateConfirmation) {
+                Button("Generate Report") { onGenerate() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Please confirm that the checklist details are correct before generating the report.")
             }
         }
     }
