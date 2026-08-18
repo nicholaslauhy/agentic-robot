@@ -80,6 +80,13 @@ private enum VehicleStatusFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private struct VehicleTypeSection: Identifiable {
+    let type: String
+    let vehicles: [ManagedVehicle]
+
+    var id: String { type }
+}
+
 struct ManagedVehicle: Identifiable {
     let id: String
     var plate: String
@@ -157,6 +164,7 @@ private struct VehicleBaselineSnapshot: Identifiable {
 struct AdminVehicleManagementView: View {
     @State private var vehicles: [ManagedVehicle] = []
     @State private var selectedFilter: VehicleStatusFilter = .all
+    @State private var selectedVehicleType: String?
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -165,12 +173,31 @@ struct AdminVehicleManagementView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return vehicles.filter { vehicle in
             let matchesFilter = selectedFilter.status == nil || vehicle.status == selectedFilter.status
-            guard matchesFilter else { return false }
+            let matchesVehicleType = selectedVehicleType == nil || vehicle.carType == selectedVehicleType
+            guard matchesFilter, matchesVehicleType else { return false }
             guard !query.isEmpty else { return true }
             return vehicle.plate.lowercased().contains(query)
                 || vehicle.carType.lowercased().contains(query)
                 || vehicle.status.title.lowercased().contains(query)
         }
+    }
+
+    private var vehicleTypes: [String] {
+        Array(Set(vehicles.map(\.carType)))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private var vehicleSections: [VehicleTypeSection] {
+        Dictionary(grouping: filteredVehicles, by: \.carType)
+            .map { type, groupedVehicles in
+                VehicleTypeSection(
+                    type: type,
+                    vehicles: groupedVehicles.sorted {
+                        $0.plate.localizedStandardCompare($1.plate) == .orderedAscending
+                    }
+                )
+            }
+            .sorted { $0.type.localizedStandardCompare($1.type) == .orderedAscending }
     }
 
     private var attentionCount: Int {
@@ -183,8 +210,9 @@ struct AdminVehicleManagementView: View {
 
             VStack(spacing: 0) {
                 summaryHeader
-                filterBar
                 searchBar
+                vehicleTypeFilter
+                filterBar
                 content
             }
         }
@@ -227,30 +255,37 @@ struct AdminVehicleManagementView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 9) {
-                ForEach(VehicleStatusFilter.allCases) { filter in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selectedFilter = filter
+        VStack(alignment: .leading, spacing: 8) {
+            Text("STATUS")
+                .font(.caption2.weight(.bold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 9) {
+                    ForEach(VehicleStatusFilter.allCases) { filter in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedFilter = filter
+                            }
+                        } label: {
+                            Text(filter.rawValue)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(selectedFilter == filter ? .white : .secondary)
+                                .padding(.horizontal, 15)
+                                .padding(.vertical, 9)
+                                .background(
+                                    selectedFilter == filter
+                                    ? HTXTheme.primaryPurple
+                                    : Color(.secondarySystemBackground)
+                                )
+                                .clipShape(Capsule())
                         }
-                    } label: {
-                        Text(filter.rawValue)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(selectedFilter == filter ? .white : .secondary)
-                            .padding(.horizontal, 15)
-                            .padding(.vertical, 9)
-                            .background(
-                                selectedFilter == filter
-                                ? HTXTheme.primaryPurple
-                                : Color(.secondarySystemBackground)
-                            )
-                            .clipShape(Capsule())
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
         }
         .padding(.bottom, 10)
     }
@@ -277,6 +312,80 @@ struct AdminVehicleManagementView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(HTXTheme.primaryPurple.opacity(0.20), lineWidth: 1)
         )
+        .padding(.horizontal)
+        .padding(.bottom, 10)
+    }
+
+    private var vehicleTypeFilter: some View {
+        Menu {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedVehicleType = nil
+                }
+            } label: {
+                Label(
+                    "All Vehicle Types",
+                    systemImage: selectedVehicleType == nil ? "checkmark" : "car.2"
+                )
+            }
+
+            Divider()
+
+            ForEach(vehicleTypes, id: \.self) { vehicleType in
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedVehicleType = vehicleType
+                    }
+                } label: {
+                    Label(
+                        vehicleType,
+                        systemImage: selectedVehicleType == vehicleType ? "checkmark" : "car.side"
+                    )
+                }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "car.2.fill")
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .frame(width: 34, height: 34)
+                    .background(HTXTheme.primaryPurple.opacity(0.09))
+                    .clipShape(RoundedRectangle(cornerRadius: 9))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("VEHICLE TYPE")
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(.secondary)
+                    Text(selectedVehicleType ?? "All Vehicle Types")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                if selectedVehicleType != nil {
+                    Text("Filtered")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundColor(HTXTheme.primaryPurple)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(HTXTheme.primaryPurple.opacity(0.09))
+                        .clipShape(Capsule())
+                }
+
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(11)
+            .background(Color(.systemBackground).opacity(0.92))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(HTXTheme.primaryPurple.opacity(0.20), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
         .padding(.horizontal)
         .padding(.bottom, 10)
     }
@@ -308,19 +417,28 @@ struct AdminVehicleManagementView: View {
             ContentUnavailableView(
                 "No vehicles found",
                 systemImage: "car.2",
-                description: Text("Try another search or status filter.")
+                description: Text("Try another search, vehicle type or status filter.")
             )
             Spacer()
         } else {
             ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(filteredVehicles) { vehicle in
-                        NavigationLink {
-                            VehicleManagementDetailView(vehicle: vehicle, onVehicleUpdated: fetchVehicles)
-                        } label: {
-                            vehicleRow(vehicle)
+                LazyVStack(spacing: 18, pinnedViews: [.sectionHeaders]) {
+                    ForEach(vehicleSections) { section in
+                        Section {
+                            ForEach(section.vehicles) { vehicle in
+                                NavigationLink {
+                                    VehicleManagementDetailView(
+                                        vehicle: vehicle,
+                                        onVehicleUpdated: fetchVehicles
+                                    )
+                                } label: {
+                                    vehicleRow(vehicle)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        } header: {
+                            vehicleTypeHeader(section)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
@@ -328,6 +446,35 @@ struct AdminVehicleManagementView: View {
             }
             .refreshable { fetchVehicles() }
         }
+    }
+
+    private func vehicleTypeHeader(_ section: VehicleTypeSection) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "car.side.fill")
+                .font(.subheadline)
+                .foregroundColor(HTXTheme.primaryPurple)
+
+            Text(section.type)
+                .font(.headline)
+                .foregroundColor(.primary)
+
+            Spacer()
+
+            Text("\(section.vehicles.count)")
+                .font(.caption.weight(.bold))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .frame(minWidth: 26, minHeight: 26)
+                .background(HTXTheme.primaryPurple.opacity(0.10))
+                .clipShape(Circle())
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(HTXTheme.primaryPurple.opacity(0.14), lineWidth: 1)
+        )
     }
 
     private func vehicleRow(_ vehicle: ManagedVehicle) -> some View {
