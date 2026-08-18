@@ -1658,12 +1658,20 @@ private struct ChecklistManualDamageEditor: View {
                     }
                     .padding(.horizontal)
 
-                    BoundingBoxOverlayView(
-                        image: image,
-                        normalizedBBox: $normalizedBBox,
-                        accentColor: .orange,
-                        isInteractive: true
-                    )
+                    GeometryReader { canvas in
+                        BoundingBoxOverlayView(
+                            image: image,
+                            normalizedBBox: $normalizedBBox,
+                            accentColor: .orange,
+                            isInteractive: true
+                        )
+                        .frame(
+                            width: canvas.size.width,
+                            height: canvas.size.height,
+                            alignment: .center
+                        )
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .frame(height: 480)
                     .background(Color.black.opacity(0.04))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
