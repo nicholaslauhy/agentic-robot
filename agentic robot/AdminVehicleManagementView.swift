@@ -1101,25 +1101,11 @@ private struct VehicleManagementDetailView: View {
                 let cropImage = imageFromBase64(region.referenceCropBase64)
                 guard let image = fullImage ?? cropImage else { continue }
 
-                var normalizedBox: CGRect?
-                if fullImage != nil,
-                   let x1 = region.x1,
-                   let y1 = region.y1,
-                   let x2 = region.x2,
-                   let y2 = region.y2,
-                   let width = region.imageWidth,
-                   let height = region.imageHeight,
-                   width > 0,
-                   height > 0,
-                   x2 > x1,
-                   y2 > y1 {
-                    normalizedBox = CGRect(
-                        x: CGFloat(x1) / CGFloat(width),
-                        y: CGFloat(y1) / CGFloat(height),
-                        width: CGFloat(x2 - x1) / CGFloat(width),
-                        height: CGFloat(y2 - y1) / CGFloat(height)
-                    )
-                }
+                let normalizedBox = baselineBox(
+                    for: region,
+                    fullImage: fullImage,
+                    cropImage: cropImage
+                )
 
                 snapshots.append(
                     VehicleBaselineSnapshot(
@@ -1136,6 +1122,76 @@ private struct VehicleManagementDetailView: View {
         }
 
         return snapshots
+    }
+
+    private func baselineBox(
+        for region: BaselineRegion,
+        fullImage: UIImage?,
+        cropImage: UIImage?
+    ) -> CGRect? {
+        if let fullImage,
+           let x1 = region.x1,
+           let y1 = region.y1,
+           let x2 = region.x2,
+           let y2 = region.y2 {
+            let width = CGFloat(
+                region.imageWidth.flatMap { $0 > 0 ? $0 : nil }
+                    ?? max(1, Int(fullImage.size.width.rounded()))
+            )
+            let height = CGFloat(
+                region.imageHeight.flatMap { $0 > 0 ? $0 : nil }
+                    ?? max(1, Int(fullImage.size.height.rounded()))
+            )
+            return normalizedBox(
+                x1: CGFloat(x1),
+                y1: CGFloat(y1),
+                x2: CGFloat(x2),
+                y2: CGFloat(y2),
+                width: width,
+                height: height
+            )
+        }
+
+        if let cropImage,
+           let x1 = region.templateX1,
+           let y1 = region.templateY1,
+           let x2 = region.templateX2,
+           let y2 = region.templateY2 {
+            return normalizedBox(
+                x1: CGFloat(x1),
+                y1: CGFloat(y1),
+                x2: CGFloat(x2),
+                y2: CGFloat(y2),
+                width: max(1, cropImage.size.width),
+                height: max(1, cropImage.size.height)
+            )
+        }
+
+        return nil
+    }
+
+    private func normalizedBox(
+        x1: CGFloat,
+        y1: CGFloat,
+        x2: CGFloat,
+        y2: CGFloat,
+        width: CGFloat,
+        height: CGFloat
+    ) -> CGRect? {
+        guard width > 0, height > 0, x2 > x1, y2 > y1 else { return nil }
+
+        let left = min(max(0, x1 / width), 1)
+        let top = min(max(0, y1 / height), 1)
+        let right = min(max(0, x2 / width), 1)
+        let bottom = min(max(0, y2 / height), 1)
+        guard right > left, bottom > top else { return nil }
+
+        return CGRect(
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top
+        )
     }
 
     private func imageFromBase64(_ value: String?) -> UIImage? {
@@ -1213,7 +1269,11 @@ private struct VehicleBaselineImage: View {
                         containerSize: geometry.size
                     )
                     RoundedRectangle(cornerRadius: 3)
-                        .stroke(Color.orange, lineWidth: 2)
+                        .fill(Color.orange.opacity(0.12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(Color.orange, lineWidth: 3)
+                        )
                         .frame(width: max(2, rect.width), height: max(2, rect.height))
                         .offset(x: rect.minX, y: rect.minY)
                 }

@@ -668,7 +668,9 @@ final class DamageAnalysisService {
             print("Baseline API status:", httpResponse.statusCode)
         }
 
-        return try JSONDecoder().decode(BaselineLookupResponse.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return try decoder.decode(BaselineLookupResponse.self, from: data)
     }
 
     func analyzeCompared(plate: String, images: [UIImage], angleIndices: [Int]? = nil) async throws -> DamageAnalysisComparedResponse {
