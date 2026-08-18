@@ -160,6 +160,7 @@ private struct ChecklistDamageReviewSession: Identifiable {
     let guideCarType: CarType
     let replacementID: UUID?
     let detectedRegions: [ChecklistDamageRegion]
+    let existingRegions: [ChecklistDamageRegion]
 }
 
 private enum ChecklistDamageProcessingStage: Equatable {
@@ -798,6 +799,9 @@ struct SecComPreDrivingChecklistView: View {
                 let newRegions = results
                     .filter { !($0.isBaseline ?? false) }
                     .map { ChecklistDamageRegion(detection: $0, sourceImage: image) }
+                let existingRegions = results
+                    .filter { $0.isBaseline ?? false }
+                    .map { ChecklistDamageRegion(detection: $0, sourceImage: image) }
 
                 await MainActor.run {
                     damageAnalysisProgress.completeAnimated {
@@ -811,7 +815,8 @@ struct SecComPreDrivingChecklistView: View {
                             angleIndex: angleIndex,
                             guideCarType: guideCarType,
                             replacementID: replacementID,
-                            detectedRegions: newRegions
+                            detectedRegions: newRegions,
+                            existingRegions: existingRegions
                         )
                     }
                 }
@@ -1029,6 +1034,32 @@ struct SecComPreDrivingChecklistView: View {
         mileage.filter { $0.isNumber }
     }
 
+    private func checklistBaselineAngles() -> [ConfirmBaselineBatchAngle] {
+        let groupedPhotos = Dictionary(grouping: damagePhotos, by: \.angleIndex)
+
+        return groupedPhotos.keys.sorted().compactMap { angleIndex -> ConfirmBaselineBatchAngle? in
+            guard let photos = groupedPhotos[angleIndex] else { return nil }
+
+            let regions: [ConfirmBaselineRegion] = photos.flatMap { photo -> [ConfirmBaselineRegion] in
+                photo.confirmedRegions.compactMap { region -> ConfirmBaselineRegion? in
+                    guard let box = region.normalizedBBox else { return nil }
+                    return ConfirmBaselineRegion.fromNormalizedBox(
+                        box,
+                        label: region.damageType,
+                        image: photo.image
+                    )
+                }
+            }
+
+            guard !regions.isEmpty else { return nil }
+            return ConfirmBaselineBatchAngle(
+                angle_index: angleIndex,
+                angle_name: photos.first?.angleLabel ?? "Angle \(angleIndex)",
+                regions: regions
+            )
+        }
+    }
+
     private var validationIssues: [String] {
         var issues: [String] = []
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1104,6 +1135,7 @@ struct SecComPreDrivingChecklistView: View {
             "adminReviewStatus": "pending",
             "createdAt":        FieldValue.serverTimestamp()
         ]
+        let baselineAngles = checklistBaselineAngles()
 
         let saveFirestore: ([String: Any]) -> Void = { finalData in
             Firestore.firestore()
@@ -1133,6 +1165,35 @@ struct SecComPreDrivingChecklistView: View {
                 }
         }
 
+        let saveWithUpdatedBaseline: ([String: Any]) -> Void = { finalData in
+            guard !baselineAngles.isEmpty else {
+                var dataWithoutDamage = finalData
+                dataWithoutDamage["baselineUpdateStatus"] = "not_required"
+                saveFirestore(dataWithoutDamage)
+                return
+            }
+
+            Task {
+                do {
+                    try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
+                        plate: effectivePlate,
+                        angles: baselineAngles
+                    )
+
+                    var dataWithBaseline = finalData
+                    dataWithBaseline["baselineUpdateStatus"] = "updated"
+                    dataWithBaseline["baselineUpdatedAngles"] = baselineAngles.map(\.angle_index)
+                    dataWithBaseline["baselineUpdatedAt"] = FieldValue.serverTimestamp()
+                    saveFirestore(dataWithBaseline)
+                } catch {
+                    await MainActor.run {
+                        isSubmitting = false
+                        submitError = "The checklist was not submitted because the vehicle damage baseline could not be updated. Your confirmed damage is still on this screen. Check the backend connection and try again. (\(error.localizedDescription))"
+                    }
+                }
+            }
+        }
+
         func uploadDamageImages(
             _ photos: [ChecklistDamagePhoto],
             index: Int = 0,
@@ -1145,7 +1206,7 @@ struct SecComPreDrivingChecklistView: View {
                     finalData["damageImageStoragePaths"] = paths
                     finalData["damagePhotos"] = metadata
                 }
-                saveFirestore(finalData)
+                saveWithUpdatedBaseline(finalData)
                 return
             }
 
@@ -1425,12 +1486,30 @@ private struct ChecklistDamageReviewView: View {
                         ChecklistDamageAnnotatedImage(
                             image: session.image,
                             regions: visibleRegions,
+                            existingRegions: session.existingRegions,
                             showLabels: true
                         )
                         .frame(height: 330)
                         .background(Color.black.opacity(0.04))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .padding(.horizontal)
+
+                        if !session.existingRegions.isEmpty {
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack(spacing: 18) {
+                                    Label("Existing baseline", systemImage: "square")
+                                        .foregroundColor(HTXTheme.primaryPurple)
+                                    Label("New suggestion", systemImage: "square")
+                                        .foregroundColor(.orange)
+                                }
+                                .font(.caption.weight(.semibold))
+
+                                Text("Existing damage is shown for reference and does not need to be confirmed again. Only the orange suggestions below will be added to this checklist.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal)
+                        }
 
                         if candidates.isEmpty {
                             VStack(spacing: 10) {
@@ -1768,6 +1847,7 @@ private struct ChecklistManualDamageEditor: View {
 private struct ChecklistDamageAnnotatedImage: View {
     let image: UIImage
     let regions: [ChecklistDamageRegion]
+    var existingRegions: [ChecklistDamageRegion] = []
     let showLabels: Bool
 
     var body: some View {
@@ -1780,6 +1860,39 @@ private struct ChecklistDamageAnnotatedImage: View {
                     .scaledToFit()
                     .frame(width: imageRect.width, height: imageRect.height)
                     .position(x: imageRect.midX, y: imageRect.midY)
+
+                ForEach(Array(existingRegions.enumerated()), id: \.element.id) { index, region in
+                    if let box = region.normalizedBBox {
+                        let rect = CGRect(
+                            x: imageRect.minX + box.minX * imageRect.width,
+                            y: imageRect.minY + box.minY * imageRect.height,
+                            width: box.width * imageRect.width,
+                            height: box.height * imageRect.height
+                        )
+
+                        Rectangle()
+                            .stroke(
+                                HTXTheme.primaryPurple,
+                                style: StrokeStyle(lineWidth: 2.5, dash: [7, 4])
+                            )
+                            .frame(width: rect.width, height: rect.height)
+                            .offset(x: rect.minX, y: rect.minY)
+
+                        if showLabels {
+                            Text("E\(index + 1): \(region.damageType.capitalized)")
+                                .font(.caption2.bold())
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 4)
+                                .background(HTXTheme.primaryPurple)
+                                .clipShape(RoundedRectangle(cornerRadius: 5))
+                                .offset(
+                                    x: min(max(imageRect.minX, rect.minX), max(imageRect.minX, imageRect.maxX - 130)),
+                                    y: max(imageRect.minY, rect.minY - 24)
+                                )
+                        }
+                    }
+                }
 
                 ForEach(Array(regions.enumerated()), id: \.element.id) { index, region in
                     if let box = region.normalizedBBox {

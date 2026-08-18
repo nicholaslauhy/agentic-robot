@@ -10,10 +10,6 @@ import UIKit
 
 struct GeminiAngleService {
 
-    // The OpenAI key must stay on the server. This endpoint belongs to the same
-    // private backend used by licence-plate and damage analysis.
-    private static let endpoint = "http://192.168.86.241:8000/validate-vehicle-angle"
-
     enum DetectedAngle: String {
         case front   = "Front"
         case rear    = "Rear"
@@ -229,7 +225,7 @@ struct GeminiAngleService {
             "expectedAngle": expectedAngle.rawValue
         ]
 
-        guard let url = URL(string: endpoint),
+        guard let url = BackendConfiguration.endpointURL(path: "validate-vehicle-angle"),
               let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
             return nil
         }
