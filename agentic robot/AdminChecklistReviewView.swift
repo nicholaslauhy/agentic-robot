@@ -741,15 +741,39 @@ private struct AdminChecklistReviewDetail: View {
     private var decisionCard: some View {
         adminSection(title: "Administrator Decision", icon: "person.badge.shield.checkmark.fill") {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Follow-up Notes (Optional)")
-                    .font(.subheadline.weight(.semibold))
+                if reviewStatus == .pending {
+                    Text("Follow-up Notes (Optional)")
+                        .font(.subheadline.weight(.semibold))
 
-                TextEditor(text: $reviewNotes)
-                    .frame(minHeight: 90)
-                    .padding(8)
-                    .background(Color(.secondarySystemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.18), lineWidth: 1))
+                    TextEditor(text: $reviewNotes)
+                        .frame(minHeight: 90)
+                        .padding(8)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.18), lineWidth: 1))
+                } else {
+                    Label("Decision recorded", systemImage: "lock.fill")
+                        .font(.headline)
+                        .foregroundColor(reviewStatus.color)
+
+                    Text("This classification is final and cannot be changed.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+
+                    if !reviewNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Follow-up Notes")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
+                            Text(reviewNotes)
+                                .font(.subheadline)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
 
                 if let saveError {
                     Text(saveError)
@@ -757,7 +781,31 @@ private struct AdminChecklistReviewDetail: View {
                         .foregroundColor(.red)
                 }
 
-                if reviewStatus == .escalationRequired {
+                if reviewStatus == .pending {
+                    Button {
+                        pendingDecision = .escalationRequired
+                    } label: {
+                        Label("Escalate to NP299", systemImage: "exclamationmark.shield.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(HTXTheme.primaryPurple)
+                    .disabled(isSaving)
+
+                    Button {
+                        pendingDecision = .noEscalation
+                    } label: {
+                        Label("No Police Report Required", systemImage: "checkmark.seal.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.green)
+                    .disabled(isSaving)
+                } else if reviewStatus == .escalationRequired {
                     if let reportNo = generatedNP299ReportNo ?? data["np299ReportNo"] as? String,
                        !reportNo.isEmpty {
                         Label("NP299 Generated · \(reportNo)", systemImage: "checkmark.seal.fill")
@@ -781,30 +829,14 @@ private struct AdminChecklistReviewDetail: View {
                         .disabled(isSaving || isLoadingPhotos)
                     }
                 } else {
-                    Button {
-                        pendingDecision = .escalationRequired
-                    } label: {
-                        Label("Escalate to NP299", systemImage: "exclamationmark.shield.fill")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 13)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(HTXTheme.primaryPurple)
-                    .disabled(isSaving)
-                }
-
-                Button {
-                    pendingDecision = .noEscalation
-                } label: {
                     Label("No Police Report Required", systemImage: "checkmark.seal.fill")
                         .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                        .foregroundColor(.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(13)
+                        .background(Color.green.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.bordered)
-                .tint(.green)
-                .disabled(isSaving)
 
                 if isSaving {
                     HStack(spacing: 10) {
@@ -832,6 +864,12 @@ private struct AdminChecklistReviewDetail: View {
     }
 
     private func saveDecision(_ status: ChecklistAdminReviewStatus) {
+        guard reviewStatus == .pending else {
+            saveError = "This checklist already has a final administrator decision."
+            pendingDecision = nil
+            return
+        }
+
         pendingDecision = nil
         isSaving = true
         saveError = nil
