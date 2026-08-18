@@ -42,8 +42,17 @@ service cloud.firestore {
     }
 
     match /fuel_refuel_reports/{reportId} {
-      allow create: if hasActiveProfile();
-      allow read, update, delete: if isAdmin();
+      allow create: if hasActiveProfile()
+        && request.resource.data.get("adminFollowUpStatus", "pending") == "pending";
+      allow read, delete: if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.get("adminFollowUpStatus", "pending")
+          in ["pending", "completed"]
+        && (
+          resource.data.get("adminFollowUpStatus", "pending") == "pending"
+          || request.resource.data.get("adminFollowUpStatus", "pending")
+            == resource.data.get("adminFollowUpStatus", "pending")
+        );
     }
 
     match /iu_barcodes/{barcodeId} {
