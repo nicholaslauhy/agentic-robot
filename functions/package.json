@@ -6,7 +6,7 @@
     "node": "24"
   },
   "scripts": {
-    "deploy": "firebase deploy --only functions:deleteUser"
+    "deploy": "firebase deploy --only functions"
   },
   "dependencies": {
     "firebase-admin": "^13.6.0",

@@ -163,7 +163,7 @@ struct AdminChecklistReviewView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
         }
-        .navigationTitle("Checklist Review")
+        .navigationTitle("Pre-driving Follow-up")
         .navigationBarTitleDisplayMode(.inline)
         .tint(accent)
         .onAppear(perform: fetchChecklists)
@@ -211,7 +211,7 @@ struct AdminChecklistReviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 13))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text("Pre-driving follow-up")
+                Text("Pre-driving Follow-up")
                     .font(.headline)
                 Text("\(pendingCount) checklist\(pendingCount == 1 ? "" : "s") awaiting review")
                     .font(.subheadline)

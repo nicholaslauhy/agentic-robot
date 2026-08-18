@@ -12,6 +12,7 @@
 		935C996B2FB5A59C00B3A29D /* FirebaseDatabase in Frameworks */ = {isa = PBXBuildFile; productRef = 935C996A2FB5A59C00B3A29D /* FirebaseDatabase */; };
 		9368554A2FC9DAFA008CB234 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 936855492FC9DAFA008CB234 /* FirebaseStorage */; };
 		9370B1802FC0467B00729779 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 9370B17F2FC0467B00729779 /* FirebaseFirestore */; };
+		93A100022FC9DAFA008CB234 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 93A100012FC9DAFA008CB234 /* FirebaseMessaging */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 				935C996B2FB5A59C00B3A29D /* FirebaseDatabase in Frameworks */,
 				9370B1802FC0467B00729779 /* FirebaseFirestore in Frameworks */,
 				935C99692FB5A59C00B3A29D /* FirebaseCore in Frameworks */,
+				93A100022FC9DAFA008CB234 /* FirebaseMessaging in Frameworks */,
 				9368554A2FC9DAFA008CB234 /* FirebaseStorage in Frameworks */,
 				935C99672FB5A59C00B3A29D /* FirebaseAuth in Frameworks */,
 			);
@@ -137,6 +139,7 @@
 				935C99682FB5A59C00B3A29D /* FirebaseCore */,
 				935C996A2FB5A59C00B3A29D /* FirebaseDatabase */,
 				9370B17F2FC0467B00729779 /* FirebaseFirestore */,
+				93A100012FC9DAFA008CB234 /* FirebaseMessaging */,
 				936855492FC9DAFA008CB234 /* FirebaseStorage */,
 			);
 			productName = "agentic robot";
@@ -201,6 +204,14 @@
 				TargetAttributes = {
 					93B5B86B2FB36C4200EBEB1B = {
 						CreatedOnToolsVersion = 26.5;
+						SystemCapabilities = {
+							com.apple.BackgroundModes = {
+								enabled = 1;
+							};
+							com.apple.Push = {
+								enabled = 1;
+							};
+						};
 					};
 					93B5B87A2FB36C4300EBEB1B = {
 						CreatedOnToolsVersion = 26.5;
@@ -417,6 +428,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "agentic robot/agentic robot.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -465,6 +477,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "agentic robot/agentic robot.entitlements";
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -683,6 +696,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 935C99652FB5A59C00B3A29D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		93A100012FC9DAFA008CB234 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 935C99652FB5A59C00B3A29D /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
