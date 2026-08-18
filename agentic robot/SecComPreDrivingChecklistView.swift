@@ -227,8 +227,8 @@ struct SecComPreDrivingChecklistView: View {
     @State private var isSubmitting = false
     @State private var submitError: String? = nil
     @State private var submitSuccess = false
+    @State private var submittedReportNumber = ""
     @State private var showReviewSheet = false
-    @State private var showGenerateConfirmation = false
 
     // Validation
     @State private var showValidationError = false
@@ -287,21 +287,26 @@ struct SecComPreDrivingChecklistView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
+                    Text("* Required field")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal)
 
                     sectionCard(title: "Basic Information", icon: "info.circle.fill") {
-                        formRow(label: "Date") {
+                        formRow(label: "Date", required: true) {
                             DatePicker("", selection: $date, displayedComponents: .date)
                                 .labelsHidden()
                                 .tint(HTXTheme.primaryPurple)
                         }
                         Divider()
-                        formRow(label: "Time") {
+                        formRow(label: "Time", required: true) {
                             DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                                 .labelsHidden()
                                 .tint(HTXTheme.primaryPurple)
                         }
                         Divider()
-                        formRow(label: "Driver Name") {
+                        formRow(label: "Driver Name", required: true) {
                             HStack(spacing: 6) {
                                 Text(driverName.isEmpty ? "Username not set" : driverName)
                                     .foregroundColor(driverName.isEmpty ? .orange : .primary)
@@ -314,7 +319,7 @@ struct SecComPreDrivingChecklistView: View {
                                 .multilineTextAlignment(.trailing)
                         }
                         Divider()
-                        formRow(label: "Work Contact") {
+                        formRow(label: "Work Contact", required: true) {
                             TextField("Contact number", text: $workContact)
                                 .keyboardType(.phonePad)
                                 .multilineTextAlignment(.trailing)
@@ -327,9 +332,7 @@ struct SecComPreDrivingChecklistView: View {
                             showVehiclePicker = true
                         } label: {
                             HStack {
-                                Text("Vehicle Number")
-                                    .font(.subheadline)
-                                    .foregroundColor(.primary)
+                                HTXFieldLabel(text: "Vehicle Number", required: true)
                                 Spacer()
                                 Text(useOtherVehicle ? "Other" : (selectedPlate.isEmpty ? "Select…" : selectedPlate))
                                     .font(.subheadline.weight(.semibold))
@@ -344,7 +347,7 @@ struct SecComPreDrivingChecklistView: View {
 
                         if let grp = selectedGroup, !useOtherVehicle {
                             Divider()
-                            formRow(label: "Vehicle Type") {
+                            formRow(label: "Vehicle Type", required: true) {
                                 Text(grp.groupName)
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundColor(.secondary)
@@ -353,14 +356,14 @@ struct SecComPreDrivingChecklistView: View {
 
                         if useOtherVehicle {
                             Divider()
-                            formRow(label: "Car Plate") {
+                            formRow(label: "Car Plate", required: true) {
                                 TextField("e.g. SBA1234A", text: $otherPlate)
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
                             }
                             Divider()
-                            formRow(label: "Car Type") {
+                            formRow(label: "Car Type", required: true) {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
@@ -368,13 +371,13 @@ struct SecComPreDrivingChecklistView: View {
                         }
 
                         Divider()
-                        formRow(label: "Mileage") {
+                        formRow(label: "Mileage", required: true) {
                             TextField("Numbers only, e.g. 12345", text: $mileage)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
                         }
                         Divider()
-                        formRow(label: "Purpose") {
+                        formRow(label: "Purpose", required: true) {
                             TextField("Reason for trip", text: $purpose)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
@@ -382,7 +385,12 @@ struct SecComPreDrivingChecklistView: View {
                     }
 
                     // Equipment checklist
-                    sectionCard(title: "Checks & Equipment in Vehicle", icon: "checklist") {
+                    sectionCard(title: "Equipment in Vehicle (Optional)", icon: "checklist") {
+                        Text("Select only the equipment currently in the vehicle. You may leave everything unselected when none of these items are present.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 0) {
                             ForEach(VehicleEquipment.allCases) { item in
                                 equipmentToggle(item)
@@ -405,9 +413,12 @@ struct SecComPreDrivingChecklistView: View {
                         if !bodyworkAllInOrder {
                             Divider()
                             VStack(alignment: .leading, spacing: 6) {
-                                Text("Details")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundColor(.secondary)
+                                HTXFieldLabel(
+                                    text: "Details or damage photo",
+                                    required: true,
+                                    color: .secondary,
+                                    font: .caption.weight(.semibold)
+                                )
                                 TextEditor(text: $bodyworkOtherDetail)
                                     .frame(minHeight: 80)
                                     .padding(8)
@@ -512,17 +523,20 @@ struct SecComPreDrivingChecklistView: View {
 
                     // Validation error
                     if showValidationError {
-                        Text(
-                            selectedEquipment.isEmpty
-                            ? "Please check at least one item in the equipment checklist."
-                            : (!bodyworkAllInOrder && bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            ? "Please describe the body work defect details."
-                            : "Please fill in all required fields and select a vehicle."
-                        )
-                            .font(.footnote)
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("Please complete the following required fields:")
+                                .font(.footnote.weight(.semibold))
+                            ForEach(validationIssues, id: \.self) { issue in
+                                Label(issue, systemImage: "exclamationmark.circle.fill")
+                                    .font(.footnote)
+                            }
+                        }
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color.red.opacity(0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal)
                     }
 
                     if let submitError {
@@ -657,19 +671,9 @@ struct SecComPreDrivingChecklistView: View {
                     return "\(photo.angleLabel) · \(types)"
                 },
                 isSubmitting: isSubmitting,
-                onGenerate: { showGenerateConfirmation = true }
+                onGenerate: submitForm
             )
             .presentationDetents([.large])
-        }
-        .confirmationDialog(
-            "Generate this checklist report?",
-            isPresented: $showGenerateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Generate Report") { submitForm() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Please confirm that the details are correct before generating the report.")
         }
         .overlay {
             if isValidatingDamagePhoto || isAnalyzingDamagePhoto {
@@ -691,6 +695,13 @@ struct SecComPreDrivingChecklistView: View {
                     onRetake: discardRejectedDamagePhoto,
                     onOverride: overrideRejectedDamagePhoto
                 )
+            }
+        }
+        .overlay {
+            if submitSuccess {
+                ChecklistSubmissionSuccessView(reportNumber: submittedReportNumber)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .zIndex(20)
             }
         }
         .alert("Damage analysis could not be completed", isPresented: Binding(
@@ -958,11 +969,13 @@ struct SecComPreDrivingChecklistView: View {
     }
 
     @ViewBuilder
-    private func formRow<Trailing: View>(label: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+    private func formRow<Trailing: View>(
+        label: String,
+        required: Bool = false,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
         HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundColor(.primary)
+            HTXFieldLabel(text: label, required: required)
             Spacer()
             trailing()
                 .font(.subheadline)
@@ -1016,23 +1029,31 @@ struct SecComPreDrivingChecklistView: View {
         mileage.filter { $0.isNumber }
     }
 
+    private var validationIssues: [String] {
+        var issues: [String] = []
+        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if name.isEmpty { issues.append("Driver Name — ask an administrator to set the account username") }
+        if contact.isEmpty { issues.append("Work Contact") }
+        if effectivePlate.isEmpty { issues.append(useOtherVehicle ? "Car Plate" : "Vehicle Number") }
+        if effectiveCarType.isEmpty { issues.append(useOtherVehicle ? "Car Type" : "Vehicle Type") }
+        if cleanMileage.isEmpty { issues.append("Mileage") }
+        if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Purpose") }
+        if !bodyworkAllInOrder,
+           bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           damagePhotos.isEmpty {
+            issues.append("Body Work Details or a damage photo")
+        }
+        return issues
+    }
+
     private func validateAndShowReview() {
         showValidationError = false
         submitError = nil
         mileage = cleanMileage
 
-        let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !name.isEmpty, !contact.isEmpty,
-              !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
-              !cleanMileage.isEmpty,
-              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !selectedEquipment.isEmpty,
-              bodyworkAllInOrder
-                || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !damagePhotos.isEmpty
-        else {
+        guard validationIssues.isEmpty else {
             showValidationError = true
             return
         }
@@ -1049,15 +1070,7 @@ struct SecComPreDrivingChecklistView: View {
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
         let contact = workContact.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !name.isEmpty, !contact.isEmpty,
-              !effectivePlate.isEmpty, !effectiveCarType.isEmpty,
-              !cleanMileage.isEmpty,
-              !purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !selectedEquipment.isEmpty,
-              bodyworkAllInOrder
-                || !bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !damagePhotos.isEmpty
-        else {
+        guard validationIssues.isEmpty else {
             showValidationError = true
             return
         }
@@ -1088,6 +1101,7 @@ struct SecComPreDrivingChecklistView: View {
             "generatedBy":      name,
             "damageImageCount": damagePhotos.count,
             "detectionCount":   damagePhotos.reduce(0) { $0 + $1.confirmedRegions.count },
+            "adminReviewStatus": "pending",
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
@@ -1101,8 +1115,19 @@ struct SecComPreDrivingChecklistView: View {
                         if let error {
                             submitError = "Failed to save: \(error.localizedDescription)"
                         } else {
+                            submittedReportNumber = reportNo
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                submitSuccess = true
+                            }
                             showReviewSheet = false
-                            onReportGenerated()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    submitSuccess = false
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                                    onReportGenerated()
+                                }
+                            }
                         }
                     }
                 }
@@ -2203,6 +2228,7 @@ private struct SecComChecklistReviewSheet: View {
     let onGenerate: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showGenerateConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -2224,21 +2250,24 @@ private struct SecComChecklistReviewSheet: View {
                             reviewRow("Purpose", purpose)
                         }
 
-                        reviewCard(title: "Checks & Equipment", icon: "checklist") {
-                            ForEach(VehicleEquipment.allCases) { item in
-                                let checked = selectedEquipment.contains(item)
+                        reviewCard(title: "Equipment in Vehicle", icon: "checklist") {
+                            if selectedEquipment.isEmpty {
+                                reviewRow("Equipment", "None recorded")
+                            } else {
+                                ForEach(VehicleEquipment.allCases.filter { selectedEquipment.contains($0) }) { item in
                                 HStack(alignment: .top, spacing: 10) {
-                                    Image(systemName: checked ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                        .foregroundColor(checked ? HTXTheme.primaryPurple : .red)
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(HTXTheme.primaryPurple)
                                         .frame(width: 22)
                                     Text(item.rawValue)
                                         .font(.subheadline)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                    Text(checked ? "Checked" : "Missing")
+                                    Text("Present")
                                         .font(.caption.weight(.semibold))
-                                        .foregroundColor(checked ? HTXTheme.primaryPurple : .red)
+                                        .foregroundColor(HTXTheme.primaryPurple)
                                 }
                                 .padding(.vertical, 6)
+                                }
                             }
                         }
 
@@ -2257,7 +2286,7 @@ private struct SecComChecklistReviewSheet: View {
                         }
 
                         Button {
-                            onGenerate()
+                            showGenerateConfirmation = true
                         } label: {
                             if isSubmitting {
                                 ProgressView().tint(.white)
@@ -2285,6 +2314,17 @@ private struct SecComChecklistReviewSheet: View {
                     Button("Edit") { dismiss() }
                         .fontWeight(.semibold)
                         .foregroundColor(HTXTheme.primaryPurple)
+                }
+            }
+            .alert("Generate This Checklist Report?", isPresented: $showGenerateConfirmation) {
+                Button("Generate Report") { onGenerate() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Please confirm that the checklist details are correct before generating the report.")
+            }
+            .overlay {
+                if isSubmitting {
+                    ChecklistSubmissionProgressView()
                 }
             }
         }
@@ -2316,6 +2356,93 @@ private struct SecComChecklistReviewSheet: View {
                 .multilineTextAlignment(.leading)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Checklist Submission Transition
+
+private struct ChecklistSubmissionProgressView: View {
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.42).ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(HTXTheme.primaryPurple)
+
+                Text("Submitting Checklist")
+                    .font(.title3.weight(.bold))
+
+                Text("Uploading the report and damage evidence. Please keep the app open.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 30)
+            .padding(.vertical, 26)
+            .frame(maxWidth: 390)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(HTXTheme.primaryPurple.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
+            .padding(24)
+        }
+    }
+}
+
+private struct ChecklistSubmissionSuccessView: View {
+    let reportNumber: String
+
+    var body: some View {
+        ZStack {
+            SubtleHTXBackground().ignoresSafeArea()
+
+            VStack(spacing: 18) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 72, weight: .semibold))
+                    .foregroundStyle(.green)
+                    .symbolEffect(.bounce, value: reportNumber)
+
+                Text("Checklist Submitted")
+                    .font(.largeTitle.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text("The checklist has been sent to an administrator for review.")
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+
+                if !reportNumber.isEmpty {
+                    Text(reportNumber)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(HTXTheme.primaryPurple)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(HTXTheme.primaryPurple.opacity(0.08))
+                        .clipShape(Capsule())
+                }
+
+                HStack(spacing: 9) {
+                    ProgressView()
+                        .tint(HTXTheme.primaryPurple)
+                    Text("Returning to the welcome page…")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 4)
+            }
+            .padding(.horizontal, 34)
+            .padding(.vertical, 38)
+            .frame(maxWidth: 520)
+            .subtleHTXCard()
+            .padding(28)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Checklist submitted successfully. Returning to the welcome page.")
     }
 }
 

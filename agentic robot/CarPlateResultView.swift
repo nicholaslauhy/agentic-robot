@@ -208,6 +208,13 @@ struct CarPlateResultView: View {
                     .font(.subheadline)
                     .foregroundColor(.secondary)
 
+                HTXFieldLabel(
+                    text: "Licence Plate",
+                    required: true,
+                    color: HTXTheme.primaryPurple,
+                    font: .caption.weight(.semibold)
+                )
+
                 TextField("Enter licence plate", text: $plateDraft)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()

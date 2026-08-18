@@ -1,0 +1,15 @@
+{
+  "name": "htx-inspect-functions",
+  "private": true,
+  "main": "index.js",
+  "engines": {
+    "node": "24"
+  },
+  "scripts": {
+    "deploy": "firebase deploy --only functions:deleteUser"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.6.0",
+    "firebase-functions": "^7.0.0"
+  }
+}

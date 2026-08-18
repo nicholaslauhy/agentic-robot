@@ -6,6 +6,28 @@
 //
 
 import SwiftUI
+
+struct HTXFieldLabel: View {
+    let text: String
+    var required = false
+    var color: Color = .primary
+    var font: Font = .subheadline
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(text)
+                .font(font)
+                .foregroundColor(color)
+            if required {
+                Text("*")
+                    .font(font.weight(.bold))
+                    .foregroundColor(.red)
+                    .accessibilityLabel("required")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
 import Combine
 
 // MARK: - HTX Brand Colors & Theme

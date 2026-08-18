@@ -106,6 +106,16 @@ struct CarTypeSelectionView: View {
                 selectedType = nil
             }
 
+            HTXFieldLabel(
+                text: "Select a vehicle type",
+                required: true,
+                color: HTXTheme.primaryPurple,
+                font: .subheadline.weight(.semibold)
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            .padding(.top, 12)
+
             // TYPE GRID
             ScrollView {
                 LazyVGrid(

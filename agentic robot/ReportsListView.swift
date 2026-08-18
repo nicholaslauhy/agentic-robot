@@ -48,6 +48,12 @@ struct RawReportDocument: Identifiable {
     let raw: [String: Any]   // full document for type-specific detail views
 }
 
+private struct PendingReportDeletion: Identifiable {
+    let document: RawReportDocument
+    let category: ReportCategory
+    var id: String { "\(category.rawValue)-\(document.id)" }
+}
+
 // MARK: - Reports List View
 struct ReportsListView: View {
 
@@ -63,6 +69,10 @@ struct ReportsListView: View {
 
     @State private var selectedDoc: RawReportDocument? = nil
     @State private var selectedPDFURL: URL? = nil
+    @State private var pendingDeletion: PendingReportDeletion? = nil
+    @State private var isDeleting = false
+    @State private var deletionFeedbackTitle = ""
+    @State private var deletionFeedbackMessage: String? = nil
 
     private var activeDocs: [RawReportDocument] {
         switch selectedCategory {
@@ -165,13 +175,48 @@ struct ReportsListView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(filteredDocs) { doc in
-                                ReportRowCard(report: doc.entry, category: selectedCategory, accent: selectedCategory.accentColor)
-                                    .onTapGesture { selectedDoc = doc }
+                                HStack(spacing: 9) {
+                                    Button {
+                                        selectedDoc = doc
+                                    } label: {
+                                        ReportRowCard(
+                                            report: doc.entry,
+                                            category: selectedCategory,
+                                            accent: selectedCategory.accentColor
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Button {
+                                        pendingDeletion = PendingReportDeletion(
+                                            document: doc,
+                                            category: selectedCategory
+                                        )
+                                    } label: {
+                                        Image(systemName: "trash.fill")
+                                            .font(.subheadline.weight(.semibold))
+                                            .foregroundColor(.red)
+                                            .frame(width: 44, height: 44)
+                                            .background(Color.red.opacity(0.09))
+                                            .clipShape(Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Delete \(doc.entry.reportNo)")
+                                }
                             }
                         }
                         .padding(.horizontal).padding(.bottom, 24)
                     }
                 }
+            }
+
+            if isDeleting {
+                Color.black.opacity(0.32).ignoresSafeArea()
+                ProgressView("Deleting report…")
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
             }
         }
         .navigationTitle("Existing Reports")
@@ -195,6 +240,32 @@ struct ReportsListView: View {
         }
         .sheet(item: $selectedPDFURL) { url in
             ReportPDFPreviewView(url: url)
+        }
+        .alert(
+            "Delete Report?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            presenting: pendingDeletion
+        ) { deletion in
+            Button("Delete Permanently", role: .destructive) {
+                deleteReport(deletion)
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: { deletion in
+            Text("\(deletion.document.entry.reportNo) and its stored files will be permanently deleted. This cannot be undone.")
+        }
+        .alert(
+            deletionFeedbackTitle,
+            isPresented: Binding(
+                get: { deletionFeedbackMessage != nil },
+                set: { if !$0 { deletionFeedbackMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { deletionFeedbackMessage = nil }
+        } message: {
+            Text(deletionFeedbackMessage ?? "")
         }
         .requiresRole(.admin)
     }
@@ -275,6 +346,59 @@ struct ReportsListView: View {
                     completion(docs)
                 }
             }
+    }
+
+    private func deleteReport(_ deletion: PendingReportDeletion) {
+        pendingDeletion = nil
+        isDeleting = true
+        let paths = storagePaths(for: deletion.document, category: deletion.category)
+
+        ReportStore.deleteReport(
+            collection: deletion.category.firestoreCollection,
+            documentID: deletion.document.id,
+            storagePaths: paths,
+            localBarcodeId: deletion.document.entry.barcodeId
+        ) { result in
+            DispatchQueue.main.async {
+                isDeleting = false
+                switch result {
+                case .success(let deletionResult):
+                    removeFromLoadedReports(deletion.document.id, category: deletion.category)
+                    if !deletionResult.storagePathsNotDeleted.isEmpty {
+                        deletionFeedbackTitle = "Report Deleted with Warning"
+                        deletionFeedbackMessage = "The report was deleted, but \(deletionResult.storagePathsNotDeleted.count) stored file\(deletionResult.storagePathsNotDeleted.count == 1 ? "" : "s") could not be removed. Check Firebase Storage permissions."
+                    }
+                case .failure(let error):
+                    deletionFeedbackTitle = "Could Not Delete Report"
+                    deletionFeedbackMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func storagePaths(for document: RawReportDocument, category: ReportCategory) -> [String] {
+        switch category {
+        case .np299:
+            return [document.entry.pdfStoragePath].compactMap { $0 }
+        case .fuel:
+            return [document.raw["receiptStoragePath"] as? String].compactMap { $0 }
+        case .secCom:
+            var paths = document.raw["damageImageStoragePaths"] as? [String] ?? []
+            let photos = document.raw["damagePhotos"] as? [[String: Any]] ?? []
+            paths.append(contentsOf: photos.compactMap { $0["storagePath"] as? String })
+            return paths
+        }
+    }
+
+    private func removeFromLoadedReports(_ documentID: String, category: ReportCategory) {
+        switch category {
+        case .np299:
+            np299Docs.removeAll { $0.id == documentID }
+        case .secCom:
+            secComDocs.removeAll { $0.id == documentID }
+        case .fuel:
+            fuelDocs.removeAll { $0.id == documentID }
+        }
     }
 }
 

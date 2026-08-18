@@ -2,6 +2,27 @@ import SwiftUI
 import UIKit
 import Combine
 import FirebaseAuth
+import FirebaseFirestore
+
+struct NP299EscalationContext {
+    let checklistID: String
+    let checklistReportNo: String
+    let informantName: String
+    let workContact: String
+    let incidentDate: Date?
+    let onReportSaved: (String) -> Void
+}
+
+private struct NP299EscalationContextKey: EnvironmentKey {
+    static let defaultValue: NP299EscalationContext? = nil
+}
+
+extension EnvironmentValues {
+    var htxNP299EscalationContext: NP299EscalationContext? {
+        get { self[NP299EscalationContextKey.self] }
+        set { self[NP299EscalationContextKey.self] = newValue }
+    }
+}
 
 // Make URL usable as a sheet item
 extension URL: @retroactive Identifiable {
@@ -2048,7 +2069,7 @@ private func renderCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.6) -
 /// image, then crop around that same box. This guarantees the close-up matches
 /// the vehicle-location image visually and keeps the orange outline visible
 /// without any shaded fill.
-private func renderAnnotatedCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.55) -> UIImage {
+func renderAnnotatedCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.55) -> UIImage {
     guard let bbox else { return normalizedImage(image) }
 
     let img = normalizedImage(image)
@@ -2610,6 +2631,7 @@ struct PoliceReportStageZeroView: View {
     @State private var customPostalCode = ""
     @State private var customTelephone = ""
     @State private var showStageOne = false
+    @State private var showStationValidationError = false
     @State private var expandedDivisions: Set<String> = [PoliceStationDetails.defaultStation.division]
     @Environment(\.dismiss) private var dismiss
 
@@ -2624,6 +2646,15 @@ struct PoliceReportStageZeroView: View {
             )
         }
         return selectedStation
+    }
+
+    private var stationValidationIssues: [String] {
+        guard useOtherStation else { return [] }
+        var issues: [String] = []
+        if customDivision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Division") }
+        if customAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Location") }
+        if customPostalCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Postal Code") }
+        return issues
     }
 
     var body: some View {
@@ -2715,9 +2746,12 @@ struct PoliceReportStageZeroView: View {
                 Section("Other Station") {
                     Toggle("Use other / manual NPC", isOn: $useOtherStation)
                     if useOtherStation {
-                        reportTextField("Division", text: $customDivision, placeholder: "Enter division")
-                        reportTextField("Location", text: $customAddress, placeholder: "Enter station location", axis: .vertical)
-                        reportTextField("Postal Code", text: $customPostalCode, placeholder: "Enter postal code")
+                        Text("* Required field")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.red)
+                        reportTextField("Division", text: $customDivision, placeholder: "Enter division", required: true)
+                        reportTextField("Location", text: $customAddress, placeholder: "Enter station location", axis: .vertical, required: true)
+                        reportTextField("Postal Code", text: $customPostalCode, placeholder: "Enter postal code", required: true)
                             .keyboardType(.numberPad)
                         reportTextField("Telephone", text: $customTelephone, placeholder: "Enter telephone, if any")
                             .keyboardType(.phonePad)
@@ -2736,8 +2770,17 @@ struct PoliceReportStageZeroView: View {
                 }
 
                 Section {
+                    if showStationValidationError, !stationValidationIssues.isEmpty {
+                        validationSummary(stationValidationIssues)
+                    }
+
                     Button {
-                        showStageOne = true
+                        if stationValidationIssues.isEmpty {
+                            showStationValidationError = false
+                            showStageOne = true
+                        } else {
+                            showStationValidationError = true
+                        }
                     } label: {
                         Text("Proceed to Stage 1")
                             .font(.headline)
@@ -2779,13 +2822,32 @@ struct PoliceReportStageZeroView: View {
         _ title: String,
         text: Binding<String>,
         placeholder: String,
-        axis: Axis = .horizontal
+        axis: Axis = .horizontal,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
         }
+    }
+
+    private func validationSummary(_ issues: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Please complete:")
+                .font(.footnote.weight(.semibold))
+            ForEach(issues, id: \.self) { issue in
+                Label(issue, systemImage: "exclamationmark.circle.fill")
+                    .font(.footnote)
+            }
+        }
+        .foregroundColor(.red)
+        .padding(.vertical, 4)
     }
 }
 
@@ -2844,8 +2906,11 @@ struct PoliceReportStageOneView: View {
     @State private var dateOfBirthValue = Calendar.current.date(byAdding: .year, value: -25, to: Date()) ?? Date()
     @State private var incidentDateTimeValue = Date()
     @State private var showStageTwo = false
+    @State private var showRequiredFieldErrors = false
     @State private var expandedDropdown: DropdownField? = nil
+    @State private var didApplyEscalationPrefill = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.htxNP299EscalationContext) private var escalationContext
 
     private let sexOptions = ["", "Male", "Female", "Prefer not to say"]
     private let raceOptions = ["", "Chinese", "Malay", "Indian", "Other"]
@@ -2939,28 +3004,45 @@ struct PoliceReportStageOneView: View {
         isBlank(details.dateTimeOfIncident) || isValidDate(details.dateTimeOfIncident, formats: ["d MMMM yyyy, HH:mm", "dd MMMM yyyy, HH:mm"])
     }
 
-    private var canProceed: Bool {
-        isAgeValid &&
-        isDOBValid &&
-        isIncidentDateTimeValid &&
-        isNRICValid &&
-        isFINValid &&
-        isPhoneValid &&
-        isEmailValid &&
-        isAgeTwoDigits
+    private var validationIssues: [String] {
+        var issues: [String] = []
+        if isBlank(details.nameOfInformant) { issues.append("Name of Informant") }
+        if isBlank(details.address) { issues.append("Address") }
+        if isBlank(details.contactNumber) { issues.append("Contact Number") }
+        if isBlank(details.nationality) { issues.append("Nationality") }
+        if isBlank(details.sex) { issues.append("Sex") }
+        if isBlank(details.age) { issues.append("Age") }
+        if isBlank(details.race) { issues.append("Race") }
+        if isBlank(details.language) { issues.append("Language") }
+        if isBlank(details.locationOfIncident) { issues.append("Location of Incident") }
+        if !isNRICValid { issues.append("ID Type / ID No. has an invalid NRIC format") }
+        if !isFINValid { issues.append("FIN No. has an invalid format") }
+        if !isPhoneValid { issues.append("Contact Number must be 8 digits beginning with 6, 8, or 9") }
+        if !isEmailValid { issues.append("Email Address has an invalid format") }
+        if !isAgeValid || !isAgeTwoDigits { issues.append("Age must contain one or two valid digits") }
+        if !isDOBValid { issues.append("Date of Birth is invalid") }
+        if !isIncidentDateTimeValid { issues.append("Date/Time of Incident is invalid") }
+        return issues.reduce(into: [String]()) { unique, issue in
+            if !unique.contains(issue) { unique.append(issue) }
+        }
     }
 
     var body: some View {
         Form {
             Section("Incident Details") {
+                    Text("* Required field")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.red)
+
                     reportTextField(
                         "Station Diary No.",
                         text: $details.stationDiaryNo,
-                        placeholder: "Auto: D/yyyymmdd/1234"
+                        placeholder: "Auto: D/yyyymmdd/1234",
+                        required: true
                     )
                     reportTextField("Vide Report No.", text: $details.videReportNo, placeholder: "Leave blank if not available")
-                    reportTextField("Name of Informant", text: $details.nameOfInformant, placeholder: "Enter full name")
-                    reportTextField("Address", text: $details.address, placeholder: "Enter address", axis: .vertical)
+                    reportTextField("Name of Informant", text: $details.nameOfInformant, placeholder: "Enter full name", required: true)
+                    reportTextField("Address", text: $details.address, placeholder: "Enter address", axis: .vertical, required: true)
                     VStack(alignment: .leading, spacing: 6) {
 
                         reportTextField(
@@ -2996,7 +3078,7 @@ struct PoliceReportStageOneView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Contact No.").font(.caption).foregroundColor(.secondary)
+                        HTXFieldLabel(text: "Contact No.", required: true, color: .secondary, font: .caption)
                         Picker("Contact Type", selection: $details.contactType) {
                             ForEach(contactOptions, id: \.self) { option in
                                 Text(option).tag(option)
@@ -3044,7 +3126,7 @@ struct PoliceReportStageOneView: View {
                             validationText("Invalid email address.")
                         }
                     }
-                    reportTextField("Nationality", text: $details.nationality, placeholder: "Enter nationality")
+                    reportTextField("Nationality", text: $details.nationality, placeholder: "Enter nationality", required: true)
                     reportTextField("Occupation", text: $details.occupation, placeholder: "Enter occupation")
 
                     dropdownField(
@@ -3052,13 +3134,15 @@ struct PoliceReportStageOneView: View {
                         selection: $details.sex,
                         options: sexOptions,
                         emptyTitle: "Select sex",
-                        field: .sex
+                        field: .sex,
+                        required: true
                     )
                     VStack(alignment: .leading, spacing: 6) {
                         reportTextField(
                             "Age",
                             text: $details.age,
-                            placeholder: "Enter age"
+                            placeholder: "Enter age",
+                            required: true
                         )
                         .keyboardType(.numberPad)
                         .focused($focusedField, equals: .age)
@@ -3084,7 +3168,8 @@ struct PoliceReportStageOneView: View {
                     dateOnlyPickerField(
                         "Date of Birth",
                         date: $dateOfBirthValue,
-                        output: $details.dateOfBirth
+                        output: $details.dateOfBirth,
+                        required: true
                     )
 
                     dropdownField(
@@ -3092,34 +3177,44 @@ struct PoliceReportStageOneView: View {
                         selection: $details.race,
                         options: raceOptions,
                         emptyTitle: "Select race",
-                        field: .race
+                        field: .race,
+                        required: true
                     )
                     reportTextField("Institution/School Name", text: $details.institutionSchoolName, placeholder: "Enter institution/school, if any")
-                    reportTextField("Language", text: $details.language, placeholder: "Enter language")
+                    reportTextField("Language", text: $details.language, placeholder: "Enter language", required: true)
                     dateTimePickerField(
                         "Date/Time of Incident",
                         date: $incidentDateTimeValue,
-                        output: $details.dateTimeOfIncident
+                        output: $details.dateTimeOfIncident,
+                        required: true
                     )
-                    reportTextField("Location of Incident", text: $details.locationOfIncident, placeholder: "Enter location", axis: .vertical)
+                    reportTextField("Location of Incident", text: $details.locationOfIncident, placeholder: "Enter location", axis: .vertical, required: true)
                 }
 
                 Section {
+                    if showRequiredFieldErrors, !validationIssues.isEmpty {
+                        validationSummary(validationIssues)
+                    }
+
                     Button {
                         if isBlank(details.stationDiaryNo) {
                             details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
                         }
                         details.dateOfBirth = PoliceReportFormFormatter.dobDisplay(from: dateOfBirthValue)
                         details.dateTimeOfIncident = PoliceReportFormFormatter.reportDateTimeDisplay(from: incidentDateTimeValue)
-                        showStageTwo = true
+                        if validationIssues.isEmpty {
+                            showRequiredFieldErrors = false
+                            showStageTwo = true
+                        } else {
+                            showRequiredFieldErrors = true
+                        }
                     } label: {
                         Text("Proceed to Stage 2")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(canProceed ? HTXTheme.primaryPurple : .gray)
-                    .disabled(!canProceed)
+                    .tint(HTXTheme.primaryPurple)
                     .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
                 }
             }
@@ -3142,11 +3237,31 @@ struct PoliceReportStageOneView: View {
                     isPresented: $isPresented
                 )
             }
-            .onAppear {
-                if details.stationDiaryNo.isEmpty {
-                    details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
-                }
-            }
+            .onAppear(perform: applyInitialValues)
+    }
+
+    private func applyInitialValues() {
+        if details.stationDiaryNo.isEmpty {
+            details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
+        }
+
+        guard !didApplyEscalationPrefill, let escalationContext else { return }
+        didApplyEscalationPrefill = true
+
+        if details.nameOfInformant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            details.nameOfInformant = escalationContext.informantName
+        }
+
+        if details.contactNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !escalationContext.workContact.isEmpty {
+            details.contactType = "Office"
+            details.contactNumber = escalationContext.workContact
+        }
+
+        if let incidentDate = escalationContext.incidentDate {
+            incidentDateTimeValue = incidentDate
+            details.dateTimeOfIncident = PoliceReportFormFormatter.reportDateTimeDisplay(from: incidentDate)
+        }
     }
 
     @ViewBuilder
@@ -3154,10 +3269,16 @@ struct PoliceReportStageOneView: View {
         _ title: String,
         text: Binding<String>,
         placeholder: String,
-        axis: Axis = .horizontal
+        axis: Axis = .horizontal,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
         }
@@ -3169,10 +3290,16 @@ struct PoliceReportStageOneView: View {
         selection: Binding<String>,
         options: [String],
         emptyTitle: String,
-        field: DropdownField
+        field: DropdownField,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
 
             Button {
                 dismissKeyboard()
@@ -3246,10 +3373,16 @@ struct PoliceReportStageOneView: View {
     private func dateOnlyPickerField(
         _ title: String,
         date: Binding<Date>,
-        output: Binding<String>
+        output: Binding<String>,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
             DatePicker("", selection: date, displayedComponents: .date)
                 .datePickerStyle(.wheel)
                 .labelsHidden()
@@ -3270,10 +3403,16 @@ struct PoliceReportStageOneView: View {
     private func dateTimePickerField(
         _ title: String,
         date: Binding<Date>,
-        output: Binding<String>
+        output: Binding<String>,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
             DatePicker("", selection: date, displayedComponents: [.date, .hourAndMinute])
                 .datePickerStyle(.wheel)
                 .labelsHidden()
@@ -3295,6 +3434,19 @@ struct PoliceReportStageOneView: View {
         Text(message)
             .font(.caption)
             .foregroundColor(.red)
+    }
+
+    private func validationSummary(_ issues: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Please complete or correct:")
+                .font(.footnote.weight(.semibold))
+            ForEach(issues, id: \.self) { issue in
+                Label(issue, systemImage: "exclamationmark.circle.fill")
+                    .font(.footnote)
+            }
+        }
+        .foregroundColor(.red)
+        .padding(.vertical, 4)
     }
 
     private func isBlank(_ value: String) -> Bool {
@@ -3326,6 +3478,8 @@ struct PoliceReportStageTwoView: View {
     @Binding var pdfURL: URL?
     @Binding var isPresented: Bool
 
+    @Environment(\.htxNP299EscalationContext) private var escalationContext
+
     @State private var details = PoliceReportStageTwoDetails()
     @State private var officerSignatureTrigger = UUID()
     @State private var interpreterSignatureTrigger = UUID()
@@ -3336,17 +3490,43 @@ struct PoliceReportStageTwoView: View {
     @State private var interpreterSignatureImage: UIImage? = nil
     @State private var informantSignatureImage: UIImage? = nil
     @State private var showReportReview = false
+    @State private var showRequiredFieldErrors = false
+
+    private var validationIssues: [String] {
+        var issues: [String] = []
+        if details.officerRecordingName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append("Name of Officer Recording the Report")
+        }
+        if officerSignatureImage == nil { issues.append("Signature of Officer Recording the Report") }
+        let informantName = details.informantName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if informantName.isEmpty && stageOne.nameOfInformant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append("Name of Informant")
+        }
+        if informantSignatureImage == nil { issues.append("Signature of Informant") }
+        if details.officerInCharge.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append("Name of Officer In-Charge of Case")
+        }
+        if details.classificationOfCase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            issues.append("Classification of Case")
+        }
+        return issues
+    }
 
     var body: some View {
         Form {
             Section("Officer") {
-                reportTextField("Name of officer recording the report", text: $details.officerRecordingName, placeholder: "Enter officer name")
+                Text("* Required field")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.red)
+
+                reportTextField("Name of officer recording the report", text: $details.officerRecordingName, placeholder: "Enter officer name", required: true)
 
                 signatureInput(
                     title: "Signature of Officer Recording the Report",
                     image: $officerSignatureImage,
                     clearTrigger: $officerSignatureTrigger,
-                    clearTitle: "Clear Officer Signature"
+                    clearTitle: "Clear Officer Signature",
+                    required: true
                 )
             }
 
@@ -3363,25 +3543,35 @@ struct PoliceReportStageTwoView: View {
             }
 
             Section("Informant") {
-                reportTextField("Name of Informant", text: $details.informantName, placeholder: stageOne.nameOfInformant.isEmpty ? "Enter informant name" : stageOne.nameOfInformant)
+                reportTextField("Name of Informant", text: $details.informantName, placeholder: stageOne.nameOfInformant.isEmpty ? "Enter informant name" : stageOne.nameOfInformant, required: true)
                 signatureInput(
                     title: "Signature of Informant",
                     image: $informantSignatureImage,
                     clearTrigger: $informantSignatureTrigger,
-                    clearTitle: "Clear Informant Signature"
+                    clearTitle: "Clear Informant Signature",
+                    required: true
                 )
 
                 dateTimePickerField("Date/Time", date: $informantDateTimeValue, output: $details.informantSignatureDateTime)
             }
 
             Section("Case") {
-                reportTextField("Name of Officer In-Charge of Case", text: $details.officerInCharge, placeholder: "Enter officer-in-charge")
-                reportTextField("Classification of Case", text: $details.classificationOfCase, placeholder: "Enter classification", axis: .vertical)
+                reportTextField("Name of Officer In-Charge of Case", text: $details.officerInCharge, placeholder: "Enter officer-in-charge", required: true)
+                reportTextField("Classification of Case", text: $details.classificationOfCase, placeholder: "Enter classification", axis: .vertical, required: true)
             }
 
             Section {
+                if showRequiredFieldErrors, !validationIssues.isEmpty {
+                    validationSummary(validationIssues)
+                }
+
                 Button {
-                    showReportReview = true
+                    if validationIssues.isEmpty {
+                        showRequiredFieldErrors = false
+                        showReportReview = true
+                    } else {
+                        showRequiredFieldErrors = true
+                    }
                 } label: {
                     HStack {
                         Image(systemName: "checkmark.seal.fill")
@@ -3444,10 +3634,16 @@ struct PoliceReportStageTwoView: View {
         _ title: String,
         text: Binding<String>,
         placeholder: String,
-        axis: Axis = .horizontal
+        axis: Axis = .horizontal,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.caption.weight(.semibold)).foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
             TextField(placeholder, text: text, axis: axis)
                 .lineLimit(axis == .vertical ? 2...4 : 1...1)
         }
@@ -3480,12 +3676,16 @@ struct PoliceReportStageTwoView: View {
         title: String,
         image: Binding<UIImage?>,
         clearTrigger: Binding<UUID>,
-        clearTitle: String
+        clearTitle: String,
+        required: Bool = false
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(HTXTheme.primaryPurple)
+            HTXFieldLabel(
+                text: title,
+                required: required,
+                color: HTXTheme.primaryPurple,
+                font: .caption.weight(.semibold)
+            )
 
             // Keep the tappable/drawable signature canvas visually and interactively
             // separate from the clear action below.
@@ -3519,6 +3719,19 @@ struct PoliceReportStageTwoView: View {
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private func validationSummary(_ issues: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Please complete:")
+                .font(.footnote.weight(.semibold))
+            ForEach(issues, id: \.self) { issue in
+                Label(issue, systemImage: "exclamationmark.circle.fill")
+                    .font(.footnote)
+            }
+        }
+        .foregroundColor(.red)
+        .padding(.vertical, 4)
     }
 
     private func finalizedStageTwoDetails() -> PoliceReportStageTwoDetails {
@@ -3561,6 +3774,7 @@ struct PoliceReportStageTwoView: View {
         let generatedBy = !officerName.isEmpty
             ? officerName
             : (!(signedInName ?? "").isEmpty ? signedInName! : (signedInEmail?.isEmpty == false ? signedInEmail! : "Not recorded"))
+        let escalationContext = escalationContext
 
         Task(priority: .userInitiated) {
             do {
@@ -3597,9 +3811,60 @@ struct PoliceReportStageTwoView: View {
                         detectionCount: reportDetections.count,
                         numericBarcodeId: numericBarcodeId,
                         pdfURL: url
-                    )
+                    ) { error in
+                        guard error == nil, let escalationContext else {
+                            if let error {
+                                print("Failed to save NP299 report:", error.localizedDescription)
+                            }
+                            return
+                        }
+                        linkEscalatedChecklist(
+                            context: escalationContext,
+                            reportID: numericBarcodeId,
+                            reportNo: reportNo
+                        )
+                    }
                 }
                 pdfURL = url
+            }
+        }
+    }
+
+    private func linkEscalatedChecklist(
+        context: NP299EscalationContext,
+        reportID: String,
+        reportNo: String
+    ) {
+        let database = Firestore.firestore()
+        let reportReference = database.collection("reports").document(reportID)
+        let checklistReference = database.collection("seccom_checklists").document(context.checklistID)
+        let batch = database.batch()
+
+        batch.setData(
+            [
+                "sourceChecklistId": context.checklistID,
+                "sourceChecklistReportNo": context.checklistReportNo
+            ],
+            forDocument: reportReference,
+            merge: true
+        )
+        batch.setData(
+            [
+                "np299ReportId": reportID,
+                "np299ReportNo": reportNo,
+                "np299GeneratedAt": FieldValue.serverTimestamp()
+            ],
+            forDocument: checklistReference,
+            merge: true
+        )
+
+        batch.commit { error in
+            if let error {
+                print("Failed to link NP299 report to checklist:", error.localizedDescription)
+                return
+            }
+            DispatchQueue.main.async {
+                context.onReportSaved(reportNo)
             }
         }
     }

@@ -39,6 +39,10 @@ struct ReportEntry: Identifiable {
     }
 }
 
+struct ReportDeletionResult {
+    let storagePathsNotDeleted: [String]
+}
+
 struct ReportStore {
 
     static func makeNumericBarcodeId(date: Date = Date()) -> String {
@@ -126,6 +130,48 @@ struct ReportStore {
                 completion(.failure(error))
             }
         }
+    }
+
+    static func deleteReport(
+        collection: String,
+        documentID: String,
+        storagePaths: [String],
+        localBarcodeId: String? = nil,
+        completion: @escaping (Result<ReportDeletionResult, Error>) -> Void
+    ) {
+        let uniquePaths = Array(Set(storagePaths.filter { !$0.isEmpty }))
+
+        func deleteNextFile(index: Int, failedPaths: [String]) {
+            guard index < uniquePaths.count else {
+                Firestore.firestore()
+                    .collection(collection)
+                    .document(documentID)
+                    .delete { error in
+                        if let error {
+                            completion(.failure(error))
+                            return
+                        }
+
+                        if let localBarcodeId, !localBarcodeId.isEmpty {
+                            let localURL = localPDFURL(for: localBarcodeId)
+                            try? FileManager.default.removeItem(at: localURL)
+                        }
+
+                        completion(.success(ReportDeletionResult(storagePathsNotDeleted: failedPaths)))
+                    }
+                return
+            }
+
+            let path = uniquePaths[index]
+            Storage.storage().reference().child(path).delete { error in
+                deleteNextFile(
+                    index: index + 1,
+                    failedPaths: error == nil ? failedPaths : failedPaths + [path]
+                )
+            }
+        }
+
+        deleteNextFile(index: 0, failedPaths: [])
     }
 
     /// Synchronous legacy resolver. It only works for PDFs already on this device

@@ -1,0 +1,31 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function hasActiveProfile() {
+      return request.auth != null
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get("active", true) == true;
+    }
+
+    function isAdmin() {
+      return hasActiveProfile()
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    match /reports/{reportId}/{fileName} {
+      allow create: if hasActiveProfile();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /fuel_refuel_reports/{reportId}/{fileName} {
+      allow create: if hasActiveProfile();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /seccom_checklists/{reportId}/damage_images/{fileName} {
+      allow create: if hasActiveProfile();
+      allow read, update, delete: if isAdmin();
+    }
+  }
+}
