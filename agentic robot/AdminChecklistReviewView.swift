@@ -82,6 +82,8 @@ private struct AdminDamagePhotoMetadata: Identifiable {
     let id = UUID()
     let storagePath: String
     let angle: String
+    let angleIndex: Int
+    let guideVehicleType: String?
     let regions: [AdminDamageRegion]
 }
 
@@ -89,6 +91,12 @@ private struct LoadedAdminDamagePhoto: Identifiable {
     let id = UUID()
     let image: UIImage
     let metadata: AdminDamagePhotoMetadata
+}
+
+private struct ChecklistNP299Payload: Identifiable {
+    let id = UUID()
+    let carType: CarType
+    let detections: [MutableDamageDetection]
 }
 
 // MARK: - Admin Queue
@@ -161,7 +169,6 @@ struct AdminChecklistReviewView: View {
         .onAppear(perform: fetchChecklists)
         .sheet(item: $selectedRecord) { record in
             AdminChecklistReviewDetail(record: record) {
-                selectedRecord = nil
                 fetchChecklists()
             }
         }
@@ -480,6 +487,10 @@ private struct AdminChecklistReviewDetail: View {
     @State private var pendingDecision: ChecklistAdminReviewStatus?
     @State private var isSaving = false
     @State private var saveError: String?
+    @State private var np299Payload: ChecklistNP299Payload?
+    @State private var isGeneratingNP299 = false
+    @State private var np299PDFURL: URL?
+    @State private var generatedNP299ReportNo: String?
 
     private let accent = Color(red: 0.08, green: 0.50, blue: 0.30)
 
@@ -525,6 +536,35 @@ private struct AdminChecklistReviewDetail: View {
             .onAppear(perform: loadDamagePhotos)
             .fullScreenCover(item: $selectedPhoto) { photo in
                 AdminDamagePhotoViewer(photo: photo)
+            }
+            .fullScreenCover(item: $np299Payload) { payload in
+                PoliceReportStageZeroView(
+                    plate: record.plate,
+                    carType: payload.carType,
+                    detections: payload.detections,
+                    scanImages: [],
+                    onLogout: { auth.logout() },
+                    isGeneratingReport: $isGeneratingNP299,
+                    pdfURL: $np299PDFURL,
+                    isPresented: Binding(
+                        get: { np299Payload != nil },
+                        set: { if !$0 { np299Payload = nil } }
+                    )
+                )
+                .environment(
+                    \.htxNP299EscalationContext,
+                    NP299EscalationContext(
+                        checklistID: record.id,
+                        checklistReportNo: record.reportNo,
+                        informantName: record.driverName,
+                        workContact: data["workContact"] as? String ?? "",
+                        incidentDate: record.createdAt,
+                        onReportSaved: { reportNo in
+                            generatedNP299ReportNo = reportNo
+                            onSaved()
+                        }
+                    )
+                )
             }
             .alert(
                 "Confirm Decision",
@@ -717,17 +757,42 @@ private struct AdminChecklistReviewDetail: View {
                         .foregroundColor(.red)
                 }
 
-                Button {
-                    pendingDecision = .escalationRequired
-                } label: {
-                    Label("Escalate to NP299", systemImage: "exclamationmark.shield.fill")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
+                if reviewStatus == .escalationRequired {
+                    if let reportNo = generatedNP299ReportNo ?? data["np299ReportNo"] as? String,
+                       !reportNo.isEmpty {
+                        Label("NP299 Generated · \(reportNo)", systemImage: "checkmark.seal.fill")
+                            .font(.headline)
+                            .foregroundColor(.green)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(13)
+                            .background(Color.green.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        Button {
+                            openNP299Workflow()
+                        } label: {
+                            Label("Continue NP299 Report", systemImage: "doc.text.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(HTXTheme.primaryPurple)
+                        .disabled(isSaving || isLoadingPhotos)
+                    }
+                } else {
+                    Button {
+                        pendingDecision = .escalationRequired
+                    } label: {
+                        Label("Escalate to NP299", systemImage: "exclamationmark.shield.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(HTXTheme.primaryPurple)
+                    .disabled(isSaving)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(HTXTheme.primaryPurple)
-                .disabled(isSaving)
 
                 Button {
                     pendingDecision = .noEscalation
@@ -793,8 +858,80 @@ private struct AdminChecklistReviewDetail: View {
                     }
                     reviewStatus = status
                     onSaved()
+                    if status == .escalationRequired {
+                        openNP299Workflow()
+                    } else {
+                        dismiss()
+                    }
                 }
             }
+    }
+
+    private func openNP299Workflow() {
+        saveError = nil
+
+        if isLoadingPhotos {
+            saveError = "Damage evidence is still loading. Please wait a moment and try again."
+            return
+        }
+
+        if let photoError, !damagePhotoMetadata().isEmpty {
+            saveError = "The NP299 form cannot open until its damage evidence is available: \(photoError)"
+            return
+        }
+
+        let carType = resolvedNP299CarType()
+        let detections = loadedPhotos.flatMap { photo in
+            photo.metadata.regions.map { region in
+                MutableDamageDetection(
+                    angleIndex: photo.metadata.angleIndex,
+                    angleName: photo.metadata.angle,
+                    damageType: region.damageType,
+                    confidence: region.confidence,
+                    cropImage: renderAnnotatedCrop(
+                        image: photo.image,
+                        bbox: region.normalizedBBox
+                    ),
+                    contextImage: nil,
+                    cleanContextImage: photo.image.htxNormalizedImage(),
+                    normalizedBBox: region.normalizedBBox,
+                    isBaseline: false,
+                    explanation: region.explanation.isEmpty
+                        ? "\(region.damageType.capitalized) confirmed from the pre-driving checklist."
+                        : region.explanation
+                )
+            }
+        }
+
+        np299Payload = ChecklistNP299Payload(
+            carType: carType,
+            detections: detections
+        )
+    }
+
+    private func resolvedNP299CarType() -> CarType {
+        for photo in loadedPhotos {
+            if let rawType = photo.metadata.guideVehicleType,
+               let exactType = CarType(rawValue: rawType) {
+                return exactType
+            }
+        }
+
+        if let exactType = CarType(rawValue: record.carType) {
+            return exactType
+        }
+
+        let value = record.carType.lowercased()
+        if value.contains("ambulance") { return .emergencyAmbulance }
+        if value.contains("hazmat") { return .hazmat }
+        if value.contains("suv") || value.contains("xc 90") ||
+            value.contains("pajero") || value.contains("land cruiser") {
+            return .suv
+        }
+        if value.contains("van") || value.contains("transporter") || value.contains("mpv") {
+            return .mpv
+        }
+        return .sedan
     }
 
     private func loadDamagePhotos() {
@@ -852,6 +989,8 @@ private struct AdminChecklistReviewDetail: View {
                 return AdminDamagePhotoMetadata(
                     storagePath: path,
                     angle: rawPhoto["angle"] as? String ?? "Vehicle Image",
+                    angleIndex: Int(number(rawPhoto["angleIndex"]) ?? 0),
+                    guideVehicleType: rawPhoto["guideVehicleType"] as? String,
                     regions: regions
                 )
             }
@@ -862,6 +1001,8 @@ private struct AdminChecklistReviewDetail: View {
             AdminDamagePhotoMetadata(
                 storagePath: path,
                 angle: "Damage Photo \(index + 1)",
+                angleIndex: min(index, 3),
+                guideVehicleType: nil,
                 regions: []
             )
         }

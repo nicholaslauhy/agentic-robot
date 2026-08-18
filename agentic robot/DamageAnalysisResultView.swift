@@ -2,6 +2,27 @@ import SwiftUI
 import UIKit
 import Combine
 import FirebaseAuth
+import FirebaseFirestore
+
+struct NP299EscalationContext {
+    let checklistID: String
+    let checklistReportNo: String
+    let informantName: String
+    let workContact: String
+    let incidentDate: Date?
+    let onReportSaved: (String) -> Void
+}
+
+private struct NP299EscalationContextKey: EnvironmentKey {
+    static let defaultValue: NP299EscalationContext? = nil
+}
+
+extension EnvironmentValues {
+    var htxNP299EscalationContext: NP299EscalationContext? {
+        get { self[NP299EscalationContextKey.self] }
+        set { self[NP299EscalationContextKey.self] = newValue }
+    }
+}
 
 // Make URL usable as a sheet item
 extension URL: @retroactive Identifiable {
@@ -2048,7 +2069,7 @@ private func renderCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.6) -
 /// image, then crop around that same box. This guarantees the close-up matches
 /// the vehicle-location image visually and keeps the orange outline visible
 /// without any shaded fill.
-private func renderAnnotatedCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.55) -> UIImage {
+func renderAnnotatedCrop(image: UIImage, bbox: CGRect?, padding: CGFloat = 0.55) -> UIImage {
     guard let bbox else { return normalizedImage(image) }
 
     let img = normalizedImage(image)
@@ -2887,7 +2908,9 @@ struct PoliceReportStageOneView: View {
     @State private var showStageTwo = false
     @State private var showRequiredFieldErrors = false
     @State private var expandedDropdown: DropdownField? = nil
+    @State private var didApplyEscalationPrefill = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.htxNP299EscalationContext) private var escalationContext
 
     private let sexOptions = ["", "Male", "Female", "Prefer not to say"]
     private let raceOptions = ["", "Chinese", "Malay", "Indian", "Other"]
@@ -3214,11 +3237,31 @@ struct PoliceReportStageOneView: View {
                     isPresented: $isPresented
                 )
             }
-            .onAppear {
-                if details.stationDiaryNo.isEmpty {
-                    details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
-                }
-            }
+            .onAppear(perform: applyInitialValues)
+    }
+
+    private func applyInitialValues() {
+        if details.stationDiaryNo.isEmpty {
+            details.stationDiaryNo = PoliceReportFormFormatter.stationDiaryNumber()
+        }
+
+        guard !didApplyEscalationPrefill, let escalationContext else { return }
+        didApplyEscalationPrefill = true
+
+        if details.nameOfInformant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            details.nameOfInformant = escalationContext.informantName
+        }
+
+        if details.contactNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !escalationContext.workContact.isEmpty {
+            details.contactType = "Office"
+            details.contactNumber = escalationContext.workContact
+        }
+
+        if let incidentDate = escalationContext.incidentDate {
+            incidentDateTimeValue = incidentDate
+            details.dateTimeOfIncident = PoliceReportFormFormatter.reportDateTimeDisplay(from: incidentDate)
+        }
     }
 
     @ViewBuilder
@@ -3434,6 +3477,8 @@ struct PoliceReportStageTwoView: View {
     @Binding var isGeneratingReport: Bool
     @Binding var pdfURL: URL?
     @Binding var isPresented: Bool
+
+    @Environment(\.htxNP299EscalationContext) private var escalationContext
 
     @State private var details = PoliceReportStageTwoDetails()
     @State private var officerSignatureTrigger = UUID()
@@ -3729,6 +3774,7 @@ struct PoliceReportStageTwoView: View {
         let generatedBy = !officerName.isEmpty
             ? officerName
             : (!(signedInName ?? "").isEmpty ? signedInName! : (signedInEmail?.isEmpty == false ? signedInEmail! : "Not recorded"))
+        let escalationContext = escalationContext
 
         Task(priority: .userInitiated) {
             do {
@@ -3765,9 +3811,60 @@ struct PoliceReportStageTwoView: View {
                         detectionCount: reportDetections.count,
                         numericBarcodeId: numericBarcodeId,
                         pdfURL: url
-                    )
+                    ) { error in
+                        guard error == nil, let escalationContext else {
+                            if let error {
+                                print("Failed to save NP299 report:", error.localizedDescription)
+                            }
+                            return
+                        }
+                        linkEscalatedChecklist(
+                            context: escalationContext,
+                            reportID: numericBarcodeId,
+                            reportNo: reportNo
+                        )
+                    }
                 }
                 pdfURL = url
+            }
+        }
+    }
+
+    private func linkEscalatedChecklist(
+        context: NP299EscalationContext,
+        reportID: String,
+        reportNo: String
+    ) {
+        let database = Firestore.firestore()
+        let reportReference = database.collection("reports").document(reportID)
+        let checklistReference = database.collection("seccom_checklists").document(context.checklistID)
+        let batch = database.batch()
+
+        batch.setData(
+            [
+                "sourceChecklistId": context.checklistID,
+                "sourceChecklistReportNo": context.checklistReportNo
+            ],
+            forDocument: reportReference,
+            merge: true
+        )
+        batch.setData(
+            [
+                "np299ReportId": reportID,
+                "np299ReportNo": reportNo,
+                "np299GeneratedAt": FieldValue.serverTimestamp()
+            ],
+            forDocument: checklistReference,
+            merge: true
+        )
+
+        batch.commit { error in
+            if let error {
+                print("Failed to link NP299 report to checklist:", error.localizedDescription)
+                return
+            }
+            DispatchQueue.main.async {
+                context.onReportSaved(reportNo)
             }
         }
     }
