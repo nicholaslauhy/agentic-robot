@@ -527,6 +527,7 @@ struct FuelRefuelView: View {
             "createdByName":    name,
             "createdByEmail":   auth.currentEmail,
             "generatedBy":      name,
+            "adminFollowUpStatus": "pending",
             "createdAt":        FieldValue.serverTimestamp()
         ]
 

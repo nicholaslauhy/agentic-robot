@@ -124,6 +124,18 @@ struct HomeView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
 
                             NavigationLink {
+                                AdminFuelFollowUpView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "fuelpump.circle.fill",
+                                    title: "Refuel Follow-up",
+                                    subtitle: "Review and complete submitted refuel forms"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                            NavigationLink {
                                 ReportScannerView()
                             } label: {
                                 HomeActionRow(

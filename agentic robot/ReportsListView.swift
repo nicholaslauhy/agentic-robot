@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 import FirebaseFirestore
 
 // MARK: - Report Category Enum
@@ -769,13 +770,40 @@ struct SecComDetailSheet: View {
 // MARK: - Fuel Detail Sheet
 struct FuelDetailSheet: View {
     let doc: RawReportDocument
+    let allowsFollowUpActions: Bool
+    let onFollowUpUpdated: () -> Void
+
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject private var auth: AuthViewModel
     private let accent = HTXTheme.fuelOrange
 
     @State private var receiptImage: UIImage? = nil
     @State private var isLoadingReceipt = false
     @State private var receiptError: String? = nil
     @State private var selectedReceiptImage: ZoomableImageItem? = nil
+    @State private var followUpStatus: FuelFollowUpStatus
+    @State private var followUpNotes: String
+    @State private var followedUpByName: String
+    @State private var followedUpAt: Date?
+    @State private var isSavingFollowUp = false
+    @State private var followUpError: String? = nil
+    @State private var showCompleteConfirmation = false
+
+    init(
+        doc: RawReportDocument,
+        allowsFollowUpActions: Bool = false,
+        onFollowUpUpdated: @escaping () -> Void = {}
+    ) {
+        self.doc = doc
+        self.allowsFollowUpActions = allowsFollowUpActions
+        self.onFollowUpUpdated = onFollowUpUpdated
+        _followUpStatus = State(
+            initialValue: FuelFollowUpStatus(firestoreValue: doc.raw["adminFollowUpStatus"])
+        )
+        _followUpNotes = State(initialValue: doc.raw["adminFollowUpNotes"] as? String ?? "")
+        _followedUpByName = State(initialValue: doc.raw["adminFollowedUpByName"] as? String ?? "")
+        _followedUpAt = State(initialValue: (doc.raw["adminFollowedUpAt"] as? Timestamp)?.dateValue())
+    }
 
     private var d: [String: Any] { doc.raw }
     private var usedMastercard: Bool { d["usedMastercard"] as? Bool ?? false }
@@ -800,6 +828,8 @@ struct FuelDetailSheet: View {
                             subtitle: doc.entry.reportNo,
                             accent: accent
                         )
+
+                        followUpCard
 
                         // Driver info
                         sectionCard(title: "Driver Information", icon: "person.fill", accent: accent) {
@@ -887,7 +917,199 @@ struct FuelDetailSheet: View {
             .fullScreenCover(item: $selectedReceiptImage) { item in
                 ZoomableImageViewer(image: item.image)
             }
+            .alert("Complete Refuel Follow-up?", isPresented: $showCompleteConfirmation) {
+                Button("Mark Completed") { completeFollowUp() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This confirms that the refuel submission has been followed up. Its completed status cannot be changed later.")
+            }
         }
+    }
+
+    private var followUpCard: some View {
+        sectionCard(title: "Administrator Follow-up", icon: "person.badge.shield.checkmark.fill", accent: accent) {
+            VStack(alignment: .leading, spacing: 16) {
+                followUpStatusPanel
+
+                if followUpStatus == .completed {
+                    if !followedUpByName.isEmpty || followedUpAt != nil {
+                        VStack(spacing: 0) {
+                            if !followedUpByName.isEmpty {
+                                followUpDetailRow(label: "Approved by", value: followedUpByName)
+                            }
+
+                            if !followedUpByName.isEmpty, followedUpAt != nil {
+                                Divider()
+                                    .padding(.leading, 12)
+                            }
+
+                            if let completedAt = followedUpAt {
+                                followUpDetailRow(
+                                    label: "Approved on",
+                                    value: completedAt.formatted(date: .abbreviated, time: .shortened)
+                                )
+                            }
+                        }
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+
+                    if !followUpNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Follow-up Notes")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.primary)
+                            Text(followUpNotes)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                } else if allowsFollowUpActions {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 4) {
+                            Text("Follow-up Notes")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Optional")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Text("Record any action taken or information the next administrator should know.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    TextEditor(text: $followUpNotes)
+                        .frame(minHeight: 110)
+                        .scrollContentBackground(.hidden)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.secondary.opacity(0.20), lineWidth: 1)
+                        )
+
+                    if let followUpError {
+                        Label(followUpError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundColor(.red)
+                    }
+
+                    Button {
+                        showCompleteConfirmation = true
+                    } label: {
+                        if isSavingFollowUp {
+                            ProgressView()
+                                .tint(.white)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        } else {
+                            Label("Mark Follow-up Completed", systemImage: "checkmark.seal.fill")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+                    .controlSize(.large)
+                    .disabled(isSavingFollowUp)
+                } else {
+                    Text("This submission is waiting for administrator follow-up.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+        }
+    }
+
+    private var followUpStatusPanel: some View {
+        HStack(spacing: 12) {
+            Image(systemName: followUpStatus.icon)
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(width: 36, height: 36)
+                .background(followUpStatus.color)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Follow-up status")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(followUpStatus.title)
+                    .font(.headline)
+                    .foregroundColor(followUpStatus.color)
+            }
+
+            Spacer(minLength: 8)
+
+            if followUpStatus == .completed {
+                Label("Locked", systemImage: "lock.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(12)
+        .background(followUpStatus.color.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(followUpStatus.color.opacity(0.18), lineWidth: 1)
+        )
+    }
+
+    private func followUpDetailRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(12)
+    }
+
+    private func completeFollowUp() {
+        guard followUpStatus == .pending, !isSavingFollowUp else { return }
+        isSavingFollowUp = true
+        followUpError = nil
+
+        let payload: [String: Any] = [
+            "adminFollowUpStatus": FuelFollowUpStatus.completed.rawValue,
+            "adminFollowUpNotes": followUpNotes.trimmingCharacters(in: .whitespacesAndNewlines),
+            "adminFollowedUpByUid": auth.user?.uid ?? "",
+            "adminFollowedUpByName": auth.currentUsername,
+            "adminFollowedUpByEmail": auth.currentEmail,
+            "adminFollowedUpAt": FieldValue.serverTimestamp()
+        ]
+
+        Firestore.firestore()
+            .collection("fuel_refuel_reports")
+            .document(doc.id)
+            .setData(payload, merge: true) { error in
+                DispatchQueue.main.async {
+                    isSavingFollowUp = false
+                    if let error {
+                        followUpError = "Could not complete the follow-up: \(error.localizedDescription)"
+                        return
+                    }
+                    followUpStatus = .completed
+                    followedUpByName = auth.currentUsername
+                    followedUpAt = Date()
+                    onFollowUpUpdated()
+                }
+            }
     }
 
     private func loadReceiptImage() {
