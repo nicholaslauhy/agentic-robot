@@ -935,7 +935,7 @@ struct FuelDetailSheet: View {
                     if !followedUpByName.isEmpty || followedUpAt != nil {
                         VStack(spacing: 0) {
                             if !followedUpByName.isEmpty {
-                                followUpDetailRow(label: "Completed by", value: followedUpByName)
+                                followUpDetailRow(label: "Approved by", value: followedUpByName)
                             }
 
                             if !followedUpByName.isEmpty, followedUpAt != nil {
@@ -945,7 +945,7 @@ struct FuelDetailSheet: View {
 
                             if let completedAt = followedUpAt {
                                 followUpDetailRow(
-                                    label: "Completed on",
+                                    label: "Approved on",
                                     value: completedAt.formatted(date: .abbreviated, time: .shortened)
                                 )
                             }
