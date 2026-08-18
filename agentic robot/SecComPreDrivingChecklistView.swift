@@ -1508,7 +1508,34 @@ private struct ChecklistManualDamageEditor: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal)
 
-                    if normalizedBBox == nil {
+                    if let box = normalizedBBox,
+                       let preview = checklistDamageAnnotatedCrop(image: image, bbox: box) {
+                        VStack(alignment: .center, spacing: 10) {
+                            Label("Close-up Preview", systemImage: "magnifyingglass")
+                                .font(.subheadline.bold())
+
+                            Image(uiImage: preview)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: .infinity)
+                                .frame(maxHeight: 230)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(HTXTheme.primaryPurple.opacity(0.25), lineWidth: 1)
+                                )
+
+                            Text("This is the damage close-up that will be attached. Draw again above to replace the boundary.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(14)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .padding(.horizontal)
+                    } else {
                         Label("Draw a boundary before adding this damage.", systemImage: "hand.draw")
                             .font(.footnote.weight(.semibold))
                             .foregroundColor(.orange)
@@ -1529,7 +1556,7 @@ private struct ChecklistManualDamageEditor: View {
                             damageType: damageType,
                             confidence: 1,
                             normalizedBBox: normalizedBBox,
-                            cropImage: checklistDamageCrop(image: image, bbox: normalizedBBox),
+                            cropImage: checklistDamageAnnotatedCrop(image: image, bbox: normalizedBBox),
                             explanation: "\(damageType.capitalized) marked by the driver.",
                             isManuallyAdded: true
                         )
@@ -1632,6 +1659,62 @@ private func checklistDamageCrop(image: UIImage, bbox: CGRect?) -> UIImage? {
           pixelRect.height > 1,
           let cropped = cgImage.cropping(to: pixelRect) else { return nil }
     return UIImage(cgImage: cropped, scale: 1, orientation: .up)
+}
+
+/// Creates the same type of close-up used by the NP299 manual-damage flow:
+/// retain some surrounding vehicle context and draw the selected boundary on
+/// the cropped image so the driver can verify exactly what will be submitted.
+private func checklistDamageAnnotatedCrop(image: UIImage, bbox: CGRect?) -> UIImage? {
+    guard let bbox else { return nil }
+    let normalized = image.htxNormalizedImage()
+    guard let cgImage = normalized.cgImage else { return nil }
+
+    let imageWidth = CGFloat(cgImage.width)
+    let imageHeight = CGFloat(cgImage.height)
+    let damageRect = CGRect(
+        x: bbox.minX * imageWidth,
+        y: bbox.minY * imageHeight,
+        width: bbox.width * imageWidth,
+        height: bbox.height * imageHeight
+    ).intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
+
+    guard damageRect.width > 1, damageRect.height > 1 else { return nil }
+
+    let padX = max(damageRect.width * 0.55, imageWidth * 0.01)
+    let padY = max(damageRect.height * 0.55, imageHeight * 0.01)
+    let cropRect = damageRect
+        .insetBy(dx: -padX, dy: -padY)
+        .intersection(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
+        .integral
+
+    guard cropRect.width > 1,
+          cropRect.height > 1,
+          let croppedCG = cgImage.cropping(to: cropRect) else { return nil }
+
+    let croppedImage = UIImage(cgImage: croppedCG, scale: 1, orientation: .up)
+    let localDamageRect = CGRect(
+        x: damageRect.minX - cropRect.minX,
+        y: damageRect.minY - cropRect.minY,
+        width: damageRect.width,
+        height: damageRect.height
+    ).intersection(CGRect(origin: .zero, size: cropRect.size))
+
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+    let renderer = UIGraphicsImageRenderer(size: cropRect.size, format: format)
+
+    return renderer.image { _ in
+        UIColor.white.setFill()
+        UIBezierPath(rect: CGRect(origin: .zero, size: cropRect.size)).fill()
+        croppedImage.draw(in: CGRect(origin: .zero, size: cropRect.size))
+
+        UIColor.orange.setStroke()
+        let safeRect = localDamageRect.insetBy(dx: 1.5, dy: 1.5)
+        let path = UIBezierPath(rect: safeRect)
+        path.lineWidth = max(cropRect.width * 0.01, 3)
+        path.stroke()
+    }
 }
 
 private func angleLabel(for index: Int) -> String {
