@@ -3759,8 +3759,10 @@ struct PoliceReportStageTwoView: View {
         // in the app for reference, but it should not be printed into the NP299 PDF.
         let reportDetections = detections.filter { !$0.isBaseline }
 
-        // Benchmark must contain BOTH existing benchmark damage + newly confirmed
-        // damage, so the next analysis compares against the fully updated car state.
+        // A normal four-view NP299 review contains the complete edited baseline
+        // and can replace the submitted angles. A checklist escalation contains
+        // only the driver's newly confirmed areas, so that path must merge with
+        // the existing baseline instead of erasing older damage for that angle.
         let baselineAngles = makeBaselineBatchAngles(from: detections, scanImages: scanImages)
 
         let scanImages = scanImages
@@ -3778,10 +3780,17 @@ struct PoliceReportStageTwoView: View {
 
         Task(priority: .userInitiated) {
             do {
-                try await DamageAnalysisService.shared.confirmBaselineBatch(
-                    plate: plate,
-                    angles: baselineAngles
-                )
+                if escalationContext != nil {
+                    try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
+                        plate: plate,
+                        angles: baselineAngles
+                    )
+                } else {
+                    try await DamageAnalysisService.shared.confirmBaselineBatch(
+                        plate: plate,
+                        angles: baselineAngles
+                    )
+                }
                 print("Saved updated benchmark for \(plate).")
             } catch {
                 print("Failed to save updated benchmark for \(plate):", error)
