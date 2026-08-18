@@ -21,12 +21,6 @@ service cloud.firestore {
       allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
       allow create, update, delete: if isAdmin();
-
-      match /deviceTokens/{deviceId} {
-        allow read: if false;
-        allow create, update, delete: if hasActiveProfile()
-          && request.auth.uid == userId;
-      }
     }
 
     match /admin_notifications/{notificationId} {

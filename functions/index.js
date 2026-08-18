@@ -3,7 +3,6 @@ const {onDocumentCreated} = require("firebase-functions/v2/firestore");
 const {initializeApp} = require("firebase-admin/app");
 const {getAuth} = require("firebase-admin/auth");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
-const {getMessaging} = require("firebase-admin/messaging");
 
 initializeApp();
 
@@ -122,76 +121,6 @@ function notificationDetails(reportType, data) {
   }
 }
 
-async function activeAdminDevices() {
-  const database = getFirestore();
-  const admins = await database.collection("users")
-      .where("role", "==", "admin")
-      .get();
-  const activeAdmins = admins.docs.filter((document) => {
-    return document.data().active !== false;
-  });
-
-  const deviceSnapshots = await Promise.all(activeAdmins.map((admin) => {
-    return admin.ref.collection("deviceTokens").get();
-  }));
-
-  return deviceSnapshots.flatMap((snapshot) => {
-    return snapshot.docs.flatMap((document) => {
-      const token = cleanText(document.data().token, "");
-      return token ? [{token, reference: document.ref}] : [];
-    });
-  });
-}
-
-async function sendAdminPush(notificationId, reportType, details) {
-  const devices = await activeAdminDevices();
-  if (devices.length === 0) {
-    console.log("No active administrator devices are registered for push alerts.");
-    return;
-  }
-
-  for (let start = 0; start < devices.length; start += 500) {
-    const group = devices.slice(start, start + 500);
-    const result = await getMessaging().sendEachForMulticast({
-      tokens: group.map((device) => device.token),
-      notification: {
-        title: details.title,
-        body: details.message,
-      },
-      data: {
-        notificationId,
-        reportType,
-      },
-      apns: {
-        payload: {
-          aps: {
-            sound: "default",
-          },
-        },
-      },
-    });
-
-    const invalidReferences = [];
-    result.responses.forEach((response, index) => {
-      if (response.success) {
-        return;
-      }
-      const code = response.error?.code || "";
-      console.warn("Administrator push delivery failed", code);
-      if (code === "messaging/registration-token-not-registered" ||
-          code === "messaging/invalid-registration-token") {
-        invalidReferences.push(group[index].reference);
-      }
-    });
-
-    if (invalidReferences.length > 0) {
-      const cleanup = getFirestore().batch();
-      invalidReferences.forEach((reference) => cleanup.delete(reference));
-      await cleanup.commit();
-    }
-  }
-}
-
 async function createAdminNotification(event, reportType) {
   const snapshot = event.data;
   if (!snapshot) {
@@ -219,13 +148,6 @@ async function createAdminNotification(event, reportType) {
     readBy: [],
   }, {merge: false});
 
-  try {
-    await sendAdminPush(notificationId, reportType, details);
-  } catch (error) {
-    // The inbox notification remains available even when APNs/FCM has not yet
-    // been configured or a transient push-delivery error occurs.
-    console.error("Administrator push delivery failed", error);
-  }
 }
 
 exports.notifyChecklistSubmitted = onDocumentCreated(

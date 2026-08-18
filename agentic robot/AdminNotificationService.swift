@@ -2,9 +2,6 @@ import SwiftUI
 import Combine
 import FirebaseAuth
 import FirebaseFirestore
-import FirebaseMessaging
-import UserNotifications
-import UIKit
 
 enum AdminNotificationKind: String {
     case checklist
@@ -95,10 +92,6 @@ final class AdminNotificationService: ObservableObject {
 
     private var listener: ListenerRegistration?
     private var activeAdminUID: String?
-    private var pendingFCMToken: String?
-    private var pendingOpenedNotificationID: String?
-
-    private static let deviceIDKey = "htx.notificationDeviceID"
 
     private init() {}
 
@@ -113,33 +106,6 @@ final class AdminNotificationService: ObservableObject {
 
         activeAdminUID = uid
         startInboxListener(for: uid)
-        requestPushPermission()
-
-        if let pendingFCMToken {
-            saveDeviceToken(pendingFCMToken, for: uid)
-        } else {
-            Messaging.messaging().token { [weak self] token, error in
-                Task { @MainActor in
-                    if let error {
-                        print("Could not retrieve the Firebase messaging token: \(error.localizedDescription)")
-                        return
-                    }
-                    self?.receiveFCMToken(token)
-                }
-            }
-        }
-
-        if let pendingOpenedNotificationID {
-            self.pendingOpenedNotificationID = nil
-            markRead(notificationID: pendingOpenedNotificationID)
-        }
-    }
-
-    func receiveFCMToken(_ token: String?) {
-        guard let token, !token.isEmpty else { return }
-        pendingFCMToken = token
-        guard let activeAdminUID else { return }
-        saveDeviceToken(token, for: activeAdminUID)
     }
 
     func endSession() {
@@ -148,23 +114,7 @@ final class AdminNotificationService: ObservableObject {
         notifications = []
         unreadCount = 0
         loadingError = nil
-        updateAppBadge(0)
-
-        if let uid = activeAdminUID {
-            deviceTokenReference(uid: uid).delete { error in
-                if let error {
-                    print("Could not remove the notification device registration: \(error.localizedDescription)")
-                }
-            }
-        }
-
         activeAdminUID = nil
-        pendingFCMToken = nil
-        Messaging.messaging().deleteToken { error in
-            if let error {
-                print("Could not delete the Firebase messaging token: \(error.localizedDescription)")
-            }
-        }
     }
 
     func markRead(_ notification: AdminNotificationItem) {
@@ -172,10 +122,7 @@ final class AdminNotificationService: ObservableObject {
     }
 
     func markRead(notificationID: String) {
-        guard let uid = activeAdminUID, !notificationID.isEmpty else {
-            pendingOpenedNotificationID = notificationID
-            return
-        }
+        guard let uid = activeAdminUID, !notificationID.isEmpty else { return }
 
         Firestore.firestore()
             .collection("admin_notifications")
@@ -205,11 +152,6 @@ final class AdminNotificationService: ObservableObject {
         }
     }
 
-    func handleOpenedPush(userInfo: [AnyHashable: Any]) {
-        guard let notificationID = userInfo["notificationId"] as? String else { return }
-        markRead(notificationID: notificationID)
-    }
-
     private func startInboxListener(for uid: String) {
         listener?.remove()
         loadingError = nil
@@ -226,73 +168,14 @@ final class AdminNotificationService: ObservableObject {
                         self.notifications = []
                         self.unreadCount = 0
                         self.loadingError = "Could not load notifications: \(error.localizedDescription)"
-                        self.updateAppBadge(0)
                         return
                     }
 
                     self.loadingError = nil
                     self.notifications = (snapshot?.documents ?? []).compactMap(AdminNotificationItem.init)
                     self.unreadCount = self.notifications.filter { !$0.isRead(by: uid) }.count
-                    self.updateAppBadge(self.unreadCount)
                 }
             }
-    }
-
-    private func requestPushPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if let error {
-                print("Notification permission could not be requested: \(error.localizedDescription)")
-                return
-            }
-
-            guard granted else { return }
-            DispatchQueue.main.async {
-                UIApplication.shared.registerForRemoteNotifications()
-            }
-        }
-    }
-
-    private func saveDeviceToken(_ token: String, for uid: String) {
-        guard activeAdminUID == uid else { return }
-        deviceTokenReference(uid: uid).setData(
-            [
-                "token": token,
-                "platform": "ios",
-                "deviceName": UIDevice.current.name,
-                "bundleIdentifier": Bundle.main.bundleIdentifier ?? "",
-                "updatedAt": FieldValue.serverTimestamp()
-            ],
-            merge: true
-        ) { error in
-            if let error {
-                print("Could not save the notification device registration: \(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func deviceTokenReference(uid: String) -> DocumentReference {
-        Firestore.firestore()
-            .collection("users")
-            .document(uid)
-            .collection("deviceTokens")
-            .document(Self.deviceID)
-    }
-
-    private static var deviceID: String {
-        if let existing = UserDefaults.standard.string(forKey: deviceIDKey), !existing.isEmpty {
-            return existing
-        }
-        let value = UUID().uuidString.lowercased()
-        UserDefaults.standard.set(value, forKey: deviceIDKey)
-        return value
-    }
-
-    private func updateAppBadge(_ count: Int) {
-        if #available(iOS 16.0, *) {
-            UNUserNotificationCenter.current().setBadgeCount(count)
-        } else {
-            UIApplication.shared.applicationIconBadgeNumber = count
-        }
     }
 }
 
