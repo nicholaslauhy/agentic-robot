@@ -40,10 +40,10 @@ enum ChecklistAdminReviewStatus: String, Equatable {
 }
 
 private enum ChecklistReviewFilter: String, CaseIterable, Identifiable {
-    case pending = "Pending"
-    case escalation = "NP299 Required"
-    case completed = "No Escalation"
     case all = "All"
+    case pending = "Pending"
+    case escalation = "NP299"
+    case completed = "No Escalation"
 
     var id: String { rawValue }
 }
@@ -95,11 +95,15 @@ private struct LoadedAdminDamagePhoto: Identifiable {
 
 struct AdminChecklistReviewView: View {
     @State private var records: [AdminChecklistRecord] = []
-    @State private var selectedFilter: ChecklistReviewFilter = .pending
+    @State private var selectedFilter: ChecklistReviewFilter = .all
     @State private var selectedRecord: AdminChecklistRecord?
+    @State private var deletionCandidate: AdminChecklistRecord?
     @State private var searchText = ""
     @State private var isLoading = false
+    @State private var isDeleting = false
     @State private var errorMessage: String?
+    @State private var deletionFeedbackTitle = ""
+    @State private var deletionFeedbackMessage: String?
 
     private let accent = Color(red: 0.08, green: 0.50, blue: 0.30)
 
@@ -141,6 +145,15 @@ struct AdminChecklistReviewView: View {
                 searchBar
                 content
             }
+
+            if isDeleting {
+                Color.black.opacity(0.32).ignoresSafeArea()
+                ProgressView("Deleting checklist…")
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
         }
         .navigationTitle("Checklist Review")
         .navigationBarTitleDisplayMode(.inline)
@@ -151,6 +164,32 @@ struct AdminChecklistReviewView: View {
                 selectedRecord = nil
                 fetchChecklists()
             }
+        }
+        .alert(
+            "Delete Checklist?",
+            isPresented: Binding(
+                get: { deletionCandidate != nil },
+                set: { if !$0 { deletionCandidate = nil } }
+            ),
+            presenting: deletionCandidate
+        ) { record in
+            Button("Delete Permanently", role: .destructive) {
+                deleteChecklist(record)
+            }
+            Button("Cancel", role: .cancel) { deletionCandidate = nil }
+        } message: { record in
+            Text("\(record.reportNo) and its submitted damage images will be permanently deleted. This cannot be undone.")
+        }
+        .alert(
+            deletionFeedbackTitle,
+            isPresented: Binding(
+                get: { deletionFeedbackMessage != nil },
+                set: { if !$0 { deletionFeedbackMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { deletionFeedbackMessage = nil }
+        } message: {
+            Text(deletionFeedbackMessage ?? "")
         }
         .requiresRole(.admin)
     }
@@ -270,12 +309,27 @@ struct AdminChecklistReviewView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(filteredRecords) { record in
-                        Button {
-                            selectedRecord = record
-                        } label: {
-                            AdminChecklistRow(record: record, accent: accent)
+                        HStack(spacing: 9) {
+                            Button {
+                                selectedRecord = record
+                            } label: {
+                                AdminChecklistRow(record: record, accent: accent)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                deletionCandidate = record
+                            } label: {
+                                Image(systemName: "trash.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.red)
+                                    .frame(width: 44, height: 44)
+                                    .background(Color.red.opacity(0.09))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Delete \(record.reportNo)")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
@@ -328,6 +382,37 @@ struct AdminChecklistReviewView: View {
                     }
                 }
             }
+    }
+
+    private func deleteChecklist(_ record: AdminChecklistRecord) {
+        deletionCandidate = nil
+        isDeleting = true
+
+        var storagePaths = record.raw["damageImageStoragePaths"] as? [String] ?? []
+        let photos = record.raw["damagePhotos"] as? [[String: Any]] ?? []
+        storagePaths.append(contentsOf: photos.compactMap { $0["storagePath"] as? String })
+
+        ReportStore.deleteReport(
+            collection: "seccom_checklists",
+            documentID: record.id,
+            storagePaths: storagePaths
+        ) { result in
+            DispatchQueue.main.async {
+                isDeleting = false
+                switch result {
+                case .success(let deletionResult):
+                    records.removeAll { $0.id == record.id }
+                    if selectedRecord?.id == record.id { selectedRecord = nil }
+                    if !deletionResult.storagePathsNotDeleted.isEmpty {
+                        deletionFeedbackTitle = "Checklist Deleted with Warning"
+                        deletionFeedbackMessage = "The checklist was deleted, but \(deletionResult.storagePathsNotDeleted.count) image file\(deletionResult.storagePathsNotDeleted.count == 1 ? "" : "s") could not be removed. Check Firebase Storage permissions."
+                    }
+                case .failure(let error):
+                    deletionFeedbackTitle = "Could Not Delete Checklist"
+                    deletionFeedbackMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }
 
