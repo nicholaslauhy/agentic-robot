@@ -112,6 +112,18 @@ struct HomeView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
 
                             NavigationLink {
+                                AdminChecklistReviewView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "checklist.checked",
+                                    title: "Review Checklists",
+                                    subtitle: "Review damage and decide whether NP299 is required"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                            NavigationLink {
                                 ReportScannerView()
                             } label: {
                                 HomeActionRow(

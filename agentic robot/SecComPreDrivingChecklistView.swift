@@ -1088,6 +1088,7 @@ struct SecComPreDrivingChecklistView: View {
             "generatedBy":      name,
             "damageImageCount": damagePhotos.count,
             "detectionCount":   damagePhotos.reduce(0) { $0 + $1.confirmedRegions.count },
+            "adminReviewStatus": "pending",
             "createdAt":        FieldValue.serverTimestamp()
         ]
 
