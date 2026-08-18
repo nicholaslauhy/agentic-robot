@@ -22,8 +22,6 @@ struct MemberManagementView: View {
     @State private var listError: String? = nil
 
     // Account actions
-    @State private var memberToToggleStatus: MemberEntry? = nil
-    @State private var showStatusConfirm = false
     @State private var memberToPermanentlyDelete: MemberEntry? = nil
     @State private var isDeletingUser = false
     @State private var deletionFeedbackMessage: String? = nil
@@ -227,18 +225,6 @@ struct MemberManagementView: View {
                                                 .cornerRadius(8)
                                             }
 
-                                            // Deactivate / Reactivate button
-                                            Button {
-                                                memberToToggleStatus = member
-                                                showStatusConfirm = true
-                                            } label: {
-                                                Image(systemName: member.active ? "person.fill.xmark" : "person.fill.checkmark")
-                                                    .foregroundColor(member.active ? .orange : .green)
-                                                    .imageScale(.large)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .accessibilityLabel(member.active ? "Deactivate \(member.email)" : "Reactivate \(member.email)")
-
                                             // Permanent account deletion
                                             Button {
                                                 memberToPermanentlyDelete = member
@@ -280,26 +266,6 @@ struct MemberManagementView: View {
         .sheet(item: $memberToEdit) { member in
             usernameEditor(for: member)
                 .interactiveDismissDisabled(isSavingUsername)
-        }
-        // Deactivation / Reactivation confirmation alert
-        .alert(
-            memberToToggleStatus?.active == true
-            ? "Deactivate \(memberToToggleStatus?.email ?? "this user")?"
-            : "Reactivate \(memberToToggleStatus?.email ?? "this user")?",
-            isPresented: $showStatusConfirm,
-            presenting: memberToToggleStatus
-        ) { member in
-            Button(member.active ? "Deactivate" : "Reactivate",
-                   role: member.active ? .destructive : nil) {
-                toggleActiveStatus(member)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { member in
-            Text(
-                member.active
-                ? "This user will lose access to the application until reactivated."
-                : "This user will regain access to the application."
-            )
         }
         .alert(
             "Delete Account Permanently?",
@@ -420,26 +386,6 @@ struct MemberManagementView: View {
                     }
                     self.memberToEdit = nil
                     self.usernameDraft = ""
-                }
-            }
-    }
-
-    // MARK: - Toggle active status
-    private func toggleActiveStatus(_ member: MemberEntry) {
-        let newStatus = !member.active
-
-        Firestore.firestore()
-            .collection("users")
-            .document(member.id)
-            .updateData(["active": newStatus]) { err in
-                DispatchQueue.main.async {
-                    if let err {
-                        self.listError = err.localizedDescription
-                    } else {
-                        if let idx = self.members.firstIndex(where: { $0.id == member.id }) {
-                            self.members[idx].active = newStatus
-                        }
-                    }
                 }
             }
     }
