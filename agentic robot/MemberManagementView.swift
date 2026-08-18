@@ -21,9 +21,12 @@ struct MemberManagementView: View {
     @State private var isLoadingMembers = false
     @State private var listError: String? = nil
 
-    // Confirmation alert for deactivation/reactivation
-    @State private var memberToDelete: MemberEntry? = nil
-    @State private var showDeleteConfirm = false
+    // Account actions
+    @State private var memberToToggleStatus: MemberEntry? = nil
+    @State private var showStatusConfirm = false
+    @State private var memberToPermanentlyDelete: MemberEntry? = nil
+    @State private var isDeletingUser = false
+    @State private var deletionFeedbackMessage: String? = nil
 
     // Username editor
     @State private var memberToEdit: MemberEntry? = nil
@@ -226,14 +229,26 @@ struct MemberManagementView: View {
 
                                             // Deactivate / Reactivate button
                                             Button {
-                                                memberToDelete = member
-                                                showDeleteConfirm = true
+                                                memberToToggleStatus = member
+                                                showStatusConfirm = true
                                             } label: {
                                                 Image(systemName: member.active ? "person.fill.xmark" : "person.fill.checkmark")
-                                                    .foregroundColor(member.active ? .red : .green)
+                                                    .foregroundColor(member.active ? .orange : .green)
                                                     .imageScale(.large)
                                             }
                                             .buttonStyle(.plain)
+                                            .accessibilityLabel(member.active ? "Deactivate \(member.email)" : "Reactivate \(member.email)")
+
+                                            // Permanent account deletion
+                                            Button {
+                                                memberToPermanentlyDelete = member
+                                            } label: {
+                                                Image(systemName: "trash.fill")
+                                                    .foregroundColor(.red)
+                                                    .imageScale(.large)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Delete \(member.email) permanently")
                                         }
                                     }
                                     .padding(.vertical, 8)
@@ -249,6 +264,15 @@ struct MemberManagementView: View {
         }
         .groupBoxStyle(SubtleHTXGroupBoxStyle())
         .tint(HTXTheme.primaryPurple)
+
+        if isDeletingUser {
+            Color.black.opacity(0.32).ignoresSafeArea()
+            ProgressView("Deleting account…")
+                .padding(.horizontal, 24)
+                .padding(.vertical, 18)
+                .background(.regularMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
         }
         .navigationTitle("Manage Accounts")
         .navigationBarTitleDisplayMode(.inline)
@@ -259,11 +283,11 @@ struct MemberManagementView: View {
         }
         // Deactivation / Reactivation confirmation alert
         .alert(
-            memberToDelete?.active == true
-            ? "Deactivate \(memberToDelete?.email ?? "this user")?"
-            : "Reactivate \(memberToDelete?.email ?? "this user")?",
-            isPresented: $showDeleteConfirm,
-            presenting: memberToDelete
+            memberToToggleStatus?.active == true
+            ? "Deactivate \(memberToToggleStatus?.email ?? "this user")?"
+            : "Reactivate \(memberToToggleStatus?.email ?? "this user")?",
+            isPresented: $showStatusConfirm,
+            presenting: memberToToggleStatus
         ) { member in
             Button(member.active ? "Deactivate" : "Reactivate",
                    role: member.active ? .destructive : nil) {
@@ -276,6 +300,32 @@ struct MemberManagementView: View {
                 ? "This user will lose access to the application until reactivated."
                 : "This user will regain access to the application."
             )
+        }
+        .alert(
+            "Delete Account Permanently?",
+            isPresented: Binding(
+                get: { memberToPermanentlyDelete != nil },
+                set: { if !$0 { memberToPermanentlyDelete = nil } }
+            ),
+            presenting: memberToPermanentlyDelete
+        ) { member in
+            Button("Delete Permanently", role: .destructive) {
+                deleteUser(member)
+            }
+            Button("Cancel", role: .cancel) { memberToPermanentlyDelete = nil }
+        } message: { member in
+            Text("This permanently deletes \(member.email) from Firebase Authentication and the account list. Existing submitted reports are kept as audit records and can be deleted separately by an administrator.")
+        }
+        .alert(
+            "Could Not Delete Account",
+            isPresented: Binding(
+                get: { deletionFeedbackMessage != nil },
+                set: { if !$0 { deletionFeedbackMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { deletionFeedbackMessage = nil }
+        } message: {
+            Text(deletionFeedbackMessage ?? "")
         }
         .requiresRole(.admin)
     }
@@ -392,6 +442,30 @@ struct MemberManagementView: View {
                     }
                 }
             }
+    }
+
+    // MARK: - Permanently delete account
+    private func deleteUser(_ member: MemberEntry) {
+        guard member.id != auth.user?.uid else {
+            deletionFeedbackMessage = "You cannot delete the account you are currently using."
+            return
+        }
+
+        memberToPermanentlyDelete = nil
+        isDeletingUser = true
+        listError = nil
+
+        FirebaseAdminService.deleteUser(uid: member.id) { result in
+            DispatchQueue.main.async {
+                isDeletingUser = false
+                switch result {
+                case .success:
+                    members.removeAll { $0.id == member.id }
+                case .failure(let error):
+                    deletionFeedbackMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     // MARK: - Add member via REST (keeps admin session intact)
