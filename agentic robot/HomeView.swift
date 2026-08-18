@@ -21,112 +21,112 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            SubtleHTXBackground()
+            SubtleHTXBackground().ignoresSafeArea()
 
-            VStack(spacing: 24) {
+            ScrollView {
+                VStack(spacing: 24) {
 
-                // MARK: - Header
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(auth.hasUsername ? "Welcome, \(auth.currentUsername)" : "Welcome")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundColor(HTXTheme.primaryPurple)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                    // MARK: - Header
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(auth.hasUsername ? "Welcome, \(auth.currentUsername)" : "Welcome")
+                                .font(.largeTitle.weight(.bold))
+                                .foregroundColor(HTXTheme.primaryPurple)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
 
-                        Text(auth.isAdmin ? "Administrator" : "Member")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundColor(.secondary)
-                    }
+                            Text(auth.isAdmin ? "Administrator" : "Member")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundColor(.secondary)
+                        }
 
-                    Spacer()
+                        Spacer()
 
-                    HStack(spacing: 12) {
-                        if auth.isAdmin {
-                            NavigationLink {
-                                AdminNotificationsView()
-                            } label: {
-                                ZStack(alignment: .topTrailing) {
-                                    Image(systemName: "bell.fill")
-                                        .font(.headline)
-                                        .foregroundColor(HTXTheme.primaryPurple)
-                                        .frame(width: 38, height: 38)
-                                        .background(HTXTheme.primaryPurple.opacity(0.09))
-                                        .clipShape(Circle())
+                        HStack(spacing: 12) {
+                            if auth.isAdmin {
+                                NavigationLink {
+                                    AdminNotificationsView()
+                                } label: {
+                                    ZStack(alignment: .topTrailing) {
+                                        Image(systemName: "bell.fill")
+                                            .font(.headline)
+                                            .foregroundColor(HTXTheme.primaryPurple)
+                                            .frame(width: 38, height: 38)
+                                            .background(HTXTheme.primaryPurple.opacity(0.09))
+                                            .clipShape(Circle())
 
-                                    if notificationService.unreadCount > 0 {
-                                        Text(notificationService.unreadCount > 99 ? "99+" : "\(notificationService.unreadCount)")
-                                            .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 5)
-                                            .frame(minWidth: 18, minHeight: 18)
-                                            .background(Color.red)
-                                            .clipShape(Capsule())
-                                            .offset(x: 4, y: -3)
+                                        if notificationService.unreadCount > 0 {
+                                            Text(notificationService.unreadCount > 99 ? "99+" : "\(notificationService.unreadCount)")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 5)
+                                                .frame(minWidth: 18, minHeight: 18)
+                                                .background(Color.red)
+                                                .clipShape(Capsule())
+                                                .offset(x: 4, y: -3)
+                                        }
                                     }
                                 }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Notifications, \(notificationService.unreadCount) unread")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Notifications, \(notificationService.unreadCount) unread")
-                        }
 
-                        Button("Logout") {
-                            auth.logout()
+                            Button("Logout") {
+                                auth.logout()
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(.red)
                         }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundColor(.red)
                     }
-                }
-                .padding(.horizontal)
-                .padding(.top)
-
-                if !auth.hasUsername {
-                    HStack(spacing: 10) {
-                        Image(systemName: "person.crop.circle.badge.exclamationmark")
-                            .foregroundColor(.orange)
-                        Text(
-                            auth.isAdmin
-                            ? "Your username has not been set. Add it in Manage Accounts before submitting a form."
-                            : "Your username has not been set. Ask an administrator to update your account before submitting a form."
-                        )
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(12)
-                    .background(Color.orange.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal)
-                }
+                    .padding(.top)
 
-                Spacer()
-
-                // MARK: - Typewriter
-                VStack(spacing: 12) {
-                    Image(systemName: "shield.lefthalf.filled")
-                        .font(.system(size: 42, weight: .semibold))
-                        .foregroundColor(HTXTheme.primaryPurple)
-                        .padding(.bottom, 4)
-
-                    Text(displayedText)
-                        .font(.title2.weight(.bold))
-                        .foregroundColor(.primary)
-                        .multilineTextAlignment(.center)
-                        .frame(minHeight: 34)
+                    if !auth.hasUsername {
+                        HStack(spacing: 10) {
+                            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                                .foregroundColor(.orange)
+                            Text(
+                                auth.isAdmin
+                                ? "Your username has not been set. Add it in Manage Accounts before submitting a form."
+                                : "Your username has not been set. Ask an administrator to update your account before submitting a form."
+                            )
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                        .background(Color.orange.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .padding(.horizontal)
-
-                    if showSubtitle {
-                        Text("Choose an action below to continue.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                }
-                .padding(.horizontal)
 
-                // MARK: - Action Buttons
-                if showButtons && !auth.isLoadingRole {
-                    VStack(spacing: 14) {
+                    // MARK: - Typewriter
+                    VStack(spacing: 12) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 42, weight: .semibold))
+                            .foregroundColor(HTXTheme.primaryPurple)
+                            .padding(.bottom, 4)
+
+                        Text(displayedText)
+                            .font(.title2.weight(.bold))
+                            .foregroundColor(.primary)
+                            .multilineTextAlignment(.center)
+                            .frame(minHeight: 34)
+                            .padding(.horizontal)
+
+                        if showSubtitle {
+                            Text("Choose an action below to continue.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 16)
+
+                    // MARK: - Action Buttons
+                    if showButtons && !auth.isLoadingRole {
+                        VStack(spacing: 14) {
 
                         if auth.isAdmin {
                             // Administrator actions
@@ -161,6 +161,18 @@ struct HomeView: View {
                                     icon: "fuelpump.circle.fill",
                                     title: "Refuel Follow-up",
                                     subtitle: "Review and complete submitted refuel forms"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                            NavigationLink {
+                                AdminVehicleManagementView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "car.2.fill",
+                                    title: "Vehicle Management",
+                                    subtitle: "Update vehicle status and review vehicle history"
                                 )
                             }
                             .buttonStyle(.plain)
@@ -202,12 +214,15 @@ struct HomeView: View {
                                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                             }
                         }
+                        }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
-                }
 
-                Spacer()
+                    Spacer(minLength: 28)
+                }
+                .padding(.bottom, 24)
             }
+            .scrollIndicators(.hidden)
         }
         .navigationBarBackButtonHidden(true)
         .tint(HTXTheme.primaryPurple)
