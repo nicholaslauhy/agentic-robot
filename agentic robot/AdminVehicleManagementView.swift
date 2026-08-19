@@ -1099,12 +1099,22 @@ private struct VehicleManagementDetailView: View {
                         let data = document.data()
                         let status = VehicleOperationalStatus(firestoreValue: data["newStatus"])
                         let changedBy = data["changedByName"] as? String ?? "Administrator"
+                        let notes = (data["notes"] as? String ?? "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let reportNo = (data["reportNo"] as? String ?? "")
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let detail = [
+                            reportNo.isEmpty ? nil : "Linked to NP299 \(reportNo)",
+                            notes.isEmpty ? nil : notes
+                        ]
+                        .compactMap { $0 }
+                        .joined(separator: " · ")
                         return VehicleHistoryItem(
                             id: "status-\(document.documentID)",
                             category: .status,
                             title: status.title,
                             subtitle: "Updated by \(changedBy)",
-                            detail: data["notes"] as? String ?? "",
+                            detail: detail,
                             createdAt: (data["changedAt"] as? Timestamp)?.dateValue(),
                             report: nil
                         )
