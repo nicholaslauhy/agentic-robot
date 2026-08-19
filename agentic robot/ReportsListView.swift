@@ -57,6 +57,7 @@ private struct PendingReportDeletion: Identifiable {
 
 // MARK: - Reports List View
 struct ReportsListView: View {
+    private let initialReportID: String?
 
     @State private var selectedCategory: ReportCategory = .np299
 
@@ -74,6 +75,11 @@ struct ReportsListView: View {
     @State private var isDeleting = false
     @State private var deletionFeedbackTitle = ""
     @State private var deletionFeedbackMessage: String? = nil
+    @State private var didHandleInitialReport = false
+
+    init(initialReportID: String? = nil) {
+        self.initialReportID = initialReportID
+    }
 
     private var activeDocs: [RawReportDocument] {
         switch selectedCategory {
@@ -305,7 +311,25 @@ struct ReportsListView: View {
         group.enter()
         fetchCollection("fuel_refuel_reports") { fuelDocs = $0; group.leave() }
 
-        group.notify(queue: .main) { isLoading = false }
+        group.notify(queue: .main) {
+            isLoading = false
+            openInitialReportIfNeeded()
+        }
+    }
+
+    private func openInitialReportIfNeeded() {
+        guard !didHandleInitialReport,
+              let initialReportID,
+              !initialReportID.isEmpty else { return }
+
+        didHandleInitialReport = true
+        selectedCategory = .np299
+        if let report = np299Docs.first(where: { $0.id == initialReportID }) {
+            selectedDoc = report
+        } else {
+            deletionFeedbackTitle = "Report Unavailable"
+            deletionFeedbackMessage = "This NP299 report may have been deleted or is no longer available."
+        }
     }
 
     private func fetchCollection(_ collection: String, completion: @escaping ([RawReportDocument]) -> Void) {

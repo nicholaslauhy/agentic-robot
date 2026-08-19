@@ -18,9 +18,9 @@ enum AdminNotificationKind: String {
 
     var destinationTitle: String {
         switch self {
-        case .checklist: return "Open pre-driving follow-up"
-        case .refuel: return "Open refuel follow-up"
-        case .np299: return "Open existing reports"
+        case .checklist: return "Open submitted checklist"
+        case .refuel: return "Open submitted refuel report"
+        case .np299: return "Open NP299 report"
         }
     }
 
@@ -356,13 +356,15 @@ struct AdminNotificationsView: View {
 
     @ViewBuilder
     private func destination(for notification: AdminNotificationItem) -> some View {
+        let reportID = notification.reportID.isEmpty ? nil : notification.reportID
+
         switch notification.kind {
         case .checklist:
-            AdminChecklistReviewView()
+            AdminChecklistReviewView(initialReportID: reportID)
         case .refuel:
-            AdminFuelFollowUpView()
+            AdminFuelFollowUpView(initialReportID: reportID)
         case .np299:
-            ReportsListView()
+            ReportsListView(initialReportID: reportID)
         }
     }
 }

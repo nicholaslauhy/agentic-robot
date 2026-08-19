@@ -121,6 +121,8 @@ private struct ChecklistNP299Payload: Identifiable {
 // MARK: - Admin Queue
 
 struct AdminChecklistReviewView: View {
+    private let initialReportID: String?
+
     @State private var records: [AdminChecklistRecord] = []
     @State private var selectedFilter: ChecklistReviewFilter = .all
     @State private var selectedRecord: AdminChecklistRecord?
@@ -131,8 +133,13 @@ struct AdminChecklistReviewView: View {
     @State private var errorMessage: String?
     @State private var deletionFeedbackTitle = ""
     @State private var deletionFeedbackMessage: String?
+    @State private var didHandleInitialReport = false
 
     private let accent = Color(red: 0.08, green: 0.50, blue: 0.30)
+
+    init(initialReportID: String? = nil) {
+        self.initialReportID = initialReportID
+    }
 
     private var filteredRecords: [AdminChecklistRecord] {
         records.filter { record in
@@ -410,8 +417,23 @@ struct AdminChecklistReviewView: View {
                             raw: data
                         )
                     }
+                    openInitialReportIfNeeded()
                 }
             }
+    }
+
+    private func openInitialReportIfNeeded() {
+        guard !didHandleInitialReport,
+              let initialReportID,
+              !initialReportID.isEmpty else { return }
+
+        didHandleInitialReport = true
+        if let record = records.first(where: { $0.id == initialReportID }) {
+            selectedRecord = record
+        } else {
+            deletionFeedbackTitle = "Checklist Unavailable"
+            deletionFeedbackMessage = "This pre-driving checklist may have been deleted or is no longer available."
+        }
     }
 
     private func deleteChecklist(_ record: AdminChecklistRecord) {
