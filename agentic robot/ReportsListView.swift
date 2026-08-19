@@ -648,39 +648,37 @@ struct SecComDetailSheet: View {
                             accent: accent
                         )
 
-                        if adminReviewStatus != .pending {
-                            sectionCard(
-                                title: "Administrator Review",
-                                icon: adminReviewStatus.icon,
-                                accent: adminReviewStatus.color
-                            ) {
-                                StatusDetailRow(
-                                    label: "Decision",
-                                    value: adminReviewStatus.title,
-                                    systemImage: adminReviewStatus.icon,
-                                    tint: adminReviewStatus.color
-                                )
+                        sectionCard(
+                            title: "Officer Review",
+                            icon: adminReviewStatus.icon,
+                            accent: adminReviewStatus.color
+                        ) {
+                            StatusDetailRow(
+                                label: "Decision",
+                                value: adminReviewStatus.title,
+                                systemImage: adminReviewStatus.icon,
+                                tint: adminReviewStatus.color
+                            )
 
-                                if !adminReviewedByName.isEmpty {
-                                    Divider().padding(.leading, 16)
-                                    DetailRow(label: "Reviewed By", value: adminReviewedByName)
-                                }
+                            if !adminReviewedByName.isEmpty {
+                                Divider().padding(.leading, 16)
+                                DetailRow(label: "Reviewed By", value: adminReviewedByName)
+                            }
 
-                                if let adminReviewedAt {
-                                    Divider().padding(.leading, 16)
-                                    DetailRow(
-                                        label: "Reviewed On",
-                                        value: adminReviewedAt.formatted(
-                                            date: .abbreviated,
-                                            time: .shortened
-                                        )
+                            if let adminReviewedAt {
+                                Divider().padding(.leading, 16)
+                                DetailRow(
+                                    label: "Reviewed On",
+                                    value: adminReviewedAt.formatted(
+                                        date: .abbreviated,
+                                        time: .shortened
                                     )
-                                }
+                                )
+                            }
 
-                                if !adminReviewNotes.isEmpty {
-                                    Divider().padding(.leading, 16)
-                                    DetailRow(label: "Review Notes", value: adminReviewNotes)
-                                }
+                            if !adminReviewNotes.isEmpty {
+                                Divider().padding(.leading, 16)
+                                DetailRow(label: "Officer Notes", value: adminReviewNotes)
                             }
                         }
 
@@ -1186,7 +1184,7 @@ struct FuelDetailSheet: View {
 
                     if !followUpNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Follow-up Notes")
+                            Text("Officer Notes")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.primary)
                             Text(followUpNotes)

@@ -16,7 +16,7 @@ struct HomeView: View {
     private var fullText: String {
         auth.isAdmin
         ? "What would you like to manage?"
-        : "What report would you like to submit?"
+        : "What would you like to view or submit?"
     }
 
     var body: some View {
@@ -202,7 +202,19 @@ struct HomeView: View {
                             .buttonStyle(.plain)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         } else {
-                            // Member report forms
+                            // Member report history and forms
+                            NavigationLink {
+                                MemberReportsView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "folder.badge.person.crop",
+                                    title: "My Reports",
+                                    subtitle: "Track your submissions, decisions and officer notes"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
                             ForEach(ReportType.allCases) { type in
                                 ReportTypeCard(type: type) {
                                     switch type {
