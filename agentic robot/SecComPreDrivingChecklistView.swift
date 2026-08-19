@@ -168,6 +168,14 @@ private enum ChecklistDamageProcessingStage: Equatable {
     case damageAnalysis
 }
 
+private enum SecComFormField: Hashable {
+    case workContact
+    case otherPlate
+    case otherCarType
+    case mileage
+    case purpose
+}
+
 // MARK: - Main Form View
 
 struct SecComPreDrivingChecklistView: View {
@@ -181,6 +189,7 @@ struct SecComPreDrivingChecklistView: View {
     @State private var date: Date = Date()
     @State private var time: Date = Date()
     @State private var workContact: String = ""
+    @FocusState private var focusedFormField: SecComFormField?
 
     // Vehicle picker
     @State private var useOtherVehicle: Bool = false
@@ -324,13 +333,17 @@ struct SecComPreDrivingChecklistView: View {
                             TextField("Contact number", text: $workContact)
                                 .keyboardType(.phonePad)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focusedFormField, equals: .workContact)
                         }
                     }
 
                     sectionCard(title: "Vehicle", icon: "car.fill") {
                         // Dropdown trigger
                         Button {
-                            showVehiclePicker = true
+                            dismissFormKeyboard()
+                            DispatchQueue.main.async {
+                                showVehiclePicker = true
+                            }
                         } label: {
                             HStack {
                                 HTXFieldLabel(text: "Vehicle Number", required: true)
@@ -362,12 +375,14 @@ struct SecComPreDrivingChecklistView: View {
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
+                                    .focused($focusedFormField, equals: .otherPlate)
                             }
                             Divider()
                             formRow(label: "Car Type", required: true) {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
+                                    .focused($focusedFormField, equals: .otherCarType)
                             }
                         }
 
@@ -376,12 +391,14 @@ struct SecComPreDrivingChecklistView: View {
                             TextField("Numbers only, e.g. 12345", text: $mileage)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focusedFormField, equals: .mileage)
                         }
                         Divider()
                         formRow(label: "Purpose", required: true) {
                             TextField("Reason for trip", text: $purpose)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
+                                .focused($focusedFormField, equals: .purpose)
                         }
                     }
 
@@ -571,7 +588,7 @@ struct SecComPreDrivingChecklistView: View {
         .navigationBarTitleDisplayMode(.inline)
         .tint(HTXTheme.primaryPurple)
         // Vehicle picker sheet
-        .sheet(isPresented: $showVehiclePicker) {
+        .sheet(isPresented: $showVehiclePicker, onDismiss: dismissFormKeyboard) {
             VehiclePickerSheet(
                 selectedGroup: $selectedGroup,
                 selectedPlate: $selectedPlate,
@@ -723,6 +740,11 @@ struct SecComPreDrivingChecklistView: View {
         } message: {
             Text(damageAnalysisError ?? "Please try again.")
         }
+    }
+
+    private func dismissFormKeyboard() {
+        focusedFormField = nil
+        UIApplication.shared.endEditing()
     }
 
     // MARK: - Helpers
