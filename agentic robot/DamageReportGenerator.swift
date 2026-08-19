@@ -230,6 +230,14 @@ struct DamageReportGenerator {
                     return angleName
                 }
 
+                func cleanSeverity(_ severity: String) -> String {
+                    let value = severity.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !value.isEmpty, value.lowercased() != "unassessed" else {
+                        return "Not assessed"
+                    }
+                    return value.replacingOccurrences(of: "_", with: " ").capitalized
+                }
+
                 func pluralize(_ word: String, count: Int) -> String {
                     if count == 1 { return word.lowercased() }
                     switch word.lowercased() {
@@ -623,7 +631,12 @@ struct DamageReportGenerator {
                         let damageType = cleanDamageType(detection.damageType)
                         let angleName = cleanAngleName(detection.angleName)
                         let confidence = "\(Int(detection.confidence * 100))%"
-                        let caseText = "Damage Type: \(damageType)\nVehicle Angle: \(angleName)\nConfidence: \(confidence)\nAI Analysis: \(valueOrBlank(detection.explanation, fallback: "No extra AI explanation provided."))"
+                        let severity = cleanSeverity(detection.severity)
+                        let description = valueOrBlank(
+                            detection.explanation,
+                            fallback: "No detailed AI description is available for this damage."
+                        )
+                        let caseText = "Damage Type: \(damageType)\nVehicle Angle: \(angleName)\nConfidence: \(confidence)\nSeverity: \(severity)\nAI Description: \(description)"
                         drawString(caseText, in: CGRect(x: left + 8, y: y + 26, width: 250, height: 118), font: .systemFont(ofSize: 8.6))
 
                         if let contextImage = detection.normalizedBBox == nil ? detection.contextImage : (detection.cleanContextImage ?? detection.contextImage) {

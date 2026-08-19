@@ -97,6 +97,7 @@ struct ChecklistDamageRegion: Identifiable {
     var cropImage: UIImage?
     var explanation: String
     var isManuallyAdded: Bool
+    var severity: String
 
     init(
         id: UUID = UUID(),
@@ -105,7 +106,8 @@ struct ChecklistDamageRegion: Identifiable {
         normalizedBBox: CGRect?,
         cropImage: UIImage?,
         explanation: String,
-        isManuallyAdded: Bool
+        isManuallyAdded: Bool,
+        severity: String = "unassessed"
     ) {
         self.id = id
         self.damageType = damageType
@@ -114,6 +116,7 @@ struct ChecklistDamageRegion: Identifiable {
         self.cropImage = cropImage
         self.explanation = explanation
         self.isManuallyAdded = isManuallyAdded
+        self.severity = severity
     }
 
     init(detection: DamageDetection, sourceImage: UIImage) {
@@ -148,7 +151,8 @@ struct ChecklistDamageRegion: Identifiable {
             normalizedBBox: box,
             cropImage: detection.cropImage,
             explanation: detection.explanation,
-            isManuallyAdded: false
+            isManuallyAdded: false,
+            severity: detection.severity
         )
     }
 }
@@ -1198,6 +1202,7 @@ struct SecComPreDrivingChecklistView: View {
                                 "damageType": region.damageType,
                                 "confidence": region.confidence,
                                 "explanation": region.explanation,
+                                "severity": region.severity,
                                 "source": region.isManuallyAdded ? "manual" : "ai_confirmed"
                             ]
                             if let box = region.normalizedBBox {
@@ -1639,6 +1644,14 @@ private struct ChecklistDamageReviewView: View {
                          : "AI confidence: \(Int((candidate.region.confidence * 100).rounded()))%")
                         .font(.caption)
                         .foregroundColor(.secondary)
+
+                    if !candidate.region.isManuallyAdded,
+                       !candidate.region.severity.isEmpty,
+                       candidate.region.severity.lowercased() != "unassessed" {
+                        Text("Severity: \(candidate.region.severity.capitalized)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                    }
 
                     if !candidate.region.explanation.isEmpty {
                         Text(candidate.region.explanation)

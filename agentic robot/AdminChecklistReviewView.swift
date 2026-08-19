@@ -90,6 +90,7 @@ private struct AdminDamageRegion: Identifiable {
     let confidence: Double
     let source: String
     let explanation: String
+    let severity: String
     let normalizedBBox: CGRect?
 
     var sourceLabel: String {
@@ -778,6 +779,12 @@ private struct AdminChecklistReviewDetail: View {
                                             Text(region.sourceLabel)
                                                 .font(.caption)
                                                 .foregroundColor(.secondary)
+                                            if !region.severity.isEmpty,
+                                               region.severity.lowercased() != "unassessed" {
+                                                Text("Severity: \(region.severity.capitalized)")
+                                                    .font(.caption.weight(.semibold))
+                                                    .foregroundColor(.secondary)
+                                            }
                                         }
                                         Spacer()
                                         if region.source != "manual" {
@@ -1039,7 +1046,8 @@ private struct AdminChecklistReviewDetail: View {
                     isBaseline: false,
                     explanation: region.explanation.isEmpty
                         ? "\(region.damageType.capitalized) confirmed from the pre-driving checklist."
-                        : region.explanation
+                        : region.explanation,
+                    severity: region.severity
                 )
             }
         }
@@ -1195,6 +1203,7 @@ private struct AdminChecklistReviewDetail: View {
             confidence: number(raw["confidence"]) ?? 1,
             source: raw["source"] as? String ?? "ai_confirmed",
             explanation: raw["explanation"] as? String ?? "",
+            severity: raw["severity"] as? String ?? "unassessed",
             normalizedBBox: box
         )
     }

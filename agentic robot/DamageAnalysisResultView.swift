@@ -194,7 +194,8 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         cleanContextImage: UIImage?,
         normalizedBBox: CGRect?,
         isBaseline: Bool = false,
-        explanation: String = ""
+        explanation: String = "",
+        severity: String = "unassessed"
     ) {
         self.id                    = UUID()
         self.angleIndex            = angleIndex
@@ -215,7 +216,7 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         self.isBaseline            = isBaseline
         self.isVerifiedDamage      = true
         self.vlmDamageType         = damageType
-        self.severity              = ""
+        self.severity              = severity
         self.repairRecommendation  = ""
         self.repairComplexity      = ""
         self.likelyFalsePositive   = false
