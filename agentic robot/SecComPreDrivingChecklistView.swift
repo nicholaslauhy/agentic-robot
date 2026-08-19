@@ -1412,6 +1412,7 @@ private struct ChecklistDamageReviewView: View {
     @State private var candidates: [ChecklistDamageCandidate]
     @State private var showManualEditor = false
     @State private var showCancelConfirmation = false
+    @State private var showZoomedReviewImage = false
 
     init(
         session: ChecklistDamageReviewSession,
@@ -1461,6 +1462,22 @@ private struct ChecklistDamageReviewView: View {
                         .frame(height: 330)
                         .background(Color.black.opacity(0.04))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(alignment: .bottomTrailing) {
+                            Label("Tap to zoom", systemImage: "magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.black.opacity(0.62), in: Capsule())
+                                .padding(10)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            showZoomedReviewImage = true
+                        }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("Open damage image")
+                        .accessibilityHint("Opens a full-screen image that can be zoomed and panned")
                         .padding(.horizontal)
 
                         if !session.existingRegions.isEmpty {
@@ -1564,15 +1581,18 @@ private struct ChecklistDamageReviewView: View {
                     candidates.append(ChecklistDamageCandidate(region: region, decision: .confirmed))
                 }
             }
-            .confirmationDialog(
-                "Discard this damage photo?",
-                isPresented: $showCancelConfirmation,
-                titleVisibility: .visible
-            ) {
+            .fullScreenCover(isPresented: $showZoomedReviewImage) {
+                ChecklistDamageReviewImageViewer(
+                    image: session.image,
+                    regions: visibleRegions,
+                    existingRegions: session.existingRegions
+                )
+            }
+            .alert("Discard This Photo?", isPresented: $showCancelConfirmation) {
                 Button("Discard Photo", role: .destructive, action: onCancel)
-                Button("Continue Reviewing", role: .cancel) {}
+                Button("Keep Reviewing", role: .cancel) {}
             } message: {
-                Text("The photo and your damage decisions will not be attached to the checklist.")
+                Text("If you cancel now, this photo and all damage selections or manually drawn areas for it will not be added to the checklist.")
             }
         }
     }
@@ -1693,6 +1713,119 @@ private struct ChecklistDamageReviewView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ChecklistDamageReviewImageViewer: View {
+    let image: UIImage
+    let regions: [ChecklistDamageRegion]
+    let existingRegions: [ChecklistDamageRegion]
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var previousScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var previousOffset: CGSize = .zero
+
+    private let maximumScale: CGFloat = 6
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            GeometryReader { geometry in
+                ChecklistDamageAnnotatedImage(
+                    image: image,
+                    regions: regions,
+                    existingRegions: existingRegions,
+                    showLabels: true
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .scaleEffect(scale)
+                .offset(offset)
+                .contentShape(Rectangle())
+                .gesture(
+                    SimultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                scale = min(max(previousScale * value, 1), maximumScale)
+                                if scale == 1 { offset = .zero }
+                            }
+                            .onEnded { _ in
+                                previousScale = scale
+                                if scale == 1 { resetZoom() }
+                            },
+                        DragGesture()
+                            .onChanged { value in
+                                guard scale > 1 else { return }
+                                offset = CGSize(
+                                    width: previousOffset.width + value.translation.width,
+                                    height: previousOffset.height + value.translation.height
+                                )
+                            }
+                            .onEnded { _ in
+                                previousOffset = offset
+                            }
+                    )
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        if scale > 1 {
+                            resetZoom()
+                        } else {
+                            scale = 2.5
+                            previousScale = 2.5
+                        }
+                    }
+                }
+            }
+
+            VStack(spacing: 12) {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.black.opacity(0.62), in: Circle())
+                    }
+                    .accessibilityLabel("Close image")
+
+                    Spacer()
+
+                    Text("Pinch to zoom · Drag to move")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.62), in: Capsule())
+                }
+
+                Spacer()
+
+                HStack(spacing: 16) {
+                    Label("Existing baseline", systemImage: "square")
+                        .foregroundColor(HTXTheme.primaryPurple)
+                    Label("New suggestion", systemImage: "square")
+                        .foregroundColor(.orange)
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding()
+        }
+        .statusBarHidden(true)
+    }
+
+    private func resetZoom() {
+        scale = 1
+        previousScale = 1
+        offset = .zero
+        previousOffset = .zero
     }
 }
 
