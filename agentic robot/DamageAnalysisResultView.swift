@@ -2339,10 +2339,14 @@ struct ReportWelcomeView: View {
     let carType: CarType
     let detectionCount: Int
     let pdfURL: URL
+    let reportID: String
+    let reportNo: String
+    let sourceChecklistID: String?
     var onLogout: () -> Void
     var onBackToActivityList: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var auth: AuthViewModel
 
     /// Controls whether we show the summary tab or the PDF preview tab.
     @State private var showingPreview = false
@@ -2411,6 +2415,17 @@ struct ReportWelcomeView: View {
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 40)
+
+                            if auth.isAdmin {
+                                PostReportVehicleStatusView(
+                                    plate: plate,
+                                    carType: carType.rawValue,
+                                    reportID: reportID,
+                                    reportNo: reportNo,
+                                    sourceChecklistID: sourceChecklistID
+                                )
+                                .padding(.horizontal, 40)
+                            }
 
                             Spacer(minLength: 20)
 
@@ -3492,6 +3507,8 @@ struct PoliceReportStageTwoView: View {
     @State private var informantSignatureImage: UIImage? = nil
     @State private var showReportReview = false
     @State private var showRequiredFieldErrors = false
+    @State private var generatedReportID = ""
+    @State private var generatedReportNo = ""
 
     private var validationIssues: [String] {
         var issues: [String] = []
@@ -3610,6 +3627,9 @@ struct PoliceReportStageTwoView: View {
                 carType: carType,
                 detectionCount: detections.filter { !$0.isBaseline }.count,
                 pdfURL: url,
+                reportID: generatedReportID,
+                reportNo: generatedReportNo,
+                sourceChecklistID: escalationContext?.checklistID,
                 onLogout: {
                     pdfURL = nil
                     isPresented = false
@@ -3750,6 +3770,8 @@ struct PoliceReportStageTwoView: View {
         guard !isGeneratingReport else { return }
         isGeneratingReport = true
         pdfURL = nil
+        generatedReportID = ""
+        generatedReportNo = ""
 
         let finalStageTwo = finalizedStageTwoDetails()
 
@@ -3808,6 +3830,8 @@ struct PoliceReportStageTwoView: View {
             await MainActor.run {
                 isGeneratingReport = false
                 if let url {
+                    generatedReportID = numericBarcodeId
+                    generatedReportNo = reportNo
                     ReportStore.saveReport(
                         reportNo: reportNo,
                         plate: plate,
