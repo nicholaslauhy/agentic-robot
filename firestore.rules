@@ -98,7 +98,11 @@ service cloud.firestore {
           "adminReviewedAt",
           "np299ReportId",
           "np299ReportNo",
-          "np299GeneratedAt"
+          "np299GeneratedAt",
+          "baselineUpdateStatus",
+          "baselineUpdatedAngles",
+          "baselineUpdatedAt",
+          "baselineUpdateError"
         ])
         && request.resource.data.get("adminReviewStatus", "pending")
           in ["pending", "escalation_required", "no_escalation"]

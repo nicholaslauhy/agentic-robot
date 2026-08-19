@@ -827,23 +827,27 @@ private struct VehicleManagementDetailView: View {
                         .foregroundColor(.green)
                 }
 
-                Button(action: saveStatus) {
-                    if isSavingStatus {
-                        ProgressView()
-                            .tint(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                    } else {
-                        Label("Update Vehicle Status", systemImage: "checkmark.circle.fill")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                HStack {
+                    Spacer()
+                    Button(action: saveStatus) {
+                        HStack(spacing: 8) {
+                            if isSavingStatus {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "checkmark.circle.fill")
+                            }
+                            Text(isSavingStatus ? "Updating…" : "Update Vehicle Status")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 18)
+                        .frame(height: 42)
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(HTXTheme.primaryPurple)
+                    .disabled(isSavingStatus || !hasStatusChanges)
+                    Spacer()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(HTXTheme.primaryPurple)
-                .controlSize(.large)
-                .disabled(isSavingStatus || !hasStatusChanges)
 
                 if !vehicle.updatedBy.isEmpty || vehicle.updatedAt != nil {
                     Divider()

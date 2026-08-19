@@ -3779,21 +3779,16 @@ struct PoliceReportStageTwoView: View {
         let escalationContext = escalationContext
 
         Task(priority: .userInitiated) {
-            do {
-                if escalationContext != nil {
-                    try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
-                        plate: plate,
-                        angles: baselineAngles
-                    )
-                } else {
+            if escalationContext == nil {
+                do {
                     try await DamageAnalysisService.shared.confirmBaselineBatch(
                         plate: plate,
                         angles: baselineAngles
                     )
+                    print("Saved updated benchmark for \(plate).")
+                } catch {
+                    print("Failed to save updated benchmark for \(plate):", error)
                 }
-                print("Saved updated benchmark for \(plate).")
-            } catch {
-                print("Failed to save updated benchmark for \(plate):", error)
             }
 
             let url = await Task(priority: .userInitiated) {
@@ -3821,16 +3816,18 @@ struct PoliceReportStageTwoView: View {
                         numericBarcodeId: numericBarcodeId,
                         pdfURL: url
                     ) { error in
-                        guard error == nil, let escalationContext else {
-                            if let error {
-                                print("Failed to save NP299 report:", error.localizedDescription)
-                            }
+                        if let error {
+                            print("Failed to save NP299 report:", error.localizedDescription)
                             return
                         }
-                        linkEscalatedChecklist(
+
+                        guard let escalationContext else { return }
+                        finalizeEscalatedChecklistBaseline(
                             context: escalationContext,
                             reportID: numericBarcodeId,
-                            reportNo: reportNo
+                            reportNo: reportNo,
+                            plate: plate,
+                            baselineAngles: baselineAngles
                         )
                     }
                 }
@@ -3839,15 +3836,69 @@ struct PoliceReportStageTwoView: View {
         }
     }
 
+    private func finalizeEscalatedChecklistBaseline(
+        context: NP299EscalationContext,
+        reportID: String,
+        reportNo: String,
+        plate: String,
+        baselineAngles: [ConfirmBaselineBatchAngle]
+    ) {
+        Task {
+            var baselineError: Error?
+
+            if !baselineAngles.isEmpty {
+                do {
+                    try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
+                        plate: plate,
+                        angles: baselineAngles
+                    )
+                    print("Saved checklist damage to the benchmark after NP299 \(reportNo) was filed.")
+                } catch {
+                    baselineError = error
+                    print("NP299 was filed, but its checklist baseline could not be updated:", error)
+                }
+            }
+
+            linkEscalatedChecklist(
+                context: context,
+                reportID: reportID,
+                reportNo: reportNo,
+                baselineAngles: baselineAngles,
+                baselineError: baselineError
+            )
+        }
+    }
+
     private func linkEscalatedChecklist(
         context: NP299EscalationContext,
         reportID: String,
-        reportNo: String
+        reportNo: String,
+        baselineAngles: [ConfirmBaselineBatchAngle],
+        baselineError: Error?
     ) {
         let database = Firestore.firestore()
         let reportReference = database.collection("reports").document(reportID)
         let checklistReference = database.collection("seccom_checklists").document(context.checklistID)
         let batch = database.batch()
+
+        var checklistUpdate: [String: Any] = [
+            "np299ReportId": reportID,
+            "np299ReportNo": reportNo,
+            "np299GeneratedAt": FieldValue.serverTimestamp()
+        ]
+
+        if baselineAngles.isEmpty {
+            checklistUpdate["baselineUpdateStatus"] = "not_required"
+            checklistUpdate["baselineUpdateError"] = FieldValue.delete()
+        } else if let baselineError {
+            checklistUpdate["baselineUpdateStatus"] = "failed"
+            checklistUpdate["baselineUpdateError"] = baselineError.localizedDescription
+        } else {
+            checklistUpdate["baselineUpdateStatus"] = "updated"
+            checklistUpdate["baselineUpdatedAngles"] = baselineAngles.map(\.angle_index)
+            checklistUpdate["baselineUpdatedAt"] = FieldValue.serverTimestamp()
+            checklistUpdate["baselineUpdateError"] = FieldValue.delete()
+        }
 
         batch.setData(
             [
@@ -3857,15 +3908,7 @@ struct PoliceReportStageTwoView: View {
             forDocument: reportReference,
             merge: true
         )
-        batch.setData(
-            [
-                "np299ReportId": reportID,
-                "np299ReportNo": reportNo,
-                "np299GeneratedAt": FieldValue.serverTimestamp()
-            ],
-            forDocument: checklistReference,
-            merge: true
-        )
+        batch.setData(checklistUpdate, forDocument: checklistReference, merge: true)
 
         batch.commit { error in
             if let error {

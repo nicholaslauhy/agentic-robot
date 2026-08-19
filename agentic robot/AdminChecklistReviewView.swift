@@ -898,7 +898,10 @@ private struct AdminChecklistReviewDetail: View {
             "adminReviewedByUid": auth.user?.uid ?? "",
             "adminReviewedByName": auth.currentUsername,
             "adminReviewedByEmail": auth.currentEmail,
-            "adminReviewedAt": FieldValue.serverTimestamp()
+            "adminReviewedAt": FieldValue.serverTimestamp(),
+            "baselineUpdateStatus": record.detectionCount == 0
+                ? "not_required"
+                : (status == .escalationRequired ? "awaiting_np299" : "not_approved")
         ]
 
         Firestore.firestore()

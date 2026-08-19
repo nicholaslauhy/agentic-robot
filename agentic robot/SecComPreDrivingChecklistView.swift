@@ -570,13 +570,13 @@ struct SecComPreDrivingChecklistView: View {
                         validateAndShowReview()
                     } label: {
                         Text("Review Checklist Details")
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
-                            .padding()
+                            .padding(.vertical, 11)
                     }
                     .background(HTXTheme.primaryPurple)
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal)
                     .disabled(isSubmitting)
                     .padding(.bottom, 30)
@@ -1056,32 +1056,6 @@ struct SecComPreDrivingChecklistView: View {
         mileage.filter { $0.isNumber }
     }
 
-    private func checklistBaselineAngles() -> [ConfirmBaselineBatchAngle] {
-        let groupedPhotos = Dictionary(grouping: damagePhotos, by: \.angleIndex)
-
-        return groupedPhotos.keys.sorted().compactMap { angleIndex -> ConfirmBaselineBatchAngle? in
-            guard let photos = groupedPhotos[angleIndex] else { return nil }
-
-            let regions: [ConfirmBaselineRegion] = photos.flatMap { photo -> [ConfirmBaselineRegion] in
-                photo.confirmedRegions.compactMap { region -> ConfirmBaselineRegion? in
-                    guard let box = region.normalizedBBox else { return nil }
-                    return ConfirmBaselineRegion.fromNormalizedBox(
-                        box,
-                        label: region.damageType,
-                        image: photo.image
-                    )
-                }
-            }
-
-            guard !regions.isEmpty else { return nil }
-            return ConfirmBaselineBatchAngle(
-                angle_index: angleIndex,
-                angle_name: photos.first?.angleLabel ?? "Angle \(angleIndex)",
-                regions: regions
-            )
-        }
-    }
-
     private var validationIssues: [String] {
         var issues: [String] = []
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1155,9 +1129,11 @@ struct SecComPreDrivingChecklistView: View {
             "damageImageCount": damagePhotos.count,
             "detectionCount":   damagePhotos.reduce(0) { $0 + $1.confirmedRegions.count },
             "adminReviewStatus": "pending",
+            "baselineUpdateStatus": damagePhotos.contains { !$0.confirmedRegions.isEmpty }
+                ? "awaiting_np299"
+                : "not_required",
             "createdAt":        FieldValue.serverTimestamp()
         ]
-        let baselineAngles = checklistBaselineAngles()
 
         let saveFirestore: ([String: Any]) -> Void = { finalData in
             Firestore.firestore()
@@ -1187,35 +1163,6 @@ struct SecComPreDrivingChecklistView: View {
                 }
         }
 
-        let saveWithUpdatedBaseline: ([String: Any]) -> Void = { finalData in
-            guard !baselineAngles.isEmpty else {
-                var dataWithoutDamage = finalData
-                dataWithoutDamage["baselineUpdateStatus"] = "not_required"
-                saveFirestore(dataWithoutDamage)
-                return
-            }
-
-            Task {
-                do {
-                    try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
-                        plate: effectivePlate,
-                        angles: baselineAngles
-                    )
-
-                    var dataWithBaseline = finalData
-                    dataWithBaseline["baselineUpdateStatus"] = "updated"
-                    dataWithBaseline["baselineUpdatedAngles"] = baselineAngles.map(\.angle_index)
-                    dataWithBaseline["baselineUpdatedAt"] = FieldValue.serverTimestamp()
-                    saveFirestore(dataWithBaseline)
-                } catch {
-                    await MainActor.run {
-                        isSubmitting = false
-                        submitError = "The checklist was not submitted because the vehicle damage baseline could not be updated. Your confirmed damage is still on this screen. Check the backend connection and try again. (\(error.localizedDescription))"
-                    }
-                }
-            }
-        }
-
         func uploadDamageImages(
             _ photos: [ChecklistDamagePhoto],
             index: Int = 0,
@@ -1228,7 +1175,7 @@ struct SecComPreDrivingChecklistView: View {
                     finalData["damageImageStoragePaths"] = paths
                     finalData["damagePhotos"] = metadata
                 }
-                saveWithUpdatedBaseline(finalData)
+                saveFirestore(finalData)
                 return
             }
 
@@ -2298,13 +2245,14 @@ private struct ChecklistDamageCaptureSetupSheet: View {
                         VStack(spacing: 10) {
                             Button(action: onTakePhoto) {
                                 Label("Open Guided Camera", systemImage: "camera.fill")
-                                    .font(.headline)
+                                    .font(.subheadline.weight(.semibold))
                                     .frame(maxWidth: .infinity)
-                                    .padding()
+                                    .frame(height: 46)
                             }
                             .background(HTXTheme.primaryPurple)
                             .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .buttonStyle(.plain)
                             .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                             .opacity(UIImagePickerController.isSourceTypeAvailable(.camera) ? 1 : 0.5)
 
@@ -2312,10 +2260,12 @@ private struct ChecklistDamageCaptureSetupSheet: View {
                                 Label("Choose Existing Photo", systemImage: "photo.on.rectangle")
                                     .font(.subheadline.weight(.semibold))
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
+                                    .frame(height: 46)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(HTXTheme.primaryPurple)
+                            .background(HTXTheme.primaryPurple)
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .buttonStyle(.plain)
 
                             if !UIImagePickerController.isSourceTypeAvailable(.camera) {
                                 Text("The simulator has no camera. Choose a photo to test the same angle validation.")
