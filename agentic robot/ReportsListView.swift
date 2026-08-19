@@ -1039,7 +1039,7 @@ struct FuelDetailSheet: View {
     @State private var followedUpAt: Date?
     @State private var isSavingFollowUp = false
     @State private var followUpError: String? = nil
-    @State private var showCompleteConfirmation = false
+    @State private var pendingFollowUpDecision: FuelFollowUpStatus?
 
     init(
         doc: RawReportDocument,
@@ -1169,11 +1169,30 @@ struct FuelDetailSheet: View {
             .fullScreenCover(item: $selectedReceiptImage) { item in
                 ZoomableImageViewer(image: item.image)
             }
-            .alert("Complete Refuel Follow-up?", isPresented: $showCompleteConfirmation) {
-                Button("Mark Completed") { completeFollowUp() }
+            .alert(
+                pendingFollowUpDecision == .rejected
+                    ? "Reject Refuel Report?"
+                    : "Complete Refuel Follow-up?",
+                isPresented: Binding(
+                    get: { pendingFollowUpDecision != nil },
+                    set: { if !$0 { pendingFollowUpDecision = nil } }
+                )
+            ) {
+                if let decision = pendingFollowUpDecision {
+                    Button(
+                        decision == .rejected ? "Reject Report" : "Mark Completed",
+                        role: decision == .rejected ? .destructive : nil
+                    ) {
+                        saveFollowUp(as: decision)
+                    }
+                }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This confirms that the refuel submission has been followed up. Its completed status cannot be changed later.")
+                Text(
+                    pendingFollowUpDecision == .rejected
+                        ? "This marks the refuel submission as unacceptable. Its rejected status cannot be changed later."
+                        : "This confirms that the refuel submission has been followed up. Its completed status cannot be changed later."
+                )
             }
         }
     }
@@ -1183,11 +1202,14 @@ struct FuelDetailSheet: View {
             VStack(alignment: .leading, spacing: 16) {
                 followUpStatusPanel
 
-                if followUpStatus == .completed {
+                if followUpStatus != .pending {
                     if !followedUpByName.isEmpty || followedUpAt != nil {
                         VStack(spacing: 0) {
                             if !followedUpByName.isEmpty {
-                                followUpDetailRow(label: "Approved by", value: followedUpByName)
+                                followUpDetailRow(
+                                    label: followUpStatus == .rejected ? "Rejected by" : "Approved by",
+                                    value: followedUpByName
+                                )
                             }
 
                             if !followedUpByName.isEmpty, followedUpAt != nil {
@@ -1195,10 +1217,10 @@ struct FuelDetailSheet: View {
                                     .padding(.leading, 12)
                             }
 
-                            if let completedAt = followedUpAt {
+                            if let decisionDate = followedUpAt {
                                 followUpDetailRow(
-                                    label: "Approved on",
-                                    value: completedAt.formatted(date: .abbreviated, time: .shortened)
+                                    label: followUpStatus == .rejected ? "Rejected on" : "Approved on",
+                                    value: decisionDate.formatted(date: .abbreviated, time: .shortened)
                                 )
                             }
                         }
@@ -1253,25 +1275,42 @@ struct FuelDetailSheet: View {
                             .foregroundColor(.red)
                     }
 
-                    Button {
-                        showCompleteConfirmation = true
-                    } label: {
-                        if isSavingFollowUp {
+                    if isSavingFollowUp {
+                        HStack(spacing: 10) {
                             ProgressView()
-                                .tint(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                        } else {
+                            Text("Saving follow-up decision…")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                    } else {
+                        HStack(spacing: 12) {
+                            Button {
+                                pendingFollowUpDecision = .rejected
+                            } label: {
+                                Label("Reject Report", systemImage: "xmark.octagon.fill")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                            .controlSize(.large)
+
+                            Button {
+                                pendingFollowUpDecision = .completed
+                            } label: {
                             Label("Mark Follow-up Completed", systemImage: "checkmark.seal.fill")
                                 .font(.headline)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(accent)
+                            .controlSize(.large)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(accent)
-                    .controlSize(.large)
-                    .disabled(isSavingFollowUp)
                 } else {
                     Text("This submission is waiting for administrator follow-up.")
                         .font(.subheadline)
@@ -1304,7 +1343,7 @@ struct FuelDetailSheet: View {
 
             Spacer(minLength: 8)
 
-            if followUpStatus == .completed {
+            if followUpStatus != .pending {
                 Label("Locked", systemImage: "lock.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
@@ -1332,13 +1371,17 @@ struct FuelDetailSheet: View {
         .padding(12)
     }
 
-    private func completeFollowUp() {
-        guard followUpStatus == .pending, !isSavingFollowUp else { return }
+    private func saveFollowUp(as decision: FuelFollowUpStatus) {
+        guard followUpStatus == .pending,
+              decision == .completed || decision == .rejected,
+              !isSavingFollowUp else { return }
+
+        pendingFollowUpDecision = nil
         isSavingFollowUp = true
         followUpError = nil
 
         let payload: [String: Any] = [
-            "adminFollowUpStatus": FuelFollowUpStatus.completed.rawValue,
+            "adminFollowUpStatus": decision.rawValue,
             "adminFollowUpNotes": followUpNotes.trimmingCharacters(in: .whitespacesAndNewlines),
             "adminFollowedUpByUid": auth.user?.uid ?? "",
             "adminFollowedUpByName": auth.currentUsername,
@@ -1353,10 +1396,11 @@ struct FuelDetailSheet: View {
                 DispatchQueue.main.async {
                     isSavingFollowUp = false
                     if let error {
-                        followUpError = "Could not complete the follow-up: \(error.localizedDescription)"
+                        let action = decision == .rejected ? "reject the report" : "complete the follow-up"
+                        followUpError = "Could not \(action): \(error.localizedDescription)"
                         return
                     }
-                    followUpStatus = .completed
+                    followUpStatus = decision
                     followedUpByName = auth.currentUsername
                     followedUpAt = Date()
                     onFollowUpUpdated()

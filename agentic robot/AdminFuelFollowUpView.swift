@@ -4,6 +4,7 @@ import FirebaseFirestore
 enum FuelFollowUpStatus: String, Equatable {
     case pending
     case completed
+    case rejected
 
     init(firestoreValue: Any?) {
         let value = (firestoreValue as? String)?
@@ -16,6 +17,7 @@ enum FuelFollowUpStatus: String, Equatable {
         switch self {
         case .pending: return "Pending"
         case .completed: return "Completed"
+        case .rejected: return "Rejected"
         }
     }
 
@@ -23,6 +25,7 @@ enum FuelFollowUpStatus: String, Equatable {
         switch self {
         case .pending: return "clock.badge.exclamationmark"
         case .completed: return "checkmark.seal.fill"
+        case .rejected: return "xmark.octagon.fill"
         }
     }
 
@@ -30,6 +33,7 @@ enum FuelFollowUpStatus: String, Equatable {
         switch self {
         case .pending: return .orange
         case .completed: return .green
+        case .rejected: return .red
         }
     }
 }
@@ -38,6 +42,7 @@ private enum FuelFollowUpFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case pending = "Pending"
     case completed = "Completed"
+    case rejected = "Rejected"
 
     var id: String { rawValue }
 }
@@ -69,6 +74,7 @@ struct AdminFuelFollowUpView: View {
             case .all: matchesFilter = true
             case .pending: matchesFilter = status == .pending
             case .completed: matchesFilter = status == .completed
+            case .rejected: matchesFilter = status == .rejected
             }
 
             guard matchesFilter else { return false }
@@ -299,6 +305,7 @@ struct AdminFuelFollowUpView: View {
         case .all: return "No refuel reports have been submitted."
         case .pending: return "No refuel reports are awaiting follow-up."
         case .completed: return "No refuel follow-ups have been completed."
+        case .rejected: return "No refuel reports have been rejected."
         }
     }
 
