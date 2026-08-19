@@ -151,6 +151,7 @@ struct MemberReportsView: View {
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @Namespace private var progressFilterAnimation
 
     private var displayedReports: [MemberReportItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -291,17 +292,24 @@ struct MemberReportsView: View {
         HStack(spacing: 8) {
             ForEach(MemberReportProgressFilter.allCases) { filter in
                 Button {
-                    selectedProgress = filter
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                        selectedProgress = filter
+                    }
                 } label: {
                     Text(filter.rawValue)
                         .font(.caption.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(
-                            selectedProgress == filter
-                            ? HTXTheme.primaryPurple.opacity(0.12)
-                            : Color.clear
-                        )
+                        .background {
+                            if selectedProgress == filter {
+                                RoundedRectangle(cornerRadius: 9)
+                                    .fill(HTXTheme.primaryPurple.opacity(0.12))
+                                    .matchedGeometryEffect(
+                                        id: "member-report-progress-filter",
+                                        in: progressFilterAnimation
+                                    )
+                            }
+                        }
                         .foregroundColor(
                             selectedProgress == filter ? HTXTheme.primaryPurple : .secondary
                         )
