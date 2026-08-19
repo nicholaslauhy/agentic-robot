@@ -124,6 +124,13 @@ private struct MemberReportItem: Identifiable {
                     color: .green,
                     isPending: false
                 )
+            case .rejected:
+                return MemberReportStatus(
+                    title: "Refuel Report Rejected",
+                    icon: "xmark.octagon.fill",
+                    color: .red,
+                    isPending: false
+                )
             }
         }
     }
