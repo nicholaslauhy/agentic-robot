@@ -119,7 +119,10 @@ struct FuelRefuelView: View {
                         Divider()
                         // Vehicle number (dropdown)
                         Button {
-                            showVehiclePicker = true
+                            dismissFormKeyboard()
+                            DispatchQueue.main.async {
+                                showVehiclePicker = true
+                            }
                         } label: {
                             HStack {
                                 HTXFieldLabel(text: "Vehicle Number", required: true)
@@ -286,7 +289,7 @@ struct FuelRefuelView: View {
         .navigationBarTitleDisplayMode(.inline)
         .tint(HTXTheme.fuelOrange)
         // Vehicle picker
-        .sheet(isPresented: $showVehiclePicker) {
+        .sheet(isPresented: $showVehiclePicker, onDismiss: dismissFormKeyboard) {
             VehiclePickerSheet(
                 selectedGroup: $selectedGroup,
                 selectedPlate: $selectedPlate,
@@ -365,6 +368,11 @@ struct FuelRefuelView: View {
         } message: {
             Text("Please confirm that the details are correct before generating the report.")
         }
+    }
+
+    private func dismissFormKeyboard() {
+        focusedField = nil
+        UIApplication.shared.endEditing()
     }
 
     // MARK: - Helpers

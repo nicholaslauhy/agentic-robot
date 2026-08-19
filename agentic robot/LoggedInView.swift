@@ -452,14 +452,14 @@ struct LoggedInView: View {
 
             Task {
                 for char in fullText {
-                    try? await Task.sleep(for: .milliseconds(25))
+                    try? await Task.sleep(for: .milliseconds(7))
                     await MainActor.run {
                         displayedText.append(char)
                     }
                 }
 
                 await MainActor.run {
-                    withAnimation(.easeIn(duration: 0.4)) {
+                    withAnimation(.easeIn(duration: 0.2)) {
                         showButtons = true
                     }
                 }

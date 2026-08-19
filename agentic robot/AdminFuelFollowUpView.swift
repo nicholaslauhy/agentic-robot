@@ -43,14 +43,22 @@ private enum FuelFollowUpFilter: String, CaseIterable, Identifiable {
 }
 
 struct AdminFuelFollowUpView: View {
+    private let initialReportID: String?
+
     @State private var reports: [RawReportDocument] = []
     @State private var selectedFilter: FuelFollowUpFilter = .all
     @State private var selectedReport: RawReportDocument?
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var unavailableReportMessage: String?
+    @State private var didHandleInitialReport = false
 
     private let accent = HTXTheme.fuelOrange
+
+    init(initialReportID: String? = nil) {
+        self.initialReportID = initialReportID
+    }
 
     private var filteredReports: [RawReportDocument] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -97,6 +105,17 @@ struct AdminFuelFollowUpView: View {
                 allowsFollowUpActions: true,
                 onFollowUpUpdated: fetchReports
             )
+        }
+        .alert(
+            "Report Unavailable",
+            isPresented: Binding(
+                get: { unavailableReportMessage != nil },
+                set: { if !$0 { unavailableReportMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { unavailableReportMessage = nil }
+        } message: {
+            Text(unavailableReportMessage ?? "")
         }
         .requiresRole(.admin)
     }
@@ -318,7 +337,21 @@ struct AdminFuelFollowUpView: View {
                         )
                         return RawReportDocument(id: document.documentID, entry: entry, raw: data)
                     }
+                    openInitialReportIfNeeded()
                 }
             }
+    }
+
+    private func openInitialReportIfNeeded() {
+        guard !didHandleInitialReport,
+              let initialReportID,
+              !initialReportID.isEmpty else { return }
+
+        didHandleInitialReport = true
+        if let report = reports.first(where: { $0.id == initialReportID }) {
+            selectedReport = report
+        } else {
+            unavailableReportMessage = "This refuel report may have been deleted or is no longer available."
+        }
     }
 }

@@ -7,6 +7,8 @@ import FirebaseFirestore
 enum ChecklistAdminReviewStatus: String, Equatable {
     case pending = "pending"
     case escalationRequired = "escalation_required"
+    case np299InProgress = "np299_in_progress"
+    case np299Filed = "np299_filed"
     case noEscalation = "no_escalation"
 
     init(firestoreValue: Any?) {
@@ -14,10 +16,23 @@ enum ChecklistAdminReviewStatus: String, Equatable {
         self = ChecklistAdminReviewStatus(rawValue: raw) ?? .pending
     }
 
+    init(firestoreData data: [String: Any]) {
+        let linkedReportID = data["np299ReportId"] as? String ?? ""
+        let linkedReportNumber = data["np299ReportNo"] as? String ?? ""
+        if !linkedReportID.isEmpty || !linkedReportNumber.isEmpty {
+            self = .np299Filed
+        } else {
+            let raw = (data["adminReviewStatus"] as? String)?.lowercased() ?? ""
+            self = ChecklistAdminReviewStatus(rawValue: raw) ?? .pending
+        }
+    }
+
     var title: String {
         switch self {
         case .pending: return "Pending Review"
         case .escalationRequired: return "NP299 Required"
+        case .np299InProgress: return "NP299 In Progress"
+        case .np299Filed: return "NP299 Filed"
         case .noEscalation: return "No Escalation"
         }
     }
@@ -26,6 +41,8 @@ enum ChecklistAdminReviewStatus: String, Equatable {
         switch self {
         case .pending: return "clock.badge.exclamationmark"
         case .escalationRequired: return "exclamationmark.shield.fill"
+        case .np299InProgress: return "doc.badge.clock.fill"
+        case .np299Filed: return "checkmark.seal.fill"
         case .noEscalation: return "checkmark.seal.fill"
         }
     }
@@ -34,6 +51,8 @@ enum ChecklistAdminReviewStatus: String, Equatable {
         switch self {
         case .pending: return .orange
         case .escalationRequired: return HTXTheme.primaryPurple
+        case .np299InProgress: return .blue
+        case .np299Filed: return .green
         case .noEscalation: return .green
         }
     }
@@ -102,6 +121,8 @@ private struct ChecklistNP299Payload: Identifiable {
 // MARK: - Admin Queue
 
 struct AdminChecklistReviewView: View {
+    private let initialReportID: String?
+
     @State private var records: [AdminChecklistRecord] = []
     @State private var selectedFilter: ChecklistReviewFilter = .all
     @State private var selectedRecord: AdminChecklistRecord?
@@ -112,8 +133,13 @@ struct AdminChecklistReviewView: View {
     @State private var errorMessage: String?
     @State private var deletionFeedbackTitle = ""
     @State private var deletionFeedbackMessage: String?
+    @State private var didHandleInitialReport = false
 
     private let accent = Color(red: 0.08, green: 0.50, blue: 0.30)
+
+    init(initialReportID: String? = nil) {
+        self.initialReportID = initialReportID
+    }
 
     private var filteredRecords: [AdminChecklistRecord] {
         records.filter { record in
@@ -122,7 +148,11 @@ struct AdminChecklistReviewView: View {
             case .pending:
                 matchesStatus = record.status == .pending
             case .escalation:
-                matchesStatus = record.status == .escalationRequired
+                matchesStatus = [
+                    ChecklistAdminReviewStatus.escalationRequired,
+                    .np299InProgress,
+                    .np299Filed
+                ].contains(record.status)
             case .completed:
                 matchesStatus = record.status == .noEscalation
             case .all:
@@ -383,12 +413,27 @@ struct AdminChecklistReviewView: View {
                             driverName: data["driverName"] as? String ?? data["generatedBy"] as? String ?? "-",
                             createdAt: (data["createdAt"] as? Timestamp)?.dateValue(),
                             detectionCount: data["detectionCount"] as? Int ?? 0,
-                            status: ChecklistAdminReviewStatus(firestoreValue: data["adminReviewStatus"]),
+                            status: ChecklistAdminReviewStatus(firestoreData: data),
                             raw: data
                         )
                     }
+                    openInitialReportIfNeeded()
                 }
             }
+    }
+
+    private func openInitialReportIfNeeded() {
+        guard !didHandleInitialReport,
+              let initialReportID,
+              !initialReportID.isEmpty else { return }
+
+        didHandleInitialReport = true
+        if let record = records.first(where: { $0.id == initialReportID }) {
+            selectedRecord = record
+        } else {
+            deletionFeedbackTitle = "Checklist Unavailable"
+            deletionFeedbackMessage = "This pre-driving checklist may have been deleted or is no longer available."
+        }
     }
 
     private func deleteChecklist(_ record: AdminChecklistRecord) {
@@ -567,6 +612,7 @@ private struct AdminChecklistReviewDetail: View {
                         incidentDate: record.createdAt,
                         onReportSaved: { reportNo in
                             generatedNP299ReportNo = reportNo
+                            reviewStatus = .np299Filed
                             onSaved()
                         }
                     )
@@ -656,7 +702,7 @@ private struct AdminChecklistReviewDetail: View {
             Divider().padding(.horizontal, 16)
             adminDetailRow("Vehicle Type", record.carType)
             Divider().padding(.horizontal, 16)
-            adminDetailRow("Mileage", kilometreText(data["mileage"] as? String))
+            adminDetailRow("Mileage (km)", data["mileage"] as? String ?? "-")
             Divider().padding(.horizontal, 16)
             adminDetailRow("Purpose", data["purpose"] as? String ?? "-")
         }
@@ -798,7 +844,8 @@ private struct AdminChecklistReviewDetail: View {
                         .foregroundColor(.red)
                 }
 
-                if reviewStatus == .pending {
+                switch reviewStatus {
+                case .pending:
                     Button {
                         pendingDecision = .escalationRequired
                     } label: {
@@ -822,10 +869,47 @@ private struct AdminChecklistReviewDetail: View {
                     .buttonStyle(.bordered)
                     .tint(.green)
                     .disabled(isSaving)
-                } else if reviewStatus == .escalationRequired {
-                    if let reportNo = generatedNP299ReportNo ?? data["np299ReportNo"] as? String,
-                       !reportNo.isEmpty {
-                        Label("NP299 Generated · \(reportNo)", systemImage: "checkmark.seal.fill")
+
+                case .escalationRequired:
+                    Label("NP299 is required but has not been started.", systemImage: reviewStatus.icon)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(reviewStatus.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button {
+                        openNP299Workflow()
+                    } label: {
+                        Label("Start NP299 Report", systemImage: "doc.badge.plus")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(HTXTheme.primaryPurple)
+                    .disabled(isSaving || isLoadingPhotos)
+
+                case .np299InProgress:
+                    Label("The NP299 report has been started but has not been filed.", systemImage: reviewStatus.icon)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(reviewStatus.color)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button {
+                        openNP299Workflow()
+                    } label: {
+                        Label("Continue NP299 Report", systemImage: "doc.text.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .disabled(isSaving || isLoadingPhotos)
+
+                case .np299Filed:
+                    let reportNo = generatedNP299ReportNo ?? data["np299ReportNo"] as? String
+                    if let reportNo, !reportNo.isEmpty {
+                        Label("NP299 Filed · \(reportNo)", systemImage: reviewStatus.icon)
                             .font(.headline)
                             .foregroundColor(.green)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -833,19 +917,16 @@ private struct AdminChecklistReviewDetail: View {
                             .background(Color.green.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     } else {
-                        Button {
-                            openNP299Workflow()
-                        } label: {
-                            Label("Continue NP299 Report", systemImage: "doc.text.fill")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 13)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(HTXTheme.primaryPurple)
-                        .disabled(isSaving || isLoadingPhotos)
+                        Label("NP299 Filed", systemImage: reviewStatus.icon)
+                            .font(.headline)
+                            .foregroundColor(.green)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(13)
+                            .background(Color.green.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                } else {
+
+                case .noEscalation:
                     Label("No Police Report Required", systemImage: "checkmark.seal.fill")
                         .font(.headline)
                         .foregroundColor(.green)
@@ -898,7 +979,10 @@ private struct AdminChecklistReviewDetail: View {
             "adminReviewedByUid": auth.user?.uid ?? "",
             "adminReviewedByName": auth.currentUsername,
             "adminReviewedByEmail": auth.currentEmail,
-            "adminReviewedAt": FieldValue.serverTimestamp()
+            "adminReviewedAt": FieldValue.serverTimestamp(),
+            "baselineUpdateStatus": record.detectionCount == 0
+                ? "not_required"
+                : (status == .escalationRequired ? "awaiting_np299" : "not_approved")
         ]
 
         Firestore.firestore()
@@ -964,6 +1048,36 @@ private struct AdminChecklistReviewDetail: View {
             carType: carType,
             detections: detections
         )
+
+        if reviewStatus == .escalationRequired {
+            let payload = np299Payload
+            np299Payload = nil
+            markNP299InProgress(andOpen: payload)
+        }
+    }
+
+    private func markNP299InProgress(andOpen payload: ChecklistNP299Payload?) {
+        guard let payload else { return }
+
+        isSaving = true
+        saveError = nil
+
+        Firestore.firestore()
+            .collection("seccom_checklists")
+            .document(record.id)
+            .updateData(["adminReviewStatus": ChecklistAdminReviewStatus.np299InProgress.rawValue]) { error in
+                DispatchQueue.main.async {
+                    isSaving = false
+                    if let error {
+                        saveError = "The NP299 workflow could not be started: \(error.localizedDescription)"
+                        return
+                    }
+
+                    reviewStatus = .np299InProgress
+                    onSaved()
+                    np299Payload = payload
+                }
+            }
     }
 
     private func resolvedNP299CarType() -> CarType {

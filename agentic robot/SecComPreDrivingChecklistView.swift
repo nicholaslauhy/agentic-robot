@@ -168,6 +168,14 @@ private enum ChecklistDamageProcessingStage: Equatable {
     case damageAnalysis
 }
 
+private enum SecComFormField: Hashable {
+    case workContact
+    case otherPlate
+    case otherCarType
+    case mileage
+    case purpose
+}
+
 // MARK: - Main Form View
 
 struct SecComPreDrivingChecklistView: View {
@@ -181,6 +189,7 @@ struct SecComPreDrivingChecklistView: View {
     @State private var date: Date = Date()
     @State private var time: Date = Date()
     @State private var workContact: String = ""
+    @FocusState private var focusedFormField: SecComFormField?
 
     // Vehicle picker
     @State private var useOtherVehicle: Bool = false
@@ -324,13 +333,17 @@ struct SecComPreDrivingChecklistView: View {
                             TextField("Contact number", text: $workContact)
                                 .keyboardType(.phonePad)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focusedFormField, equals: .workContact)
                         }
                     }
 
                     sectionCard(title: "Vehicle", icon: "car.fill") {
                         // Dropdown trigger
                         Button {
-                            showVehiclePicker = true
+                            dismissFormKeyboard()
+                            DispatchQueue.main.async {
+                                showVehiclePicker = true
+                            }
                         } label: {
                             HStack {
                                 HTXFieldLabel(text: "Vehicle Number", required: true)
@@ -362,26 +375,30 @@ struct SecComPreDrivingChecklistView: View {
                                     .textInputAutocapitalization(.characters)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
+                                    .focused($focusedFormField, equals: .otherPlate)
                             }
                             Divider()
                             formRow(label: "Car Type", required: true) {
                                 TextField("e.g. Toyota Camry", text: $otherCarType)
                                     .autocorrectionDisabled()
                                     .multilineTextAlignment(.trailing)
+                                    .focused($focusedFormField, equals: .otherCarType)
                             }
                         }
 
                         Divider()
-                        formRow(label: "Mileage", required: true) {
+                        formRow(label: "Mileage (km)", required: true) {
                             TextField("Numbers only, e.g. 12345", text: $mileage)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
+                                .focused($focusedFormField, equals: .mileage)
                         }
                         Divider()
                         formRow(label: "Purpose", required: true) {
                             TextField("Reason for trip", text: $purpose)
                                 .multilineTextAlignment(.trailing)
                                 .autocorrectionDisabled()
+                                .focused($focusedFormField, equals: .purpose)
                         }
                     }
 
@@ -553,13 +570,13 @@ struct SecComPreDrivingChecklistView: View {
                         validateAndShowReview()
                     } label: {
                         Text("Review Checklist Details")
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity)
-                            .padding()
+                            .padding(.vertical, 11)
                     }
                     .background(HTXTheme.primaryPurple)
                     .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal)
                     .disabled(isSubmitting)
                     .padding(.bottom, 30)
@@ -571,7 +588,7 @@ struct SecComPreDrivingChecklistView: View {
         .navigationBarTitleDisplayMode(.inline)
         .tint(HTXTheme.primaryPurple)
         // Vehicle picker sheet
-        .sheet(isPresented: $showVehiclePicker) {
+        .sheet(isPresented: $showVehiclePicker, onDismiss: dismissFormKeyboard) {
             VehiclePickerSheet(
                 selectedGroup: $selectedGroup,
                 selectedPlate: $selectedPlate,
@@ -723,6 +740,11 @@ struct SecComPreDrivingChecklistView: View {
         } message: {
             Text(damageAnalysisError ?? "Please try again.")
         }
+    }
+
+    private func dismissFormKeyboard() {
+        focusedFormField = nil
+        UIApplication.shared.endEditing()
     }
 
     // MARK: - Helpers
@@ -1034,32 +1056,6 @@ struct SecComPreDrivingChecklistView: View {
         mileage.filter { $0.isNumber }
     }
 
-    private func checklistBaselineAngles() -> [ConfirmBaselineBatchAngle] {
-        let groupedPhotos = Dictionary(grouping: damagePhotos, by: \.angleIndex)
-
-        return groupedPhotos.keys.sorted().compactMap { angleIndex -> ConfirmBaselineBatchAngle? in
-            guard let photos = groupedPhotos[angleIndex] else { return nil }
-
-            let regions: [ConfirmBaselineRegion] = photos.flatMap { photo -> [ConfirmBaselineRegion] in
-                photo.confirmedRegions.compactMap { region -> ConfirmBaselineRegion? in
-                    guard let box = region.normalizedBBox else { return nil }
-                    return ConfirmBaselineRegion.fromNormalizedBox(
-                        box,
-                        label: region.damageType,
-                        image: photo.image
-                    )
-                }
-            }
-
-            guard !regions.isEmpty else { return nil }
-            return ConfirmBaselineBatchAngle(
-                angle_index: angleIndex,
-                angle_name: photos.first?.angleLabel ?? "Angle \(angleIndex)",
-                regions: regions
-            )
-        }
-    }
-
     private var validationIssues: [String] {
         var issues: [String] = []
         let name = driverName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1069,7 +1065,7 @@ struct SecComPreDrivingChecklistView: View {
         if contact.isEmpty { issues.append("Work Contact") }
         if effectivePlate.isEmpty { issues.append(useOtherVehicle ? "Car Plate" : "Vehicle Number") }
         if effectiveCarType.isEmpty { issues.append(useOtherVehicle ? "Car Type" : "Vehicle Type") }
-        if cleanMileage.isEmpty { issues.append("Mileage") }
+        if cleanMileage.isEmpty { issues.append("Mileage (km)") }
         if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Purpose") }
         if !bodyworkAllInOrder,
            bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -1133,9 +1129,11 @@ struct SecComPreDrivingChecklistView: View {
             "damageImageCount": damagePhotos.count,
             "detectionCount":   damagePhotos.reduce(0) { $0 + $1.confirmedRegions.count },
             "adminReviewStatus": "pending",
+            "baselineUpdateStatus": damagePhotos.contains { !$0.confirmedRegions.isEmpty }
+                ? "awaiting_np299"
+                : "not_required",
             "createdAt":        FieldValue.serverTimestamp()
         ]
-        let baselineAngles = checklistBaselineAngles()
 
         let saveFirestore: ([String: Any]) -> Void = { finalData in
             Firestore.firestore()
@@ -1165,35 +1163,6 @@ struct SecComPreDrivingChecklistView: View {
                 }
         }
 
-        let saveWithUpdatedBaseline: ([String: Any]) -> Void = { finalData in
-            guard !baselineAngles.isEmpty else {
-                var dataWithoutDamage = finalData
-                dataWithoutDamage["baselineUpdateStatus"] = "not_required"
-                saveFirestore(dataWithoutDamage)
-                return
-            }
-
-            Task {
-                do {
-                    try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
-                        plate: effectivePlate,
-                        angles: baselineAngles
-                    )
-
-                    var dataWithBaseline = finalData
-                    dataWithBaseline["baselineUpdateStatus"] = "updated"
-                    dataWithBaseline["baselineUpdatedAngles"] = baselineAngles.map(\.angle_index)
-                    dataWithBaseline["baselineUpdatedAt"] = FieldValue.serverTimestamp()
-                    saveFirestore(dataWithBaseline)
-                } catch {
-                    await MainActor.run {
-                        isSubmitting = false
-                        submitError = "The checklist was not submitted because the vehicle damage baseline could not be updated. Your confirmed damage is still on this screen. Check the backend connection and try again. (\(error.localizedDescription))"
-                    }
-                }
-            }
-        }
-
         func uploadDamageImages(
             _ photos: [ChecklistDamagePhoto],
             index: Int = 0,
@@ -1206,7 +1175,7 @@ struct SecComPreDrivingChecklistView: View {
                     finalData["damageImageStoragePaths"] = paths
                     finalData["damagePhotos"] = metadata
                 }
-                saveWithUpdatedBaseline(finalData)
+                saveFirestore(finalData)
                 return
             }
 
@@ -1443,6 +1412,7 @@ private struct ChecklistDamageReviewView: View {
     @State private var candidates: [ChecklistDamageCandidate]
     @State private var showManualEditor = false
     @State private var showCancelConfirmation = false
+    @State private var showZoomedReviewImage = false
 
     init(
         session: ChecklistDamageReviewSession,
@@ -1492,6 +1462,22 @@ private struct ChecklistDamageReviewView: View {
                         .frame(height: 330)
                         .background(Color.black.opacity(0.04))
                         .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(alignment: .bottomTrailing) {
+                            Label("Tap to zoom", systemImage: "magnifyingglass")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(Color.black.opacity(0.62), in: Capsule())
+                                .padding(10)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            showZoomedReviewImage = true
+                        }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("Open damage image")
+                        .accessibilityHint("Opens a full-screen image that can be zoomed and panned")
                         .padding(.horizontal)
 
                         if !session.existingRegions.isEmpty {
@@ -1595,15 +1581,18 @@ private struct ChecklistDamageReviewView: View {
                     candidates.append(ChecklistDamageCandidate(region: region, decision: .confirmed))
                 }
             }
-            .confirmationDialog(
-                "Discard this damage photo?",
-                isPresented: $showCancelConfirmation,
-                titleVisibility: .visible
-            ) {
+            .fullScreenCover(isPresented: $showZoomedReviewImage) {
+                ChecklistDamageReviewImageViewer(
+                    image: session.image,
+                    regions: visibleRegions,
+                    existingRegions: session.existingRegions
+                )
+            }
+            .alert("Discard This Photo?", isPresented: $showCancelConfirmation) {
                 Button("Discard Photo", role: .destructive, action: onCancel)
-                Button("Continue Reviewing", role: .cancel) {}
+                Button("Keep Reviewing", role: .cancel) {}
             } message: {
-                Text("The photo and your damage decisions will not be attached to the checklist.")
+                Text("If you cancel now, this photo and all damage selections or manually drawn areas for it will not be added to the checklist.")
             }
         }
     }
@@ -1724,6 +1713,119 @@ private struct ChecklistDamageReviewView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct ChecklistDamageReviewImageViewer: View {
+    let image: UIImage
+    let regions: [ChecklistDamageRegion]
+    let existingRegions: [ChecklistDamageRegion]
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var previousScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var previousOffset: CGSize = .zero
+
+    private let maximumScale: CGFloat = 6
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            GeometryReader { geometry in
+                ChecklistDamageAnnotatedImage(
+                    image: image,
+                    regions: regions,
+                    existingRegions: existingRegions,
+                    showLabels: true
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .scaleEffect(scale)
+                .offset(offset)
+                .contentShape(Rectangle())
+                .gesture(
+                    SimultaneousGesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                scale = min(max(previousScale * value, 1), maximumScale)
+                                if scale == 1 { offset = .zero }
+                            }
+                            .onEnded { _ in
+                                previousScale = scale
+                                if scale == 1 { resetZoom() }
+                            },
+                        DragGesture()
+                            .onChanged { value in
+                                guard scale > 1 else { return }
+                                offset = CGSize(
+                                    width: previousOffset.width + value.translation.width,
+                                    height: previousOffset.height + value.translation.height
+                                )
+                            }
+                            .onEnded { _ in
+                                previousOffset = offset
+                            }
+                    )
+                )
+                .onTapGesture(count: 2) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        if scale > 1 {
+                            resetZoom()
+                        } else {
+                            scale = 2.5
+                            previousScale = 2.5
+                        }
+                    }
+                }
+            }
+
+            VStack(spacing: 12) {
+                HStack {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.white)
+                            .frame(width: 44, height: 44)
+                            .background(Color.black.opacity(0.62), in: Circle())
+                    }
+                    .accessibilityLabel("Close image")
+
+                    Spacer()
+
+                    Text("Pinch to zoom · Drag to move")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.62), in: Capsule())
+                }
+
+                Spacer()
+
+                HStack(spacing: 16) {
+                    Label("Existing baseline", systemImage: "square")
+                        .foregroundColor(HTXTheme.primaryPurple)
+                    Label("New suggestion", systemImage: "square")
+                        .foregroundColor(.orange)
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding()
+        }
+        .statusBarHidden(true)
+    }
+
+    private func resetZoom() {
+        scale = 1
+        previousScale = 1
+        offset = .zero
+        previousOffset = .zero
     }
 }
 
@@ -2276,13 +2378,14 @@ private struct ChecklistDamageCaptureSetupSheet: View {
                         VStack(spacing: 10) {
                             Button(action: onTakePhoto) {
                                 Label("Open Guided Camera", systemImage: "camera.fill")
-                                    .font(.headline)
+                                    .font(.subheadline.weight(.semibold))
                                     .frame(maxWidth: .infinity)
-                                    .padding()
+                                    .frame(height: 46)
                             }
                             .background(HTXTheme.primaryPurple)
                             .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .buttonStyle(.plain)
                             .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
                             .opacity(UIImagePickerController.isSourceTypeAvailable(.camera) ? 1 : 0.5)
 
@@ -2290,10 +2393,12 @@ private struct ChecklistDamageCaptureSetupSheet: View {
                                 Label("Choose Existing Photo", systemImage: "photo.on.rectangle")
                                     .font(.subheadline.weight(.semibold))
                                     .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
+                                    .frame(height: 46)
                             }
-                            .buttonStyle(.bordered)
-                            .tint(HTXTheme.primaryPurple)
+                            .background(HTXTheme.primaryPurple)
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .buttonStyle(.plain)
 
                             if !UIImagePickerController.isSourceTypeAvailable(.camera) {
                                 Text("The simulator has no camera. Choose a photo to test the same angle validation.")
@@ -2359,7 +2464,7 @@ private struct SecComChecklistReviewSheet: View {
                         reviewCard(title: "Vehicle", icon: "car.fill") {
                             reviewRow("Vehicle Number", vehicleNumber)
                             reviewRow("Vehicle Type", vehicleType)
-                            reviewRow("Mileage", "\(mileage) km")
+                            reviewRow("Mileage (km)", mileage)
                             reviewRow("Purpose", purpose)
                         }
 

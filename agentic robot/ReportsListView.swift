@@ -57,6 +57,7 @@ private struct PendingReportDeletion: Identifiable {
 
 // MARK: - Reports List View
 struct ReportsListView: View {
+    private let initialReportID: String?
 
     @State private var selectedCategory: ReportCategory = .np299
 
@@ -74,6 +75,11 @@ struct ReportsListView: View {
     @State private var isDeleting = false
     @State private var deletionFeedbackTitle = ""
     @State private var deletionFeedbackMessage: String? = nil
+    @State private var didHandleInitialReport = false
+
+    init(initialReportID: String? = nil) {
+        self.initialReportID = initialReportID
+    }
 
     private var activeDocs: [RawReportDocument] {
         switch selectedCategory {
@@ -305,7 +311,25 @@ struct ReportsListView: View {
         group.enter()
         fetchCollection("fuel_refuel_reports") { fuelDocs = $0; group.leave() }
 
-        group.notify(queue: .main) { isLoading = false }
+        group.notify(queue: .main) {
+            isLoading = false
+            openInitialReportIfNeeded()
+        }
+    }
+
+    private func openInitialReportIfNeeded() {
+        guard !didHandleInitialReport,
+              let initialReportID,
+              !initialReportID.isEmpty else { return }
+
+        didHandleInitialReport = true
+        selectedCategory = .np299
+        if let report = np299Docs.first(where: { $0.id == initialReportID }) {
+            selectedDoc = report
+        } else {
+            deletionFeedbackTitle = "Report Unavailable"
+            deletionFeedbackMessage = "This NP299 report may have been deleted or is no longer available."
+        }
     }
 
     private func fetchCollection(_ collection: String, completion: @escaping ([RawReportDocument]) -> Void) {
@@ -621,7 +645,7 @@ struct SecComDetailSheet: View {
     private var bodyworkAllInOrder: Bool { d["bodyworkAllInOrder"] as? Bool ?? true }
     private var bodyworkDetails: String { d["bodyworkDetails"] as? String ?? "" }
     private var adminReviewStatus: ChecklistAdminReviewStatus {
-        ChecklistAdminReviewStatus(firestoreValue: d["adminReviewStatus"])
+        ChecklistAdminReviewStatus(firestoreData: d)
     }
     private var adminReviewedByName: String {
         d["adminReviewedByName"] as? String ?? ""
@@ -648,39 +672,37 @@ struct SecComDetailSheet: View {
                             accent: accent
                         )
 
-                        if adminReviewStatus != .pending {
-                            sectionCard(
-                                title: "Administrator Review",
-                                icon: adminReviewStatus.icon,
-                                accent: adminReviewStatus.color
-                            ) {
-                                StatusDetailRow(
-                                    label: "Decision",
-                                    value: adminReviewStatus.title,
-                                    systemImage: adminReviewStatus.icon,
-                                    tint: adminReviewStatus.color
-                                )
+                        sectionCard(
+                            title: "Officer Review",
+                            icon: adminReviewStatus.icon,
+                            accent: adminReviewStatus.color
+                        ) {
+                            StatusDetailRow(
+                                label: "Decision",
+                                value: adminReviewStatus.title,
+                                systemImage: adminReviewStatus.icon,
+                                tint: adminReviewStatus.color
+                            )
 
-                                if !adminReviewedByName.isEmpty {
-                                    Divider().padding(.leading, 16)
-                                    DetailRow(label: "Reviewed By", value: adminReviewedByName)
-                                }
+                            if !adminReviewedByName.isEmpty {
+                                Divider().padding(.leading, 16)
+                                DetailRow(label: "Reviewed By", value: adminReviewedByName)
+                            }
 
-                                if let adminReviewedAt {
-                                    Divider().padding(.leading, 16)
-                                    DetailRow(
-                                        label: "Reviewed On",
-                                        value: adminReviewedAt.formatted(
-                                            date: .abbreviated,
-                                            time: .shortened
-                                        )
+                            if let adminReviewedAt {
+                                Divider().padding(.leading, 16)
+                                DetailRow(
+                                    label: "Reviewed On",
+                                    value: adminReviewedAt.formatted(
+                                        date: .abbreviated,
+                                        time: .shortened
                                     )
-                                }
+                                )
+                            }
 
-                                if !adminReviewNotes.isEmpty {
-                                    Divider().padding(.leading, 16)
-                                    DetailRow(label: "Review Notes", value: adminReviewNotes)
-                                }
+                            if !adminReviewNotes.isEmpty {
+                                Divider().padding(.leading, 16)
+                                DetailRow(label: "Officer Notes", value: adminReviewNotes)
                             }
                         }
 
@@ -703,7 +725,7 @@ struct SecComDetailSheet: View {
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Vehicle Type",   value: doc.entry.carType)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Mileage",        value: kilometreValue(d["mileage"] as? String))
+                            DetailRow(label: "Mileage (km)",   value: d["mileage"] as? String ?? "-")
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Purpose",        value: d["purpose"] as? String ?? "-")
                         }
@@ -1186,7 +1208,7 @@ struct FuelDetailSheet: View {
 
                     if !followUpNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Follow-up Notes")
+                            Text("Officer Notes")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundColor(.primary)
                             Text(followUpNotes)

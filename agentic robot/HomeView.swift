@@ -16,7 +16,7 @@ struct HomeView: View {
     private var fullText: String {
         auth.isAdmin
         ? "What would you like to manage?"
-        : "What report would you like to submit?"
+        : "What would you like to view or submit?"
     }
 
     var body: some View {
@@ -202,7 +202,19 @@ struct HomeView: View {
                             .buttonStyle(.plain)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         } else {
-                            // Member report forms
+                            // Member report history and forms
+                            NavigationLink {
+                                MemberReportsView()
+                            } label: {
+                                HomeActionRow(
+                                    icon: "folder.badge.person.crop",
+                                    title: "My Reports",
+                                    subtitle: "Track your submissions, decisions and officer notes"
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+
                             ForEach(ReportType.allCases) { type in
                                 ReportTypeCard(type: type) {
                                     switch type {
@@ -259,17 +271,17 @@ struct HomeView: View {
         typewriterTask = Task {
             for char in fullText {
                 if Task.isCancelled { return }
-                try? await Task.sleep(for: .milliseconds(38))
+                try? await Task.sleep(for: .milliseconds(10))
                 if Task.isCancelled { return }
                 await MainActor.run { displayedText.append(char) }
             }
 
             if Task.isCancelled { return }
-            try? await Task.sleep(for: .milliseconds(180))
+            try? await Task.sleep(for: .milliseconds(80))
 
             await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.35)) { showSubtitle = true }
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.85).delay(0.12)) {
+                withAnimation(.easeInOut(duration: 0.2)) { showSubtitle = true }
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85).delay(0.05)) {
                     showButtons = true
                 }
             }

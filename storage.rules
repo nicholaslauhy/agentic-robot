@@ -28,19 +28,56 @@ service firebase.storage {
         && request.resource.contentType.matches("image/.*");
     }
 
+    function ownsReport(reportId) {
+      return isMember()
+        && firestore.exists(/databases/(default)/documents/reports/$(reportId))
+        && firestore.get(/databases/(default)/documents/reports/$(reportId)).data.get("createdByUid", "")
+          == request.auth.uid;
+    }
+
+    function reportComesFromOwnChecklist(reportId) {
+      let report = firestore.get(/databases/(default)/documents/reports/$(reportId));
+      let checklistId = report.data.get("sourceChecklistId", "");
+      return isMember()
+        && checklistId is string
+        && checklistId.size() > 0
+        && firestore.exists(/databases/(default)/documents/seccom_checklists/$(checklistId))
+        && firestore.get(/databases/(default)/documents/seccom_checklists/$(checklistId)).data.get("createdByUid", "")
+          == request.auth.uid;
+    }
+
+    function ownsRefuelReport(reportId) {
+      return isMember()
+        && firestore.exists(/databases/(default)/documents/fuel_refuel_reports/$(reportId))
+        && firestore.get(/databases/(default)/documents/fuel_refuel_reports/$(reportId)).data.get("createdByUid", "")
+          == request.auth.uid;
+    }
+
+    function ownsChecklist(reportId) {
+      return isMember()
+        && firestore.exists(/databases/(default)/documents/seccom_checklists/$(reportId))
+        && firestore.get(/databases/(default)/documents/seccom_checklists/$(reportId)).data.get("createdByUid", "")
+          == request.auth.uid;
+    }
+
     match /reports/{reportId}/{fileName} {
       allow create: if hasActiveProfile() && isPDFWithinLimit();
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin()
+        || ownsReport(reportId)
+        || reportComesFromOwnChecklist(reportId);
+      allow update, delete: if isAdmin();
     }
 
     match /fuel_refuel_reports/{reportId}/{fileName} {
       allow create: if isMember() && isImageWithinLimit();
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin() || ownsRefuelReport(reportId);
+      allow update, delete: if isAdmin();
     }
 
     match /seccom_checklists/{reportId}/damage_images/{fileName} {
       allow create: if isMember() && isImageWithinLimit();
-      allow read, update, delete: if isAdmin();
+      allow read: if isAdmin() || ownsChecklist(reportId);
+      allow update, delete: if isAdmin();
     }
   }
 }

@@ -27,6 +27,39 @@ service cloud.firestore {
         && request.resource.data.createdByUid == request.auth.uid;
     }
 
+    function ownsExistingDocument() {
+      return isMember()
+        && resource.data.get("createdByUid", "") == request.auth.uid;
+    }
+
+    function reportComesFromOwnChecklist() {
+      let checklistId = resource.data.get("sourceChecklistId", "");
+      return isMember()
+        && checklistId is string
+        && checklistId.size() > 0
+        && exists(/databases/$(database)/documents/seccom_checklists/$(checklistId))
+        && get(/databases/$(database)/documents/seccom_checklists/$(checklistId)).data.get("createdByUid", "")
+          == request.auth.uid;
+    }
+
+    function validChecklistReviewTransition() {
+      let before = resource.data.get("adminReviewStatus", "pending");
+      let after = request.resource.data.get("adminReviewStatus", "pending");
+      return after in [
+          "pending",
+          "escalation_required",
+          "np299_in_progress",
+          "np299_filed",
+          "no_escalation"
+        ]
+        && (
+          before == after
+          || (before == "pending" && after in ["escalation_required", "no_escalation"])
+          || (before == "escalation_required" && after in ["np299_in_progress", "np299_filed"])
+          || (before == "np299_in_progress" && after == "np299_filed")
+        );
+    }
+
     match /users/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
@@ -54,7 +87,10 @@ service cloud.firestore {
         && isAttributedToCurrentUser()
         && request.resource.data.reportNo is string
         && request.resource.data.plate is string;
-      allow read, delete: if isAdmin();
+      allow read: if isAdmin()
+        || ownsExistingDocument()
+        || reportComesFromOwnChecklist();
+      allow delete: if isAdmin();
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "sourceChecklistId",
@@ -67,7 +103,8 @@ service cloud.firestore {
         && isAttributedToCurrentUser()
         && request.resource.data.reportType == "seccom_checklist"
         && request.resource.data.adminReviewStatus == "pending";
-      allow read, delete: if isAdmin();
+      allow read: if isAdmin() || ownsExistingDocument();
+      allow delete: if isAdmin();
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "adminReviewStatus",
@@ -79,15 +116,13 @@ service cloud.firestore {
           "adminReviewedAt",
           "np299ReportId",
           "np299ReportNo",
-          "np299GeneratedAt"
+          "np299GeneratedAt",
+          "baselineUpdateStatus",
+          "baselineUpdatedAngles",
+          "baselineUpdatedAt",
+          "baselineUpdateError"
         ])
-        && request.resource.data.get("adminReviewStatus", "pending")
-          in ["pending", "escalation_required", "no_escalation"]
-        && (
-          resource.data.get("adminReviewStatus", "pending") == "pending"
-          || request.resource.data.get("adminReviewStatus", "pending")
-            == resource.data.get("adminReviewStatus", "pending")
-        );
+        && validChecklistReviewTransition();
     }
 
     match /fuel_refuel_reports/{reportId} {
@@ -95,7 +130,8 @@ service cloud.firestore {
         && isAttributedToCurrentUser()
         && request.resource.data.reportType == "fuel_refuel"
         && request.resource.data.get("adminFollowUpStatus", "pending") == "pending";
-      allow read, delete: if isAdmin();
+      allow read: if isAdmin() || ownsExistingDocument();
+      allow delete: if isAdmin();
       allow update: if isAdmin()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           "adminFollowUpStatus",
