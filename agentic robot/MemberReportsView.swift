@@ -405,6 +405,9 @@ struct MemberReportsView: View {
     private func memberReportCard(_ item: MemberReportItem) -> some View {
         let entry = item.document.entry
         let status = item.status
+        let hasOfficerNotes = !item.officerNotes
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
 
         return VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .top, spacing: 12) {
@@ -429,25 +432,28 @@ struct MemberReportsView: View {
 
                 Spacer(minLength: 8)
 
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundColor(.secondary)
+                HStack(spacing: 7) {
+                    Label(status.title, systemImage: status.icon)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundColor(status.color)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(status.color.opacity(0.10))
+                        .clipShape(Capsule())
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundColor(.secondary)
+                }
             }
 
-            HStack(spacing: 8) {
-                Label(status.title, systemImage: status.icon)
+            if hasOfficerNotes {
+                Label("Officer Notes", systemImage: "text.bubble.fill")
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(status.color)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(status.color.opacity(0.10))
-                    .clipShape(Capsule())
-
-                if !item.officerNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label("Officer Notes", systemImage: "text.bubble.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(HTXTheme.primaryPurple)
-                }
+                    .foregroundColor(HTXTheme.primaryPurple)
+                    .padding(.leading, 54)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
