@@ -621,7 +621,7 @@ struct SecComDetailSheet: View {
     private var bodyworkAllInOrder: Bool { d["bodyworkAllInOrder"] as? Bool ?? true }
     private var bodyworkDetails: String { d["bodyworkDetails"] as? String ?? "" }
     private var adminReviewStatus: ChecklistAdminReviewStatus {
-        ChecklistAdminReviewStatus(firestoreValue: d["adminReviewStatus"])
+        ChecklistAdminReviewStatus(firestoreData: d)
     }
     private var adminReviewedByName: String {
         d["adminReviewedByName"] as? String ?? ""
@@ -701,7 +701,7 @@ struct SecComDetailSheet: View {
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Vehicle Type",   value: doc.entry.carType)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Mileage",        value: kilometreValue(d["mileage"] as? String))
+                            DetailRow(label: "Mileage (km)",   value: d["mileage"] as? String ?? "-")
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Purpose",        value: d["purpose"] as? String ?? "-")
                         }

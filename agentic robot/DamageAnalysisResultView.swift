@@ -3884,7 +3884,8 @@ struct PoliceReportStageTwoView: View {
         var checklistUpdate: [String: Any] = [
             "np299ReportId": reportID,
             "np299ReportNo": reportNo,
-            "np299GeneratedAt": FieldValue.serverTimestamp()
+            "np299GeneratedAt": FieldValue.serverTimestamp(),
+            "adminReviewStatus": ChecklistAdminReviewStatus.np299Filed.rawValue
         ]
 
         if baselineAngles.isEmpty {

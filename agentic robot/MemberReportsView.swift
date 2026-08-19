@@ -70,7 +70,7 @@ private struct MemberReportItem: Identifiable {
             )
 
         case .secCom:
-            switch ChecklistAdminReviewStatus(firestoreValue: document.raw["adminReviewStatus"]) {
+            switch ChecklistAdminReviewStatus(firestoreData: document.raw) {
             case .pending:
                 return MemberReportStatus(
                     title: "Pending Review",
@@ -83,6 +83,20 @@ private struct MemberReportItem: Identifiable {
                     title: "NP299 Required",
                     icon: "exclamationmark.shield.fill",
                     color: HTXTheme.primaryPurple,
+                    isPending: true
+                )
+            case .np299InProgress:
+                return MemberReportStatus(
+                    title: "NP299 In Progress",
+                    icon: "doc.badge.clock.fill",
+                    color: .blue,
+                    isPending: true
+                )
+            case .np299Filed:
+                return MemberReportStatus(
+                    title: "NP299 Filed",
+                    icon: "checkmark.seal.fill",
+                    color: .green,
                     isPending: false
                 )
             case .noEscalation:

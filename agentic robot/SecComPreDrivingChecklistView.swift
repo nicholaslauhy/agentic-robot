@@ -387,7 +387,7 @@ struct SecComPreDrivingChecklistView: View {
                         }
 
                         Divider()
-                        formRow(label: "Mileage", required: true) {
+                        formRow(label: "Mileage (km)", required: true) {
                             TextField("Numbers only, e.g. 12345", text: $mileage)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
@@ -1065,7 +1065,7 @@ struct SecComPreDrivingChecklistView: View {
         if contact.isEmpty { issues.append("Work Contact") }
         if effectivePlate.isEmpty { issues.append(useOtherVehicle ? "Car Plate" : "Vehicle Number") }
         if effectiveCarType.isEmpty { issues.append(useOtherVehicle ? "Car Type" : "Vehicle Type") }
-        if cleanMileage.isEmpty { issues.append("Mileage") }
+        if cleanMileage.isEmpty { issues.append("Mileage (km)") }
         if purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { issues.append("Purpose") }
         if !bodyworkAllInOrder,
            bodyworkOtherDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -2464,7 +2464,7 @@ private struct SecComChecklistReviewSheet: View {
                         reviewCard(title: "Vehicle", icon: "car.fill") {
                             reviewRow("Vehicle Number", vehicleNumber)
                             reviewRow("Vehicle Type", vehicleType)
-                            reviewRow("Mileage", "\(mileage) km")
+                            reviewRow("Mileage (km)", mileage)
                             reviewRow("Purpose", purpose)
                         }
 

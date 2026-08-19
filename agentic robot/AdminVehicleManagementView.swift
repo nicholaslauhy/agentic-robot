@@ -1158,9 +1158,7 @@ private struct VehicleManagementDetailView: View {
                         case .np299:
                             detail = "\(rawReport.entry.detectionCount) recorded damage case\(rawReport.entry.detectionCount == 1 ? "" : "s")"
                         case .checklist:
-                            detail = ChecklistAdminReviewStatus(
-                                firestoreValue: data["adminReviewStatus"]
-                            ).title
+                            detail = ChecklistAdminReviewStatus(firestoreData: data).title
                         case .refuel:
                             detail = FuelFollowUpStatus(
                                 firestoreValue: data["adminFollowUpStatus"]
