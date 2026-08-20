@@ -1521,25 +1521,27 @@ struct FuelDetailSheet: View {
                                 pendingFollowUpDecision = .rejected
                             } label: {
                                 Label("Reject Report", systemImage: "xmark.octagon.fill")
-                                    .font(.headline)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .frame(maxWidth: .infinity, minHeight: 40)
                             }
                             .buttonStyle(.bordered)
                             .tint(.red)
-                            .controlSize(.large)
+                            .controlSize(.regular)
 
                             Button {
                                 pendingFollowUpDecision = .completed
                             } label: {
-                            Label("Mark Follow-up Completed", systemImage: "checkmark.seal.fill")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
+                                Label("Mark Follow-up Completed", systemImage: "checkmark.seal.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.80)
+                                    .frame(maxWidth: .infinity, minHeight: 40)
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(accent)
-                            .controlSize(.large)
+                            .controlSize(.regular)
                         }
                     }
                 } else {
