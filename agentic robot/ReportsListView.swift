@@ -235,10 +235,14 @@ struct ReportsListView: View {
         .sheet(item: $selectedDoc) { doc in
             switch selectedCategory {
             case .np299:
-                ReportDetailSheet(report: doc.entry) { url in
-                    selectedDoc = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { selectedPDFURL = url }
-                }
+                ReportDetailSheet(
+                    document: doc,
+                    onViewPDF: { url in
+                        selectedDoc = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { selectedPDFURL = url }
+                    },
+                    onVehicleStatusFollowUpResolved: fetchAll
+                )
             case .secCom:
                 SecComDetailSheet(doc: doc)
             case .fuel:
@@ -477,12 +481,22 @@ private struct ReportRowCard: View {
 
 // MARK: - NP299 Detail Sheet (PDF-based, unchanged)
 struct ReportDetailSheet: View {
-    let report: ReportEntry
+    let document: RawReportDocument
     var onViewPDF: (URL) -> Void
+    var onVehicleStatusFollowUpResolved: () -> Void = {}
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject private var auth: AuthViewModel
     @State private var pdfErrorMessage: String? = nil
     @State private var isLoadingPDF = false
+
+    private var report: ReportEntry { document.entry }
+
+    private var hasVehicleStatusFollowUp: Bool {
+        guard let status = document.raw["vehicleStatusFollowUpStatus"] as? String else {
+            return false
+        }
+        return status == "pending" || status == "completed"
+    }
 
     private var generatedByText: String {
         let t = report.generatedBy.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -530,13 +544,14 @@ struct ReportDetailSheet: View {
                         // perform the same vehicle follow-up as an administrator who filed
                         // the report directly. It is intentionally not shown at the earlier
                         // "NP299 Required" escalation stage.
-                        if auth.isAdmin {
+                        if auth.isAdmin, hasVehicleStatusFollowUp {
                             PostReportVehicleStatusView(
                                 plate: report.plate,
                                 carType: report.carType,
                                 reportID: report.id,
                                 reportNo: report.reportNo,
-                                sourceChecklistID: nil
+                                sourceChecklistID: document.raw["sourceChecklistId"] as? String,
+                                onResolved: onVehicleStatusFollowUpResolved
                             )
                             .padding(.horizontal)
                         }

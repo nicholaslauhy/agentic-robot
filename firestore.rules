@@ -60,6 +60,21 @@ service cloud.firestore {
         );
     }
 
+    function validVehicleStatusFollowUpTransition() {
+      let before = resource.data.get("vehicleStatusFollowUpStatus", "");
+      let after = request.resource.data.get("vehicleStatusFollowUpStatus", "");
+      return before == after
+        || (before == "pending" && after == "completed");
+    }
+
+    function validReportBaselineTransition() {
+      let before = resource.data.get("baselineUpdateStatus", "not_required");
+      let after = request.resource.data.get("baselineUpdateStatus", "not_required");
+      return before == after
+        || (before == "pending" && after in ["updated", "failed"])
+        || (before == "failed" && after in ["updated", "failed"]);
+    }
+
     match /users/{userId} {
       allow get: if signedIn() && (request.auth.uid == userId || isAdmin());
       allow list: if isAdmin();
@@ -86,16 +101,42 @@ service cloud.firestore {
       allow create: if hasActiveProfile()
         && isAttributedToCurrentUser()
         && request.resource.data.reportNo is string
-        && request.resource.data.plate is string;
+        && request.resource.data.plate is string
+        && request.resource.data.vehicleStatusFollowUpStatus == "pending";
       allow read: if isAdmin()
         || ownsExistingDocument()
         || reportComesFromOwnChecklist();
       allow delete: if isAdmin();
-      allow update: if isAdmin()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          "sourceChecklistId",
-          "sourceChecklistReportNo"
-        ]);
+      allow update: if (
+          isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "sourceChecklistId",
+            "sourceChecklistReportNo",
+            "vehicleStatusFollowUpStatus",
+            "vehicleStatusFollowUpResolution",
+            "vehicleStatusFollowUpPreviousStatus",
+            "vehicleStatusFollowUpNewStatus",
+            "vehicleStatusFollowUpNotes",
+            "vehicleStatusFollowedUpByUid",
+            "vehicleStatusFollowedUpByName",
+            "vehicleStatusFollowedUpAt",
+            "baselineUpdateStatus",
+            "baselineUpdatedAngles",
+            "baselineUpdatedAt",
+            "baselineUpdateError"
+          ])
+          && validVehicleStatusFollowUpTransition()
+          && validReportBaselineTransition()
+        ) || (
+          ownsExistingDocument()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "baselineUpdateStatus",
+            "baselineUpdatedAngles",
+            "baselineUpdatedAt",
+            "baselineUpdateError"
+          ])
+          && validReportBaselineTransition()
+        );
     }
 
     match /seccom_checklists/{reportId} {

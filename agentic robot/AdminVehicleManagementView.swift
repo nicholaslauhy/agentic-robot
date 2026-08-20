@@ -82,7 +82,7 @@ private enum VehicleStatusFilter: String, CaseIterable, Identifiable {
 
 private enum VehicleListScope: String, CaseIterable, Identifiable {
     case all = "All Vehicles"
-    case withReports = "With Reports"
+    case statusFollowUp = "Status Follow-up"
 
     var id: String { rawValue }
 }
@@ -170,25 +170,38 @@ private struct VehicleBaselineSnapshot: Identifiable {
 
 struct AdminVehicleManagementView: View {
     @State private var vehicles: [ManagedVehicle] = []
-    @State private var reportVehicleIDs: Set<String> = []
+    @State private var pendingStatusFollowUps: [RawReportDocument] = []
+    @State private var selectedStatusFollowUp: RawReportDocument?
+    @State private var selectedPDFURL: URL?
     @State private var selectedScope: VehicleListScope = .all
     @State private var selectedFilter: VehicleStatusFilter = .all
     @State private var selectedVehicleType: String?
     @State private var searchText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var statusFollowUpError: String?
 
     private var filteredVehicles: [ManagedVehicle] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return vehicles.filter { vehicle in
-            let matchesScope = selectedScope == .all || reportVehicleIDs.contains(vehicle.id)
             let matchesFilter = selectedFilter.status == nil || vehicle.status == selectedFilter.status
             let matchesVehicleType = selectedVehicleType == nil || vehicle.carType == selectedVehicleType
-            guard matchesScope, matchesFilter, matchesVehicleType else { return false }
+            guard matchesFilter, matchesVehicleType else { return false }
             guard !query.isEmpty else { return true }
             return vehicle.plate.lowercased().contains(query)
                 || vehicle.carType.lowercased().contains(query)
                 || vehicle.status.title.lowercased().contains(query)
+        }
+    }
+
+    private var filteredStatusFollowUps: [RawReportDocument] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return pendingStatusFollowUps }
+        return pendingStatusFollowUps.filter { document in
+            document.entry.plate.lowercased().contains(query)
+                || document.entry.reportNo.lowercased().contains(query)
+                || document.entry.carType.lowercased().contains(query)
+                || document.entry.generatedBy.lowercased().contains(query)
         }
     }
 
@@ -222,14 +235,36 @@ struct AdminVehicleManagementView: View {
                 summaryHeader
                 scopePicker
                 searchBar
-                vehicleTypeFilter
-                filterBar
-                content
+                if selectedScope == .all {
+                    vehicleTypeFilter
+                    filterBar
+                    content
+                } else {
+                    statusFollowUpContent
+                }
             }
         }
         .navigationTitle("Vehicle Management")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: fetchVehicles)
+        .onChange(of: selectedScope) { _, _ in
+            searchText = ""
+        }
+        .sheet(item: $selectedStatusFollowUp) { document in
+            ReportDetailSheet(
+                document: document,
+                onViewPDF: { url in
+                    selectedStatusFollowUp = nil
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        selectedPDFURL = url
+                    }
+                },
+                onVehicleStatusFollowUpResolved: fetchVehicles
+            )
+        }
+        .sheet(item: $selectedPDFURL) { url in
+            ReportPDFPreviewView(url: url)
+        }
         .requiresRole(.admin)
     }
 
@@ -240,14 +275,14 @@ struct AdminVehicleManagementView: View {
                 .foregroundColor(.secondary)
 
             Picker("Vehicle list", selection: $selectedScope) {
-                ForEach(VehicleListScope.allCases) { scope in
-                    Text(scope.rawValue).tag(scope)
-                }
+                Text(VehicleListScope.all.rawValue).tag(VehicleListScope.all)
+                Text("Status Follow-up (\(pendingStatusFollowUps.count))")
+                    .tag(VehicleListScope.statusFollowUp)
             }
             .pickerStyle(.segmented)
 
-            if selectedScope == .withReports {
-                Text("Vehicles that have at least one NP299, pre-driving checklist or refuel report.")
+            if selectedScope == .statusFollowUp {
+                Text("New NP299 reports stay here until an administrator updates the vehicle status or confirms that no change is needed.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -328,7 +363,12 @@ struct AdminVehicleManagementView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
-            TextField("Search vehicle number, type or status", text: $searchText)
+            TextField(
+                selectedScope == .all
+                    ? "Search vehicle number, type or status"
+                    : "Search pending vehicle or report",
+                text: $searchText
+            )
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
             if !searchText.isEmpty {
@@ -482,6 +522,108 @@ struct AdminVehicleManagementView: View {
         }
     }
 
+    @ViewBuilder
+    private var statusFollowUpContent: some View {
+        if isLoading {
+            Spacer()
+            ProgressView("Loading pending follow-ups…")
+                .tint(HTXTheme.primaryPurple)
+            Spacer()
+        } else if let statusFollowUpError, pendingStatusFollowUps.isEmpty {
+            Spacer()
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.orange)
+                Text(statusFollowUpError)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Retry", action: fetchVehicles)
+                    .buttonStyle(.borderedProminent)
+                    .tint(HTXTheme.primaryPurple)
+            }
+            .padding()
+            Spacer()
+        } else if filteredStatusFollowUps.isEmpty {
+            Spacer()
+            ContentUnavailableView(
+                searchText.isEmpty ? "No pending follow-ups" : "No matching follow-ups",
+                systemImage: "checkmark.seal.fill",
+                description: Text(
+                    searchText.isEmpty
+                        ? "Every filed NP299 has a completed vehicle-status decision."
+                        : "Try another vehicle number or report number."
+                )
+            )
+            Spacer()
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(filteredStatusFollowUps) { document in
+                        Button {
+                            selectedStatusFollowUp = document
+                        } label: {
+                            statusFollowUpRow(document)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+            }
+            .refreshable { fetchVehicles() }
+        }
+    }
+
+    private func statusFollowUpRow(_ document: RawReportDocument) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "car.badge.clock.fill")
+                .font(.title3)
+                .foregroundColor(.white)
+                .frame(width: 46, height: 46)
+                .background(HTXTheme.primaryPurple)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(document.entry.plate)
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                Text(document.entry.reportNo)
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(HTXTheme.primaryPurple)
+                Text("Filed by \(document.entry.generatedBy)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("Pending")
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.orange.opacity(0.10))
+                    .clipShape(Capsule())
+                Text(document.entry.shortDate)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(14)
+        .background(Color(.systemBackground).opacity(0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(HTXTheme.primaryPurple.opacity(0.15), lineWidth: 1)
+        )
+    }
+
     private func vehicleTypeHeader(_ section: VehicleTypeSection) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "car.side.fill")
@@ -557,9 +699,11 @@ struct AdminVehicleManagementView: View {
     private func fetchVehicles() {
         isLoading = true
         errorMessage = nil
+        statusFollowUpError = nil
 
         var merged: [String: ManagedVehicle] = [:]
-        var loadedReportVehicleIDs: Set<String> = []
+        var loadedPendingStatusFollowUps: [RawReportDocument] = []
+        var pendingFollowUpError: Error?
         for group in secComVehicleGroups {
             for plate in group.plates {
                 let id = ManagedVehicle.identifier(for: plate)
@@ -609,7 +753,6 @@ struct AdminVehicleManagementView: View {
             collection: "reports",
             plateField: "plate",
             merged: { plate, carType in
-                loadedReportVehicleIDs.insert(ManagedVehicle.identifier(for: plate))
                 mergeReportVehicle(plate: plate, carType: carType, into: &merged)
             },
             captureError: { firstError = firstError ?? $0 }
@@ -620,7 +763,6 @@ struct AdminVehicleManagementView: View {
             collection: "seccom_checklists",
             plateField: "plate",
             merged: { plate, carType in
-                loadedReportVehicleIDs.insert(ManagedVehicle.identifier(for: plate))
                 mergeReportVehicle(plate: plate, carType: carType, into: &merged)
             },
             captureError: { firstError = firstError ?? $0 }
@@ -631,15 +773,35 @@ struct AdminVehicleManagementView: View {
             collection: "fuel_refuel_reports",
             plateField: "vehicleNumber",
             merged: { plate, carType in
-                loadedReportVehicleIDs.insert(ManagedVehicle.identifier(for: plate))
                 mergeReportVehicle(plate: plate, carType: carType, into: &merged)
             },
             captureError: { firstError = firstError ?? $0 }
         )
 
+        dispatchGroup.enter()
+        database.collection("reports")
+            .whereField("vehicleStatusFollowUpStatus", isEqualTo: "pending")
+            .getDocuments { snapshot, error in
+                DispatchQueue.main.async {
+                    if let error { pendingFollowUpError = error }
+                    loadedPendingStatusFollowUps = (snapshot?.documents ?? []).compactMap { document in
+                        makeStatusFollowUpReport(
+                            documentID: document.documentID,
+                            data: document.data()
+                        )
+                    }
+                    dispatchGroup.leave()
+                }
+            }
+
         dispatchGroup.notify(queue: .main) {
             isLoading = false
-            reportVehicleIDs = loadedReportVehicleIDs
+            pendingStatusFollowUps = loadedPendingStatusFollowUps.sorted {
+                ($0.entry.createdAt ?? .distantPast) > ($1.entry.createdAt ?? .distantPast)
+            }
+            statusFollowUpError = pendingFollowUpError.map {
+                "Could not load pending status follow-ups: \($0.localizedDescription)"
+            }
             vehicles = merged.values.sorted { $0.plate.localizedStandardCompare($1.plate) == .orderedAscending }
             if vehicles.isEmpty, let firstError {
                 errorMessage = "Could not load vehicles: \(firstError.localizedDescription)"
@@ -689,6 +851,31 @@ struct AdminVehicleManagementView: View {
         } else if vehicles[id]?.carType == "Unknown vehicle type", !carType.isEmpty {
             vehicles[id]?.carType = carType
         }
+    }
+
+    private func makeStatusFollowUpReport(
+        documentID: String,
+        data: [String: Any]
+    ) -> RawReportDocument? {
+        guard let reportNo = data["reportNo"] as? String,
+              let plate = data["plate"] as? String else {
+            return nil
+        }
+
+        let entry = ReportEntry(
+            id: documentID,
+            reportNo: reportNo,
+            plate: plate,
+            carType: data["carType"] as? String ?? "Unknown vehicle type",
+            generatedBy: data["generatedBy"] as? String ?? "Not recorded",
+            detectionCount: data["detectionCount"] as? Int ?? 0,
+            createdAt: (data["createdAt"] as? Timestamp)?.dateValue(),
+            barcodeId: data["barcodeId"] as? String ?? documentID,
+            pdfFileName: data["pdfFileName"] as? String,
+            pdfBase64: data["pdfBase64"] as? String,
+            pdfStoragePath: data["pdfStoragePath"] as? String
+        )
+        return RawReportDocument(id: documentID, entry: entry, raw: data)
     }
 }
 
@@ -745,12 +932,16 @@ private struct VehicleManagementDetailView: View {
             if let report = item.report {
                 switch item.category {
                 case .np299:
-                    ReportDetailSheet(report: report.entry) { url in
-                        selectedHistory = nil
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            selectedPDFURL = url
-                        }
-                    }
+                    ReportDetailSheet(
+                        document: report,
+                        onViewPDF: { url in
+                            selectedHistory = nil
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                selectedPDFURL = url
+                            }
+                        },
+                        onVehicleStatusFollowUpResolved: onVehicleUpdated
+                    )
                 case .checklist:
                     SecComDetailSheet(doc: report)
                 case .refuel:

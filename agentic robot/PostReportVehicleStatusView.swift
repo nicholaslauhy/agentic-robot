@@ -11,6 +11,7 @@ struct PostReportVehicleStatusView: View {
     let reportID: String
     let reportNo: String
     let sourceChecklistID: String?
+    var onResolved: () -> Void = {}
 
     @EnvironmentObject private var auth: AuthViewModel
 
@@ -20,6 +21,11 @@ struct PostReportVehicleStatusView: View {
     @State private var statusNotes = ""
     @State private var isLoading = true
     @State private var isSaving = false
+    @State private var reportIsReady = false
+    @State private var followUpStatus = "pending"
+    @State private var followUpResolution = ""
+    @State private var followedUpBy = ""
+    @State private var followedUpAt: Date?
     @State private var statusMessage: String?
     @State private var statusError: String?
 
@@ -31,6 +37,10 @@ struct PostReportVehicleStatusView: View {
         selectedStatus != currentStatus
             || statusNotes.trimmingCharacters(in: .whitespacesAndNewlines)
                 != currentNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var isResolved: Bool {
+        followUpStatus == "completed"
     }
 
     var body: some View {
@@ -45,7 +55,7 @@ struct PostReportVehicleStatusView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Vehicle Status Follow-up")
                         .font(.headline)
-                    Text("Optional — update the vehicle after filing this NP299 report.")
+                    Text("Review the vehicle after this NP299 report was filed.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -58,7 +68,50 @@ struct PostReportVehicleStatusView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+            } else if !reportIsReady {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(
+                        "The NP299 report is still being saved. Retry once the report is available.",
+                        systemImage: "clock.badge.exclamationmark"
+                    )
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+
+                    Button("Retry", action: reloadStatus)
+                        .buttonStyle(.bordered)
+                        .tint(HTXTheme.primaryPurple)
+                }
+            } else if isResolved {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(
+                        followUpResolution == "no_change"
+                            ? "No change to vehicle status"
+                            : "Vehicle status updated to \(currentStatus.title)",
+                        systemImage: "checkmark.seal.fill"
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.green)
+
+                    if !followedUpBy.isEmpty {
+                        Text("Completed by \(followedUpBy)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if let followedUpAt {
+                        Text(followedUpAt.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(Color.green.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             } else {
+                Text("Current status: \(currentStatus.title)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+
                 Menu {
                     ForEach(VehicleOperationalStatus.allCases) { status in
                         Button {
@@ -112,8 +165,17 @@ struct PostReportVehicleStatusView: View {
                         .foregroundColor(.green)
                 }
 
-                HStack {
-                    Spacer()
+                HStack(spacing: 10) {
+                    Button(action: resolveWithoutStatusChange) {
+                        Text("No Status Change")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 40)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(HTXTheme.primaryPurple)
+                    .disabled(isSaving)
+
                     Button(action: saveStatus) {
                         HStack(spacing: 7) {
                             if isSaving {
@@ -121,10 +183,10 @@ struct PostReportVehicleStatusView: View {
                             } else {
                                 Image(systemName: "checkmark.circle.fill")
                             }
-                            Text(isSaving ? "Updating…" : "Update Status")
+                            Text(isSaving ? "Saving…" : "Update Status")
                         }
                         .font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity)
                         .frame(height: 40)
                     }
                     .buttonStyle(.borderedProminent)
@@ -156,11 +218,17 @@ struct PostReportVehicleStatusView: View {
         statusError = nil
 
         do {
-            let snapshot = try await Firestore.firestore()
+            let database = Firestore.firestore()
+            let vehicleSnapshot = try await database
                 .collection("vehicles")
                 .document(vehicleID)
                 .getDocument()
-            let data = snapshot.data() ?? [:]
+            let reportSnapshot = try await database
+                .collection("reports")
+                .document(reportID)
+                .getDocument()
+            let data = vehicleSnapshot.data() ?? [:]
+            let reportData = reportSnapshot.data() ?? [:]
             let loadedStatus = VehicleOperationalStatus(
                 firestoreValue: data["operationalStatus"]
             )
@@ -170,11 +238,20 @@ struct PostReportVehicleStatusView: View {
             selectedStatus = loadedStatus
             currentNotes = loadedNotes
             statusNotes = loadedNotes
+            reportIsReady = reportSnapshot.exists
+            followUpStatus = reportData["vehicleStatusFollowUpStatus"] as? String ?? "pending"
+            followUpResolution = reportData["vehicleStatusFollowUpResolution"] as? String ?? ""
+            followedUpBy = reportData["vehicleStatusFollowedUpByName"] as? String ?? ""
+            followedUpAt = (reportData["vehicleStatusFollowedUpAt"] as? Timestamp)?.dateValue()
             isLoading = false
         } catch {
             isLoading = false
             statusError = "Could not load vehicle status: \(error.localizedDescription)"
         }
+    }
+
+    private func reloadStatus() {
+        Task { await loadStatus() }
     }
 
     private func saveStatus() {
@@ -187,6 +264,7 @@ struct PostReportVehicleStatusView: View {
         let database = Firestore.firestore()
         let vehicleReference = database.collection("vehicles").document(vehicleID)
         let historyReference = vehicleReference.collection("statusHistory").document()
+        let reportReference = database.collection("reports").document(reportID)
         let cleanedNotes = statusNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         let changedBy = auth.currentUsername.isEmpty ? auth.currentEmail : auth.currentUsername
         let previousStatus = currentStatus
@@ -220,9 +298,21 @@ struct PostReportVehicleStatusView: View {
             historyPayload["sourceChecklistId"] = sourceChecklistID
         }
 
+        let reportFollowUpPayload: [String: Any] = [
+            "vehicleStatusFollowUpStatus": "completed",
+            "vehicleStatusFollowUpResolution": "status_updated",
+            "vehicleStatusFollowUpPreviousStatus": previousStatus.rawValue,
+            "vehicleStatusFollowUpNewStatus": selectedStatus.rawValue,
+            "vehicleStatusFollowUpNotes": cleanedNotes,
+            "vehicleStatusFollowedUpByUid": auth.user?.uid ?? "",
+            "vehicleStatusFollowedUpByName": changedBy,
+            "vehicleStatusFollowedUpAt": FieldValue.serverTimestamp()
+        ]
+
         let batch = database.batch()
         batch.setData(vehiclePayload, forDocument: vehicleReference, merge: true)
         batch.setData(historyPayload, forDocument: historyReference)
+        batch.setData(reportFollowUpPayload, forDocument: reportReference, merge: true)
         batch.commit { error in
             DispatchQueue.main.async {
                 isSaving = false
@@ -234,8 +324,54 @@ struct PostReportVehicleStatusView: View {
                 currentStatus = selectedStatus
                 currentNotes = cleanedNotes
                 statusNotes = cleanedNotes
+                followUpStatus = "completed"
+                followUpResolution = "status_updated"
+                followedUpBy = changedBy
+                followedUpAt = Date()
                 statusMessage = "Vehicle status updated and linked to \(reportNo)."
+                onResolved()
             }
         }
+    }
+
+    private func resolveWithoutStatusChange() {
+        guard auth.isAdmin, !isSaving, reportIsReady else { return }
+
+        isSaving = true
+        statusError = nil
+        statusMessage = nil
+
+        let changedBy = auth.currentUsername.isEmpty ? auth.currentEmail : auth.currentUsername
+        let cleanedNotes = statusNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload: [String: Any] = [
+            "vehicleStatusFollowUpStatus": "completed",
+            "vehicleStatusFollowUpResolution": "no_change",
+            "vehicleStatusFollowUpPreviousStatus": currentStatus.rawValue,
+            "vehicleStatusFollowUpNewStatus": currentStatus.rawValue,
+            "vehicleStatusFollowUpNotes": cleanedNotes,
+            "vehicleStatusFollowedUpByUid": auth.user?.uid ?? "",
+            "vehicleStatusFollowedUpByName": changedBy,
+            "vehicleStatusFollowedUpAt": FieldValue.serverTimestamp()
+        ]
+
+        Firestore.firestore()
+            .collection("reports")
+            .document(reportID)
+            .setData(payload, merge: true) { error in
+                DispatchQueue.main.async {
+                    isSaving = false
+                    if let error {
+                        statusError = "Could not complete vehicle follow-up: \(error.localizedDescription)"
+                        return
+                    }
+
+                    followUpStatus = "completed"
+                    followUpResolution = "no_change"
+                    followedUpBy = changedBy
+                    followedUpAt = Date()
+                    statusMessage = "Vehicle status follow-up completed with no change."
+                    onResolved()
+                }
+            }
     }
 }

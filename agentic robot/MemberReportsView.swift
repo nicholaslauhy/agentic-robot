@@ -210,12 +210,15 @@ struct MemberReportsView: View {
         .sheet(item: $selectedReport) { item in
             switch item.category {
             case .np299:
-                ReportDetailSheet(report: item.document.entry) { url in
-                    selectedReport = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        selectedPDFURL = url
+                ReportDetailSheet(
+                    document: item.document,
+                    onViewPDF: { url in
+                        selectedReport = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            selectedPDFURL = url
+                        }
                     }
-                }
+                )
             case .secCom:
                 SecComDetailSheet(doc: item.document)
             case .fuel:
