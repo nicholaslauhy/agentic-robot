@@ -49,7 +49,6 @@ struct FuelRefuelView: View {
     @State private var submitSuccess = false
     @State private var showValidationError = false
     @State private var showReviewSheet = false
-    @State private var showGenerateConfirmation = false
 
     private var effectiveVehicleNumber: String {
         useOtherVehicle ? otherPlate.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -354,19 +353,9 @@ struct FuelRefuelView: View {
                 mastercardNumber: mastercardNumber.filter { $0.isNumber },
                 hasReceipt: receiptImage != nil,
                 isSubmitting: isSubmitting,
-                onGenerate: { showGenerateConfirmation = true }
+                onGenerate: submitForm
             )
             .presentationDetents([.large])
-        }
-        .confirmationDialog(
-            "Generate this refuel report?",
-            isPresented: $showGenerateConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Generate Report") { submitForm() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Please confirm that the details are correct before generating the report.")
         }
     }
 
@@ -613,6 +602,7 @@ private struct FuelRefuelReviewSheet: View {
     let onGenerate: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var showGenerateConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -644,7 +634,7 @@ private struct FuelRefuelReviewSheet: View {
                         }
 
                         Button {
-                            onGenerate()
+                            showGenerateConfirmation = true
                         } label: {
                             if isSubmitting {
                                 ProgressView().tint(.white)
@@ -673,6 +663,12 @@ private struct FuelRefuelReviewSheet: View {
                         .fontWeight(.semibold)
                         .foregroundColor(HTXTheme.fuelOrange)
                 }
+            }
+            .alert("Generate this refuel report?", isPresented: $showGenerateConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Generate Report") { onGenerate() }
+            } message: {
+                Text("Please confirm that the details are correct before generating the report.")
             }
         }
     }
