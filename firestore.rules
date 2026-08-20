@@ -142,7 +142,7 @@ service cloud.firestore {
           "adminFollowedUpAt"
         ])
         && request.resource.data.get("adminFollowUpStatus", "pending")
-          in ["pending", "completed"]
+          in ["pending", "completed", "rejected"]
         && (
           resource.data.get("adminFollowUpStatus", "pending") == "pending"
           || request.resource.data.get("adminFollowUpStatus", "pending")

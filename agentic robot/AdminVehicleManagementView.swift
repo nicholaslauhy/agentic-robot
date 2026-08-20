@@ -80,6 +80,13 @@ private enum VehicleStatusFilter: String, CaseIterable, Identifiable {
     }
 }
 
+private enum VehicleListScope: String, CaseIterable, Identifiable {
+    case all = "All Vehicles"
+    case withReports = "With Reports"
+
+    var id: String { rawValue }
+}
+
 private struct VehicleTypeSection: Identifiable {
     let type: String
     let vehicles: [ManagedVehicle]
@@ -163,6 +170,8 @@ private struct VehicleBaselineSnapshot: Identifiable {
 
 struct AdminVehicleManagementView: View {
     @State private var vehicles: [ManagedVehicle] = []
+    @State private var reportVehicleIDs: Set<String> = []
+    @State private var selectedScope: VehicleListScope = .all
     @State private var selectedFilter: VehicleStatusFilter = .all
     @State private var selectedVehicleType: String?
     @State private var searchText = ""
@@ -172,9 +181,10 @@ struct AdminVehicleManagementView: View {
     private var filteredVehicles: [ManagedVehicle] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return vehicles.filter { vehicle in
+            let matchesScope = selectedScope == .all || reportVehicleIDs.contains(vehicle.id)
             let matchesFilter = selectedFilter.status == nil || vehicle.status == selectedFilter.status
             let matchesVehicleType = selectedVehicleType == nil || vehicle.carType == selectedVehicleType
-            guard matchesFilter, matchesVehicleType else { return false }
+            guard matchesScope, matchesFilter, matchesVehicleType else { return false }
             guard !query.isEmpty else { return true }
             return vehicle.plate.lowercased().contains(query)
                 || vehicle.carType.lowercased().contains(query)
@@ -210,6 +220,7 @@ struct AdminVehicleManagementView: View {
 
             VStack(spacing: 0) {
                 summaryHeader
+                scopePicker
                 searchBar
                 vehicleTypeFilter
                 filterBar
@@ -220,6 +231,29 @@ struct AdminVehicleManagementView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: fetchVehicles)
         .requiresRole(.admin)
+    }
+
+    private var scopePicker: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("VEHICLE LIST")
+                .font(.caption2.weight(.bold))
+                .foregroundColor(.secondary)
+
+            Picker("Vehicle list", selection: $selectedScope) {
+                ForEach(VehicleListScope.allCases) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if selectedScope == .withReports {
+                Text("Vehicles that have at least one NP299, pre-driving checklist or refuel report.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 10)
     }
 
     private var summaryHeader: some View {
@@ -525,6 +559,7 @@ struct AdminVehicleManagementView: View {
         errorMessage = nil
 
         var merged: [String: ManagedVehicle] = [:]
+        var loadedReportVehicleIDs: Set<String> = []
         for group in secComVehicleGroups {
             for plate in group.plates {
                 let id = ManagedVehicle.identifier(for: plate)
@@ -574,6 +609,7 @@ struct AdminVehicleManagementView: View {
             collection: "reports",
             plateField: "plate",
             merged: { plate, carType in
+                loadedReportVehicleIDs.insert(ManagedVehicle.identifier(for: plate))
                 mergeReportVehicle(plate: plate, carType: carType, into: &merged)
             },
             captureError: { firstError = firstError ?? $0 }
@@ -584,6 +620,7 @@ struct AdminVehicleManagementView: View {
             collection: "seccom_checklists",
             plateField: "plate",
             merged: { plate, carType in
+                loadedReportVehicleIDs.insert(ManagedVehicle.identifier(for: plate))
                 mergeReportVehicle(plate: plate, carType: carType, into: &merged)
             },
             captureError: { firstError = firstError ?? $0 }
@@ -594,6 +631,7 @@ struct AdminVehicleManagementView: View {
             collection: "fuel_refuel_reports",
             plateField: "vehicleNumber",
             merged: { plate, carType in
+                loadedReportVehicleIDs.insert(ManagedVehicle.identifier(for: plate))
                 mergeReportVehicle(plate: plate, carType: carType, into: &merged)
             },
             captureError: { firstError = firstError ?? $0 }
@@ -601,6 +639,7 @@ struct AdminVehicleManagementView: View {
 
         dispatchGroup.notify(queue: .main) {
             isLoading = false
+            reportVehicleIDs = loadedReportVehicleIDs
             vehicles = merged.values.sorted { $0.plate.localizedStandardCompare($1.plate) == .orderedAscending }
             if vehicles.isEmpty, let firstError {
                 errorMessage = "Could not load vehicles: \(firstError.localizedDescription)"
