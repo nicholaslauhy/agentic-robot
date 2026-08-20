@@ -3509,6 +3509,7 @@ struct PoliceReportStageTwoView: View {
     @State private var showRequiredFieldErrors = false
     @State private var generatedReportID = ""
     @State private var generatedReportNo = ""
+    @State private var reportGenerationError: String? = nil
 
     private var validationIssues: [String] {
         var issues: [String] = []
@@ -3648,6 +3649,17 @@ struct PoliceReportStageTwoView: View {
                 }
             )
         }
+        .alert(
+            "Report Not Generated",
+            isPresented: Binding(
+                get: { reportGenerationError != nil },
+                set: { if !$0 { reportGenerationError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { reportGenerationError = nil }
+        } message: {
+            Text(reportGenerationError ?? "The report could not be completed.")
+        }
     }
 
     @ViewBuilder
@@ -3769,6 +3781,7 @@ struct PoliceReportStageTwoView: View {
     private func generateReport() {
         guard !isGeneratingReport else { return }
         isGeneratingReport = true
+        reportGenerationError = nil
         pdfURL = nil
         generatedReportID = ""
         generatedReportNo = ""
@@ -3786,7 +3799,21 @@ struct PoliceReportStageTwoView: View {
         // and can replace the submitted angles. A checklist escalation contains
         // only the driver's newly confirmed areas, so that path must merge with
         // the existing baseline instead of erasing older damage for that angle.
-        let baselineAngles = makeBaselineBatchAngles(from: detections, scanImages: scanImages)
+        let baselineAngles = makeBaselineBatchAngles(
+            from: detections,
+            scanImages: scanImages,
+            includeEmptyScanAngles: escalationContext == nil
+        )
+        let savedRegionCount = baselineAngles.reduce(0) { $0 + $1.regions.count }
+
+        // Never create a report whose visible/confirmed damage cannot also be
+        // represented in the comparison baseline. This prevents the PDF and the
+        // vehicle baseline from silently disagreeing.
+        guard savedRegionCount == detections.count else {
+            isGeneratingReport = false
+            reportGenerationError = "One or more confirmed damage boxes could not be saved. Return to Damage Analysis, review the affected box, and try again."
+            return
+        }
 
         let scanImages = scanImages
         let policeStation = policeStation
@@ -3802,18 +3829,6 @@ struct PoliceReportStageTwoView: View {
         let escalationContext = escalationContext
 
         Task(priority: .userInitiated) {
-            if escalationContext == nil {
-                do {
-                    try await DamageAnalysisService.shared.confirmBaselineBatch(
-                        plate: plate,
-                        angles: baselineAngles
-                    )
-                    print("Saved updated benchmark for \(plate).")
-                } catch {
-                    print("Failed to save updated benchmark for \(plate):", error)
-                }
-            }
-
             let url = await Task(priority: .userInitiated) {
                 DamageReportGenerator.generatePDF(
                     plate: plate,
@@ -3827,71 +3842,154 @@ struct PoliceReportStageTwoView: View {
                 )
             }.value
 
-            await MainActor.run {
-                isGeneratingReport = false
-                if let url {
-                    generatedReportID = numericBarcodeId
-                    generatedReportNo = reportNo
-                    ReportStore.saveReport(
-                        reportNo: reportNo,
-                        plate: plate,
-                        carType: carTypeValue,
-                        generatedBy: generatedBy,
-                        detectionCount: reportDetections.count,
-                        numericBarcodeId: numericBarcodeId,
-                        pdfURL: url
-                    ) { error in
-                        if let error {
-                            print("Failed to save NP299 report:", error.localizedDescription)
-                            return
-                        }
-
-                        guard let escalationContext else { return }
-                        finalizeEscalatedChecklistBaseline(
-                            context: escalationContext,
-                            reportID: numericBarcodeId,
-                            reportNo: reportNo,
-                            plate: plate,
-                            baselineAngles: baselineAngles
-                        )
-                    }
+            guard let url else {
+                await MainActor.run {
+                    failReportGeneration("The NP299 PDF could not be created. No baseline changes were saved.")
                 }
-                pdfURL = url
+                return
+            }
+
+            ReportStore.saveReport(
+                reportNo: reportNo,
+                plate: plate,
+                carType: carTypeValue,
+                generatedBy: generatedBy,
+                detectionCount: reportDetections.count,
+                numericBarcodeId: numericBarcodeId,
+                baselineUpdatedAngles: baselineAngles.map(\.angle_index),
+                pdfURL: url
+            ) { error in
+                if let error {
+                    DispatchQueue.main.async {
+                        failReportGeneration("The NP299 report could not be stored, so the vehicle baseline was left unchanged.\n\n\(error.localizedDescription)")
+                    }
+                    return
+                }
+
+                updateBaselineForStoredReport(
+                    url: url,
+                    reportID: numericBarcodeId,
+                    reportNo: reportNo,
+                    plate: plate,
+                    escalationContext: escalationContext,
+                    baselineAngles: baselineAngles
+                )
             }
         }
     }
 
-    private func finalizeEscalatedChecklistBaseline(
-        context: NP299EscalationContext,
+    private func updateBaselineForStoredReport(
+        url: URL,
         reportID: String,
         reportNo: String,
         plate: String,
+        escalationContext: NP299EscalationContext?,
         baselineAngles: [ConfirmBaselineBatchAngle]
     ) {
-        Task {
-            var baselineError: Error?
+        guard !baselineAngles.isEmpty else {
+            finishStoredReport(
+                url: url,
+                reportID: reportID,
+                reportNo: reportNo,
+                escalationContext: escalationContext,
+                baselineAngles: baselineAngles
+            )
+            return
+        }
 
-            if !baselineAngles.isEmpty {
-                do {
+        Task(priority: .userInitiated) {
+            do {
+                if escalationContext == nil {
+                    try await DamageAnalysisService.shared.confirmBaselineBatch(
+                        plate: plate,
+                        angles: baselineAngles
+                    )
+                } else {
                     try await DamageAnalysisService.shared.mergeConfirmedDamageIntoBaseline(
                         plate: plate,
                         angles: baselineAngles
                     )
-                    print("Saved checklist damage to the benchmark after NP299 \(reportNo) was filed.")
-                } catch {
-                    baselineError = error
-                    print("NP299 was filed, but its checklist baseline could not be updated:", error)
                 }
+                print("Saved updated benchmark for \(plate) after storing NP299 \(reportNo).")
+            } catch {
+                ReportStore.updateBaselineStatus(
+                    reportID: reportID,
+                    status: "failed",
+                    updatedAngles: baselineAngles.map(\.angle_index),
+                    errorMessage: error.localizedDescription
+                ) { _ in
+                    DispatchQueue.main.async {
+                        failReportGeneration(
+                            "The NP299 report was stored and will remain visible, but its vehicle baseline could not be updated. Check that the backend is running, then retry from the report.\n\n\(error.localizedDescription)"
+                        )
+                    }
+                }
+                return
             }
 
-            linkEscalatedChecklist(
-                context: context,
+            ReportStore.updateBaselineStatus(
                 reportID: reportID,
-                reportNo: reportNo,
-                baselineAngles: baselineAngles,
-                baselineError: baselineError
-            )
+                status: "updated",
+                updatedAngles: baselineAngles.map(\.angle_index)
+            ) { error in
+                if let error {
+                    DispatchQueue.main.async {
+                        failReportGeneration(
+                            "The NP299 report and baseline were saved, but the report status could not be finalised. The report remains available in Historical Reports.\n\n\(error.localizedDescription)"
+                        )
+                    }
+                    return
+                }
+
+                finishStoredReport(
+                    url: url,
+                    reportID: reportID,
+                    reportNo: reportNo,
+                    escalationContext: escalationContext,
+                    baselineAngles: baselineAngles
+                )
+            }
         }
+    }
+
+    private func finishStoredReport(
+        url: URL,
+        reportID: String,
+        reportNo: String,
+        escalationContext: NP299EscalationContext?,
+        baselineAngles: [ConfirmBaselineBatchAngle]
+    ) {
+        guard let escalationContext else {
+            presentGeneratedReport(url: url, reportID: reportID, reportNo: reportNo)
+            return
+        }
+
+        linkEscalatedChecklist(
+            context: escalationContext,
+            reportID: reportID,
+            reportNo: reportNo,
+            baselineAngles: baselineAngles
+        ) { error in
+            if let error {
+                failReportGeneration("The NP299 and baseline were saved, but the SecCom checklist could not be linked. The report remains available in Historical Reports.\n\n\(error.localizedDescription)")
+            } else {
+                presentGeneratedReport(url: url, reportID: reportID, reportNo: reportNo)
+            }
+        }
+    }
+
+    private func presentGeneratedReport(url: URL, reportID: String, reportNo: String) {
+        DispatchQueue.main.async {
+            generatedReportID = reportID
+            generatedReportNo = reportNo
+            isGeneratingReport = false
+            pdfURL = url
+        }
+    }
+
+    private func failReportGeneration(_ message: String) {
+        isGeneratingReport = false
+        reportGenerationError = message
     }
 
     private func linkEscalatedChecklist(
@@ -3899,7 +3997,7 @@ struct PoliceReportStageTwoView: View {
         reportID: String,
         reportNo: String,
         baselineAngles: [ConfirmBaselineBatchAngle],
-        baselineError: Error?
+        completion: @escaping (Error?) -> Void
     ) {
         let database = Firestore.firestore()
         let reportReference = database.collection("reports").document(reportID)
@@ -3916,9 +4014,6 @@ struct PoliceReportStageTwoView: View {
         if baselineAngles.isEmpty {
             checklistUpdate["baselineUpdateStatus"] = "not_required"
             checklistUpdate["baselineUpdateError"] = FieldValue.delete()
-        } else if let baselineError {
-            checklistUpdate["baselineUpdateStatus"] = "failed"
-            checklistUpdate["baselineUpdateError"] = baselineError.localizedDescription
         } else {
             checklistUpdate["baselineUpdateStatus"] = "updated"
             checklistUpdate["baselineUpdatedAngles"] = baselineAngles.map(\.angle_index)
@@ -3939,17 +4034,20 @@ struct PoliceReportStageTwoView: View {
         batch.commit { error in
             if let error {
                 print("Failed to link NP299 report to checklist:", error.localizedDescription)
+                DispatchQueue.main.async { completion(error) }
                 return
             }
             DispatchQueue.main.async {
                 context.onReportSaved(reportNo)
+                completion(nil)
             }
         }
     }
 
     private func makeBaselineBatchAngles(
         from detections: [MutableDamageDetection],
-        scanImages: [UIImage]
+        scanImages: [UIImage],
+        includeEmptyScanAngles: Bool
     ) -> [ConfirmBaselineBatchAngle] {
         var grouped: [Int: [ConfirmBaselineRegion]] = [:]
 
@@ -3959,6 +4057,16 @@ struct PoliceReportStageTwoView: View {
                 continue
             }
             grouped[detection.angleIndex, default: []].append(region)
+        }
+
+        if includeEmptyScanAngles {
+            // A normal NP299 is a complete four-view review. Sending an empty
+            // submitted angle is intentional: it records that the user removed
+            // the last old baseline case from that side. Checklist escalation
+            // does not use this path because its one-sided evidence must merge.
+            for angleIndex in scanImages.indices.prefix(4) {
+                grouped[angleIndex, default: []] = grouped[angleIndex] ?? []
+            }
         }
 
         return grouped.keys.sorted().map { angleIndex in
@@ -3974,76 +4082,6 @@ struct PoliceReportStageTwoView: View {
         from detection: MutableDamageDetection,
         scanImages: [UIImage]
     ) -> ConfirmBaselineRegion? {
-        if let originalX1 = detection.x1, let originalY1 = detection.y1,
-           let originalX2 = detection.x2, let originalY2 = detection.y2,
-           originalX2 > originalX1, originalY2 > originalY1 {
-            let sourceImage: UIImage? = {
-                guard detection.angleIndex >= 0, detection.angleIndex < scanImages.count else {
-                    return detection.cleanContextImage ?? detection.contextImage ?? detection.cropImage
-                }
-                return scanImages[detection.angleIndex]
-            }()
-
-            guard let sourceImage else { return nil }
-            let normalizedSource = sourceImage.htxNormalizedImage()
-            let referenceWidth = max(1, Int(normalizedSource.size.width.rounded()))
-            let referenceHeight = max(1, Int(normalizedSource.size.height.rounded()))
-
-            // The backend coordinates can be based on a resized analysis image,
-            // while the saved reference image can be the original camera image.
-            // Convert the box into the exact coordinate space of the image that
-            // is actually stored. Without this, the later zoom/angle transform
-            // projects a tiny or shifted box even when image alignment succeeds.
-            let coordinateWidth = max(1, detection.imageWidth ?? referenceWidth)
-            let coordinateHeight = max(1, detection.imageHeight ?? referenceHeight)
-            let scaleX = Double(referenceWidth) / Double(coordinateWidth)
-            let scaleY = Double(referenceHeight) / Double(coordinateHeight)
-
-            let x1 = min(max(0, Int((Double(originalX1) * scaleX).rounded())), referenceWidth)
-            let y1 = min(max(0, Int((Double(originalY1) * scaleY).rounded())), referenceHeight)
-            let x2 = min(max(0, Int((Double(originalX2) * scaleX).rounded())), referenceWidth)
-            let y2 = min(max(0, Int((Double(originalY2) * scaleY).rounded())), referenceHeight)
-            guard x2 > x1, y2 > y1 else { return nil }
-
-            let baseRegion = ConfirmBaselineRegion(
-                x1: x1,
-                y1: y1,
-                x2: x2,
-                y2: y2,
-                label: detection.damageType,
-                imageWidth: referenceWidth,
-                imageHeight: referenceHeight,
-                referenceImageBase64: nil,
-                referenceCropBase64: nil,
-                templateX1: nil,
-                templateY1: nil,
-                templateX2: nil,
-                templateY2: nil
-            )
-
-            guard let template = normalizedSource.htxReferenceTemplateBase64(region: baseRegion) else {
-                return baseRegion
-            }
-
-            return ConfirmBaselineRegion(
-                x1: x1,
-                y1: y1,
-                x2: x2,
-                y2: y2,
-                label: detection.damageType,
-                imageWidth: referenceWidth,
-                imageHeight: referenceHeight,
-                referenceImageBase64: normalizedSource.htxJPEGBase64(compressionQuality: 0.72),
-                referenceCropBase64: template.base64,
-                templateX1: template.templateX1,
-                templateY1: template.templateY1,
-                templateX2: template.templateX2,
-                templateY2: template.templateY2
-            )
-        }
-
-        guard let bbox = detection.normalizedBBox else { return nil }
-
         let sourceImage: UIImage? = {
             guard detection.angleIndex >= 0, detection.angleIndex < scanImages.count else {
                 return detection.cleanContextImage ?? detection.contextImage ?? detection.cropImage
@@ -4051,53 +4089,42 @@ struct PoliceReportStageTwoView: View {
             return scanImages[detection.angleIndex]
         }()
 
-        guard let image = sourceImage else { return nil }
-        let normalized = normalizedImage(image)
-        let width = normalized.size.width
-        let height = normalized.size.height
-        guard width > 0, height > 0 else { return nil }
+        guard let sourceImage else { return nil }
+        let normalizedSource = sourceImage.htxNormalizedImage()
 
-        let x1 = Int(max(0, min(width, bbox.minX * width)))
-        let y1 = Int(max(0, min(height, bbox.minY * height)))
-        let x2 = Int(max(0, min(width, bbox.maxX * width)))
-        let y2 = Int(max(0, min(height, bbox.maxY * height)))
+        let bbox: CGRect? = {
+            // This is the same current box used by the NP299 PDF. It changes when
+            // the user edits or manually draws the damage area, so it must take
+            // priority over the detector's original pixel coordinates.
+            if let current = detection.normalizedBBox,
+               current.width > 0, current.height > 0 {
+                return current
+            }
 
-        guard x2 > x1, y2 > y1 else { return nil }
+            guard let x1 = detection.x1, let y1 = detection.y1,
+                  let x2 = detection.x2, let y2 = detection.y2,
+                  x2 > x1, y2 > y1 else { return nil }
 
-        let baseRegion = ConfirmBaselineRegion(
-            x1: x1,
-            y1: y1,
-            x2: x2,
-            y2: y2,
+            let coordinateWidth = CGFloat(max(1, detection.imageWidth ?? Int(normalizedSource.size.width)))
+            let coordinateHeight = CGFloat(max(1, detection.imageHeight ?? Int(normalizedSource.size.height)))
+            return CGRect(
+                x: CGFloat(x1) / coordinateWidth,
+                y: CGFloat(y1) / coordinateHeight,
+                width: CGFloat(x2 - x1) / coordinateWidth,
+                height: CGFloat(y2 - y1) / coordinateHeight
+            )
+        }()
+
+        guard let bbox else { return nil }
+
+        // Store a compact clean reference image. The old full-resolution copy
+        // was duplicated for every box and could make baseline requests tens of
+        // megabytes, causing the silent timeouts seen during report generation.
+        let referenceImage = resizedImageForPreview(normalizedSource, maxDimension: 1800)
+        return ConfirmBaselineRegion.fromNormalizedBox(
+            bbox,
             label: detection.damageType,
-            imageWidth: Int(width),
-            imageHeight: Int(height),
-            referenceImageBase64: nil,
-            referenceCropBase64: nil,
-            templateX1: nil,
-            templateY1: nil,
-            templateX2: nil,
-            templateY2: nil
-        )
-
-        guard let template = normalized.htxReferenceTemplateBase64(region: baseRegion) else {
-            return baseRegion
-        }
-
-        return ConfirmBaselineRegion(
-            x1: x1,
-            y1: y1,
-            x2: x2,
-            y2: y2,
-            label: detection.damageType,
-            imageWidth: Int(width),
-            imageHeight: Int(height),
-            referenceImageBase64: normalized.htxJPEGBase64(compressionQuality: 0.68),
-            referenceCropBase64: template.base64,
-            templateX1: template.templateX1,
-            templateY1: template.templateY1,
-            templateX2: template.templateX2,
-            templateY2: template.templateY2
+            image: referenceImage
         )
     }
 

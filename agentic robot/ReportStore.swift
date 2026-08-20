@@ -236,6 +236,7 @@ struct ReportStore {
         generatedBy: String,
         detectionCount: Int,
         numericBarcodeId: String,
+        baselineUpdatedAngles: [Int] = [],
         pdfURL: URL? = nil,
         completion: ((Error?) -> Void)? = nil
     ) {
@@ -250,7 +251,17 @@ struct ReportStore {
             "createdByEmail": Auth.auth().currentUser?.email ?? "",
             "detectionCount": detectionCount,
             "createdAt": FieldValue.serverTimestamp(),
-            "pdfStoredInFirestore": false
+            "pdfStoredInFirestore": false,
+            // Every filed NP299 needs an explicit administrator decision about
+            // the vehicle's operational status. Vehicle Management only shows
+            // reports that are still pending this follow-up.
+            "vehicleStatusFollowUpStatus": "pending",
+            "vehicleStatusFollowUpCreatedAt": FieldValue.serverTimestamp(),
+            // The report document is created before the backend baseline is
+            // changed. This prevents logout/network failures from changing a
+            // vehicle baseline without leaving a corresponding report record.
+            "baselineUpdateStatus": baselineUpdatedAngles.isEmpty ? "not_required" : "pending",
+            "baselineUpdatedAngles": baselineUpdatedAngles
         ]
 
         guard let pdfURL else {
@@ -295,5 +306,30 @@ struct ReportStore {
                 .document(numericBarcodeId)
                 .setData(finalData, merge: true) { completion?($0) }
         }
+    }
+
+    static func updateBaselineStatus(
+        reportID: String,
+        status: String,
+        updatedAngles: [Int],
+        errorMessage: String? = nil,
+        completion: ((Error?) -> Void)? = nil
+    ) {
+        var data: [String: Any] = [
+            "baselineUpdateStatus": status,
+            "baselineUpdatedAngles": updatedAngles
+        ]
+
+        if status == "updated" {
+            data["baselineUpdatedAt"] = FieldValue.serverTimestamp()
+            data["baselineUpdateError"] = FieldValue.delete()
+        } else if let errorMessage, !errorMessage.isEmpty {
+            data["baselineUpdateError"] = errorMessage
+        }
+
+        Firestore.firestore()
+            .collection("reports")
+            .document(reportID)
+            .updateData(data) { completion?($0) }
     }
 }

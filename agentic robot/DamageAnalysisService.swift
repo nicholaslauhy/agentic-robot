@@ -821,94 +821,31 @@ final class DamageAnalysisService {
     ) async throws {
         guard !angles.isEmpty else { return }
 
-        let currentBaseline = try await getBaseline(plate: plate)
-        var incomingByAngle: [Int: ConfirmBaselineBatchAngle] = [:]
-
-        for angle in angles {
-            if let current = incomingByAngle[angle.angle_index] {
-                incomingByAngle[angle.angle_index] = ConfirmBaselineBatchAngle(
-                    angle_index: angle.angle_index,
-                    angle_name: angle.angle_name,
-                    regions: current.regions + angle.regions
-                )
-            } else {
-                incomingByAngle[angle.angle_index] = angle
-            }
+        // Merge on the backend instead of downloading every existing reference
+        // image and uploading it again. Baseline images can be several megabytes,
+        // and that old round-trip made checklist follow-ups prone to timing out.
+        guard let url = BackendConfiguration.endpointURL(path: "merge-baseline-batch") else {
+            throw URLError(.badURL)
         }
 
-        let mergedAngles = incomingByAngle.keys.sorted().compactMap { angleIndex -> ConfirmBaselineBatchAngle? in
-            guard let incoming = incomingByAngle[angleIndex] else { return nil }
+        let payload = ConfirmBaselineBatchRequest(plate: plate, angles: angles)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(payload)
 
-            let existing = (currentBaseline.baselines[String(angleIndex)] ?? [])
-                .compactMap(confirmableRegion)
-            var combined = existing
-
-            for region in incoming.regions where !combined.contains(where: { baselineRegionsMatch($0, region) }) {
-                combined.append(region)
-            }
-
-            return ConfirmBaselineBatchAngle(
-                angle_index: angleIndex,
-                angle_name: incoming.angle_name,
-                regions: combined
-            )
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let raw = String(data: data, encoding: .utf8) ?? ""
+            print("Merge baseline batch API failed:", raw)
+            throw URLError(.badServerResponse)
         }
 
-        try await confirmBaselineBatch(plate: plate, angles: mergedAngles)
-    }
-
-    private func confirmableRegion(_ region: BaselineRegion) -> ConfirmBaselineRegion? {
-        guard let x1 = region.x1,
-              let y1 = region.y1,
-              let x2 = region.x2,
-              let y2 = region.y2,
-              x2 > x1,
-              y2 > y1 else {
-            return nil
+        if let raw = String(data: data, encoding: .utf8) {
+            print("Merge baseline batch API raw response:", raw)
         }
-
-        return ConfirmBaselineRegion(
-            x1: x1,
-            y1: y1,
-            x2: x2,
-            y2: y2,
-            label: region.label ?? "damage",
-            imageWidth: region.imageWidth,
-            imageHeight: region.imageHeight,
-            referenceImageBase64: region.referenceImageBase64,
-            referenceCropBase64: region.referenceCropBase64,
-            templateX1: region.templateX1,
-            templateY1: region.templateY1,
-            templateX2: region.templateX2,
-            templateY2: region.templateY2
-        )
-    }
-
-    private func baselineRegionsMatch(
-        _ existing: ConfirmBaselineRegion,
-        _ incoming: ConfirmBaselineRegion
-    ) -> Bool {
-        guard existing.label.caseInsensitiveCompare(incoming.label) == .orderedSame else {
-            return false
-        }
-
-        let sameReferenceImage = existing.referenceImageBase64?.isEmpty == false &&
-            existing.referenceImageBase64 == incoming.referenceImageBase64
-        let sameReferenceCrop = existing.referenceCropBase64?.isEmpty == false &&
-            existing.referenceCropBase64 == incoming.referenceCropBase64
-
-        guard sameReferenceImage || sameReferenceCrop else { return false }
-
-        return Self.iou(
-            ax1: existing.x1,
-            ay1: existing.y1,
-            ax2: existing.x2,
-            ay2: existing.y2,
-            bx1: incoming.x1,
-            by1: incoming.y1,
-            bx2: incoming.x2,
-            by2: incoming.y2
-        ) >= 0.90
     }
 
     private func uploadImages(
