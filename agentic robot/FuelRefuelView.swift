@@ -157,7 +157,7 @@ struct FuelRefuelView: View {
                         }
 
                         Divider()
-                        formRow(label: "Odometer", required: true) {
+                        formRow(label: "Odometer (km)", required: true) {
                             TextField("Numbers only, e.g. 12345", text: $odometer)
                                 .keyboardType(.numberPad)
                                 .multilineTextAlignment(.trailing)
@@ -439,7 +439,7 @@ struct FuelRefuelView: View {
         if name.isEmpty { issues.append("Name — ask an administrator to set the account username") }
         if effectiveVehicleNumber.isEmpty { issues.append("Vehicle Number") }
         if effectiveCarType.isEmpty { issues.append(useOtherVehicle ? "Vehicle Type" : "Vehicle selection") }
-        if cleanOdometer.isEmpty { issues.append("Odometer") }
+        if cleanOdometer.isEmpty { issues.append("Odometer (km)") }
         if usedMastercard == nil { issues.append("Mastercard Usage — select Yes or No") }
         if usedMastercard == true, cardDigits.count != 16 {
             issues.append("Mastercard Number — enter all 16 digits")
@@ -629,7 +629,7 @@ private struct FuelRefuelReviewSheet: View {
                             reviewRow("Time of Refuel", refuelTime)
                             reviewRow("Vehicle Number", vehicleNumber)
                             reviewRow("Vehicle Type", vehicleType)
-                            reviewRow("Odometer", "\(odometer) km")
+                            reviewRow("Odometer (km)", odometer)
                         }
 
                         reviewCard(title: "Mastercard Usage", icon: "creditcard.fill") {

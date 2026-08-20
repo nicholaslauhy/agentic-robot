@@ -914,24 +914,14 @@ private struct AdminChecklistReviewDetail: View {
                     .disabled(isSaving || isLoadingPhotos)
 
                 case .np299Filed:
-                    let reportNo = generatedNP299ReportNo ?? data["np299ReportNo"] as? String
-                    if let reportNo, !reportNo.isEmpty {
-                        Label("NP299 Filed · \(reportNo)", systemImage: reviewStatus.icon)
-                            .font(.headline)
-                            .foregroundColor(.green)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(13)
-                            .background(Color.green.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    } else {
-                        Label("NP299 Filed", systemImage: reviewStatus.icon)
-                            .font(.headline)
-                            .foregroundColor(.green)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(13)
-                            .background(Color.green.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
+                    LinkedNP299AttachmentView(
+                        reportID: data["np299ReportId"] as? String ?? "",
+                        reportNo: generatedNP299ReportNo ?? data["np299ReportNo"] as? String ?? "",
+                        accent: .green
+                    )
+                    .padding(13)
+                    .background(Color.green.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
 
                 case .noEscalation:
                     Label("No Police Report Required", systemImage: "checkmark.seal.fill")

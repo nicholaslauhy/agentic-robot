@@ -688,6 +688,15 @@ struct SecComDetailSheet: View {
     private var adminReviewNotes: String {
         d["adminReviewNotes"] as? String ?? ""
     }
+    private var linkedNP299ReportID: String {
+        d["np299ReportId"] as? String ?? ""
+    }
+    private var linkedNP299ReportNo: String {
+        d["np299ReportNo"] as? String ?? ""
+    }
+    private var hasLinkedNP299: Bool {
+        !linkedNP299ReportID.isEmpty || !linkedNP299ReportNo.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -735,6 +744,22 @@ struct SecComDetailSheet: View {
                             if !adminReviewNotes.isEmpty {
                                 Divider().padding(.leading, 16)
                                 DetailRow(label: "Officer Notes", value: adminReviewNotes)
+                            }
+                        }
+
+                        if hasLinkedNP299 {
+                            sectionCard(
+                                title: "NP299 Attachment",
+                                icon: "paperclip",
+                                accent: .green
+                            ) {
+                                LinkedNP299AttachmentView(
+                                    reportID: linkedNP299ReportID,
+                                    reportNo: linkedNP299ReportNo,
+                                    accent: .green
+                                )
+                                .padding(.horizontal, 16)
+                                .padding(.bottom, 12)
                             }
                         }
 
@@ -1051,6 +1076,180 @@ struct SecComDetailSheet: View {
 
 }
 
+// MARK: - Linked NP299 Attachment
+/// Displays the filed NP299 as an attachment on its source pre-driving checklist.
+/// The PDF remains stored once under `reports`; the checklist's report ID is the link.
+struct LinkedNP299AttachmentView: View {
+    let reportID: String
+    let reportNo: String
+    let accent: Color
+
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var selectedPDFURL: URL?
+
+    private var displayedReportNo: String {
+        let value = reportNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Filed NP299 report" : value
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "doc.richtext.fill")
+                    .font(.title3)
+                    .foregroundColor(.white)
+                    .frame(width: 42, height: 42)
+                    .background(accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("NP299 Report")
+                        .font(.subheadline.weight(.semibold))
+                    Text(displayedReportNo)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "paperclip")
+                    .foregroundColor(accent)
+            }
+
+            Button {
+                openAttachment()
+            } label: {
+                HStack(spacing: 8) {
+                    if isLoading {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: "doc.text.magnifyingglass")
+                    }
+                    Text(isLoading ? "Loading Attachment…" : "View NP299 Attachment")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .foregroundColor(.white)
+                .background(accent)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .disabled(isLoading)
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { selectedPDFURL != nil },
+            set: { if !$0 { selectedPDFURL = nil } }
+        )) {
+            if let selectedPDFURL {
+                ReportPDFPreviewView(url: selectedPDFURL)
+            }
+        }
+    }
+
+    private func openAttachment() {
+        isLoading = true
+        errorMessage = nil
+
+        resolveReportDocument { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .failure(let error):
+                    isLoading = false
+                    errorMessage = error.localizedDescription
+                case .success(let report):
+                    guard report.hasPDF else {
+                        isLoading = false
+                        errorMessage = "The linked NP299 does not have a PDF attachment."
+                        return
+                    }
+
+                    ReportStore.resolvePDFURL(for: report) { url in
+                        DispatchQueue.main.async {
+                            isLoading = false
+                            if let url {
+                                selectedPDFURL = url
+                            } else {
+                                errorMessage = "The NP299 attachment could not be downloaded. Please try again."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func resolveReportDocument(completion: @escaping (Result<ReportEntry, Error>) -> Void) {
+        let trimmedID = reportID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedID.isEmpty {
+            Firestore.firestore().collection("reports").document(trimmedID).getDocument { snapshot, error in
+                if let error {
+                    completion(.failure(error))
+                } else if let snapshot, snapshot.exists, let data = snapshot.data() {
+                    completion(.success(makeReportEntry(documentID: snapshot.documentID, data: data)))
+                } else {
+                    completion(.failure(attachmentError("The linked NP299 report could not be found.")))
+                }
+            }
+            return
+        }
+
+        let trimmedNumber = reportNo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedNumber.isEmpty else {
+            completion(.failure(attachmentError("No linked NP299 report was recorded.")))
+            return
+        }
+
+        // Compatibility for older checklist records that saved only the report number.
+        Firestore.firestore()
+            .collection("reports")
+            .whereField("reportNo", isEqualTo: trimmedNumber)
+            .limit(to: 1)
+            .getDocuments { snapshot, error in
+                if let error {
+                    completion(.failure(error))
+                } else if let document = snapshot?.documents.first {
+                    completion(.success(makeReportEntry(documentID: document.documentID, data: document.data())))
+                } else {
+                    completion(.failure(attachmentError("The linked NP299 report could not be found.")))
+                }
+            }
+    }
+
+    private func makeReportEntry(documentID: String, data: [String: Any]) -> ReportEntry {
+        ReportEntry(
+            id: documentID,
+            reportNo: data["reportNo"] as? String ?? displayedReportNo,
+            plate: data["plate"] as? String ?? "-",
+            carType: data["carType"] as? String ?? "-",
+            generatedBy: data["generatedBy"] as? String ?? "-",
+            detectionCount: data["detectionCount"] as? Int ?? 0,
+            createdAt: (data["createdAt"] as? Timestamp)?.dateValue(),
+            barcodeId: data["barcodeId"] as? String ?? documentID,
+            pdfFileName: data["pdfFileName"] as? String,
+            pdfBase64: data["pdfBase64"] as? String,
+            pdfStoragePath: data["pdfStoragePath"] as? String
+        )
+    }
+
+    private func attachmentError(_ message: String) -> Error {
+        NSError(
+            domain: "LinkedNP299Attachment",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+    }
+}
+
 // MARK: - Fuel Detail Sheet
 struct FuelDetailSheet: View {
     let doc: RawReportDocument
@@ -1132,7 +1331,7 @@ struct FuelDetailSheet: View {
                             Divider().padding(.leading, 16)
                             DetailRow(label: "Vehicle Type",    value: doc.entry.carType)
                             Divider().padding(.leading, 16)
-                            DetailRow(label: "Odometer",        value: kilometreValue(d["odometer"] as? String))
+                            DetailRow(label: "Odometer (km)",   value: d["odometer"] as? String ?? "-")
                         }
 
                         // Mastercard
@@ -1640,15 +1839,6 @@ private func barcodeBlock(_ id: String, accent: Color) -> some View {
     .padding(.horizontal)
 }
 
-
-private func kilometreValue(_ raw: String?) -> String {
-    let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, trimmed != "-" else { return "-" }
-    if trimmed.localizedCaseInsensitiveContains("km") {
-        return trimmed
-    }
-    return "\(trimmed) km"
-}
 
 // MARK: - Status Rows (shared)
 private struct StatusDetailRow: View {
