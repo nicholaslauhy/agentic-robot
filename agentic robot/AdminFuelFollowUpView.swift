@@ -58,6 +58,10 @@ struct AdminFuelFollowUpView: View {
     @State private var errorMessage: String?
     @State private var unavailableReportMessage: String?
     @State private var didHandleInitialReport = false
+    @State private var deletionCandidate: RawReportDocument?
+    @State private var isDeleting = false
+    @State private var deletionFeedbackTitle = ""
+    @State private var deletionFeedbackMessage: String?
 
     private let accent = HTXTheme.fuelOrange
 
@@ -101,6 +105,15 @@ struct AdminFuelFollowUpView: View {
                 searchBar
                 content
             }
+
+            if isDeleting {
+                Color.black.opacity(0.32).ignoresSafeArea()
+                ProgressView("Deleting refuel report…")
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 18)
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
         }
         .navigationTitle("Refuel Follow-up")
         .navigationBarTitleDisplayMode(.inline)
@@ -122,6 +135,32 @@ struct AdminFuelFollowUpView: View {
             Button("OK", role: .cancel) { unavailableReportMessage = nil }
         } message: {
             Text(unavailableReportMessage ?? "")
+        }
+        .alert(
+            "Delete Refuel Report?",
+            isPresented: Binding(
+                get: { deletionCandidate != nil },
+                set: { if !$0 { deletionCandidate = nil } }
+            ),
+            presenting: deletionCandidate
+        ) { report in
+            Button("Delete Permanently", role: .destructive) {
+                deleteReport(report)
+            }
+            Button("Cancel", role: .cancel) { deletionCandidate = nil }
+        } message: { report in
+            Text("\(report.entry.reportNo) and its attached receipt will be permanently deleted. This cannot be undone.")
+        }
+        .alert(
+            deletionFeedbackTitle,
+            isPresented: Binding(
+                get: { deletionFeedbackMessage != nil },
+                set: { if !$0 { deletionFeedbackMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { deletionFeedbackMessage = nil }
+        } message: {
+            Text(deletionFeedbackMessage ?? "")
         }
         .requiresRole(.admin)
     }
@@ -243,12 +282,27 @@ struct AdminFuelFollowUpView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(filteredReports) { report in
-                        Button {
-                            selectedReport = report
-                        } label: {
-                            reportRow(report)
+                        HStack(spacing: 9) {
+                            Button {
+                                selectedReport = report
+                            } label: {
+                                reportRow(report)
+                            }
+                            .buttonStyle(.plain)
+
+                            Button {
+                                deletionCandidate = report
+                            } label: {
+                                Image(systemName: "trash.fill")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundColor(.red)
+                                    .frame(width: 44, height: 44)
+                                    .background(Color.red.opacity(0.09))
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Delete \(report.entry.reportNo)")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
                 .padding(.horizontal)
@@ -359,6 +413,40 @@ struct AdminFuelFollowUpView: View {
             selectedReport = report
         } else {
             unavailableReportMessage = "This refuel report may have been deleted or is no longer available."
+        }
+    }
+
+    private func deleteReport(_ report: RawReportDocument) {
+        deletionCandidate = nil
+        isDeleting = true
+
+        let storagePaths = [report.raw["receiptStoragePath"] as? String]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+
+        ReportStore.deleteReport(
+            collection: "fuel_refuel_reports",
+            documentID: report.id,
+            storagePaths: storagePaths
+        ) { result in
+            DispatchQueue.main.async {
+                isDeleting = false
+                switch result {
+                case .success(let deletionResult):
+                    reports.removeAll { $0.id == report.id }
+                    if selectedReport?.id == report.id {
+                        selectedReport = nil
+                    }
+
+                    if !deletionResult.storagePathsNotDeleted.isEmpty {
+                        deletionFeedbackTitle = "Report Deleted with Warning"
+                        deletionFeedbackMessage = "The refuel report was deleted, but its receipt could not be removed. Check Firebase Storage permissions."
+                    }
+                case .failure(let error):
+                    deletionFeedbackTitle = "Could Not Delete Report"
+                    deletionFeedbackMessage = error.localizedDescription
+                }
+            }
         }
     }
 }
