@@ -246,6 +246,8 @@ struct DamageAnalysisResultView: View {
     @State private var isGeneratingReport = false
     @State private var showIncidentStageOne = false
     @State private var showDamageSummaryReview = false
+    @State private var showDetailedVehicleScan = false
+    @State private var detailedPanelCaptures: [DetailedPanelCapture] = []
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -475,8 +477,28 @@ struct DamageAnalysisResultView: View {
                 existingDetections: existingDamageDetections,
                 scanImages: scanImages,
                 onBack: { showDamageSummaryReview = false },
-                onContinue: {
+                onStartDetailedScan: {
                     showDamageSummaryReview = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showDetailedVehicleScan = true
+                    }
+                },
+                onSkipDetailedScan: {
+                    showDamageSummaryReview = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showIncidentStageOne = true
+                    }
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showDetailedVehicleScan) {
+            DetailedVehicleScanView(
+                plate: plate,
+                carType: carType,
+                onCancel: { showDetailedVehicleScan = false },
+                onComplete: { captures in
+                    detailedPanelCaptures = captures
+                    showDetailedVehicleScan = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         showIncidentStageOne = true
                     }
@@ -743,7 +765,8 @@ private struct DamageSummaryReviewBeforeReportView: View {
     let existingDetections: [MutableDamageDetection]
     let scanImages: [UIImage]
     let onBack: () -> Void
-    let onContinue: () -> Void
+    let onStartDetailedScan: () -> Void
+    let onSkipDetailedScan: () -> Void
 
     @State private var selectedAngle: SummaryAngleSelection? = nil
 
@@ -854,21 +877,51 @@ private struct DamageSummaryReviewBeforeReportView: View {
                             .padding(.horizontal)
                         }
 
-                        Button {
-                            onContinue()
-                        } label: {
-                            HStack {
-                                Image(systemName: "arrow.right.circle.fill")
-                                Text("Continue to Report Details")
+                        VStack(spacing: 12) {
+                            VStack(spacing: 5) {
+                                Text("Would you like a closer inspection?")
+                                    .font(.headline)
+                                Text("The optional detailed scan captures 12 vehicle panels after the four overview photos.")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
                             }
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(HTXTheme.primaryPurple)
-                            .foregroundColor(.white)
-                            .cornerRadius(14)
-                            .padding(.horizontal)
+
+                            Button {
+                                onStartDetailedScan()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "viewfinder.circle.fill")
+                                    Text("Continue with 12-Panel Scan")
+                                }
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(HTXTheme.primaryPurple)
+                                .foregroundColor(.white)
+                                .cornerRadius(14)
+                            }
+
+                            Button {
+                                onSkipDetailedScan()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "doc.text.fill")
+                                    Text("Skip to Report Details")
+                                }
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color(.secondarySystemBackground))
+                                .foregroundColor(HTXTheme.primaryPurple)
+                                .cornerRadius(14)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(HTXTheme.softPurpleBorder, lineWidth: 1)
+                                )
+                            }
                         }
+                        .padding(.horizontal)
                         .padding(.top, 6)
                         .padding(.bottom, 30)
                     }
