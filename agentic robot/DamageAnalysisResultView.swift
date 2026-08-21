@@ -248,6 +248,8 @@ struct DamageAnalysisResultView: View {
     @State private var showDamageSummaryReview = false
     @State private var showDetailedVehicleScan = false
     @State private var detailedPanelCaptures: [DetailedPanelCapture] = []
+    @State private var showDetailedScanAnalysis = false
+    @State private var detailedScanFindings: [DetailedPanelDamageFinding] = []
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -499,6 +501,25 @@ struct DamageAnalysisResultView: View {
                 onComplete: { captures in
                     detailedPanelCaptures = captures
                     showDetailedVehicleScan = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showDetailedScanAnalysis = true
+                    }
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showDetailedScanAnalysis) {
+            DetailedScanAnalysisProgressView(
+                captures: detailedPanelCaptures,
+                onComplete: { findings in
+                    detailedScanFindings = findings
+                    showDetailedScanAnalysis = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showIncidentStageOne = true
+                    }
+                },
+                onSkip: {
+                    detailedScanFindings = []
+                    showDetailedScanAnalysis = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         showIncidentStageOne = true
                     }
