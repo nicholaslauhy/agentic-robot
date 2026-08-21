@@ -250,6 +250,7 @@ struct DamageAnalysisResultView: View {
     @State private var detailedPanelCaptures: [DetailedPanelCapture] = []
     @State private var showDetailedScanAnalysis = false
     @State private var detailedScanFindings: [DetailedProjectedDamageFinding] = []
+    @State private var showDetailedFindingsReview = false
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -515,7 +516,7 @@ struct DamageAnalysisResultView: View {
                     detailedScanFindings = findings
                     showDetailedScanAnalysis = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showIncidentStageOne = true
+                        showDetailedFindingsReview = true
                     }
                 },
                 onSkip: {
@@ -523,6 +524,29 @@ struct DamageAnalysisResultView: View {
                     showDetailedScanAnalysis = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         showIncidentStageOne = true
+                    }
+                }
+            )
+        }
+        .fullScreenCover(isPresented: $showDetailedFindingsReview) {
+            DetailedScanFindingsReviewView(
+                findings: detailedScanFindings,
+                scanImages: scanImages,
+                onComplete: { outcome in
+                    mutableDetections = DetailedFindingIntegrator.integrating(
+                        existing: mutableDetections,
+                        outcome: outcome
+                    )
+                    detailedScanFindings = []
+                    showDetailedFindingsReview = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showIncidentStageOne = true
+                    }
+                },
+                onBack: {
+                    showDetailedFindingsReview = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        showDetailedVehicleScan = true
                     }
                 }
             )
