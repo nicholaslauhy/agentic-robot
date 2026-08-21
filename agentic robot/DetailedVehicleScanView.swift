@@ -617,7 +617,7 @@ private struct DetailedVideoPicker: UIViewControllerRepresentable {
         )
         overlayController.view.backgroundColor = .clear
         overlayController.view.isUserInteractionEnabled = false
-        overlayController.view.frame = UIScreen.main.bounds
+        overlayController.view.frame = picker.view.bounds
         overlayController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         picker.cameraOverlayView = overlayController.view
         context.coordinator.overlayController = overlayController
