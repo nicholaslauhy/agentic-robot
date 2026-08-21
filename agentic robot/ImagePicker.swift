@@ -12,6 +12,7 @@ struct ImagePicker: UIViewControllerRepresentable {
 
     var sourceType: UIImagePickerController.SourceType = .photoLibrary
     var completionHandler: (UIImage) -> Void
+    var cancellationHandler: (() -> Void)? = nil
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
 
@@ -47,6 +48,11 @@ struct ImagePicker: UIViewControllerRepresentable {
                 parent.completionHandler(image)
             }
 
+            picker.dismiss(animated: true)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.cancellationHandler?()
             picker.dismiss(animated: true)
         }
     }
