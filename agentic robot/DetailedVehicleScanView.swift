@@ -1,12 +1,18 @@
+import AVFoundation
+import AVKit
 import PhotosUI
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct DetailedPanelCapture: Identifiable {
     let panel: DetailedVehiclePanel
-    let image: UIImage
+    let previewImage: UIImage
+    let videoURL: URL
+    let durationSeconds: Double
 
     var id: String { panel.id }
+    var image: UIImage { previewImage }
 }
 
 /// Optional close-up capture performed after the four overview photographs.
@@ -19,11 +25,13 @@ struct DetailedVehicleScanView: View {
     let onComplete: ([DetailedPanelCapture]) -> Void
 
     @State private var selectedPanel = DetailedVehicleScanSpecification.panels[0]
-    @State private var captures: [DetailedVehiclePanel: UIImage] = [:]
+    @State private var captures: [DetailedVehiclePanel: DetailedPanelCapture] = [:]
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showCamera = false
     @State private var showExitConfirmation = false
     @State private var errorMessage: String?
+    @State private var isPreparingCapture = false
+    @State private var playbackCapture: DetailedPanelCapture?
 
     private var currentIndex: Int {
         DetailedVehicleScanSpecification.panels.firstIndex(of: selectedPanel) ?? 0
@@ -35,7 +43,7 @@ struct DetailedVehicleScanView: View {
 
     private var orderedCaptures: [DetailedPanelCapture] {
         DetailedVehicleScanSpecification.panels.compactMap { panel in
-            captures[panel].map { DetailedPanelCapture(panel: panel, image: $0) }
+            captures[panel]
         }
     }
 
@@ -74,41 +82,51 @@ struct DetailedVehicleScanView: View {
                 isPresented: $showExitConfirmation,
                 titleVisibility: .visible
             ) {
-                Button("Discard Detailed Photos", role: .destructive) { onCancel() }
+                Button("Discard Detailed Recordings", role: .destructive) {
+                    removeAllCaptureFiles()
+                    onCancel()
+                }
                 Button("Continue Scanning", role: .cancel) {}
             } message: {
-                Text("The detailed photos captured in this scan will be discarded. Your four overview photos will not be affected.")
+                Text("The detailed recordings captured in this scan will be discarded. Your four overview photos will not be affected.")
             }
             .fullScreenCover(isPresented: $showCamera) {
-                ImagePicker(
-                    sourceType: .camera,
-                    completionHandler: { image in
-                        store(image)
+                DetailedVideoPicker(
+                    panel: selectedPanel,
+                    carType: carType,
+                    completionHandler: { sourceURL in
                         showCamera = false
+                        prepareCapture(from: sourceURL, for: selectedPanel)
                     },
                     cancellationHandler: { showCamera = false }
                 )
                 .ignoresSafeArea()
             }
+            .sheet(item: $playbackCapture) { capture in
+                DetailedVideoPlaybackView(capture: capture)
+            }
             .onChange(of: selectedPhotoItem) { _, item in
                 guard let item else { return }
                 Task {
                     do {
-                        guard let data = try await item.loadTransferable(type: Data.self),
-                              let image = UIImage(data: data) else {
+                        guard let data = try await item.loadTransferable(type: Data.self) else {
                             await MainActor.run {
-                                errorMessage = "The selected photo could not be opened."
+                                errorMessage = "The selected recording could not be opened."
                                 selectedPhotoItem = nil
                             }
                             return
                         }
+                        let importedURL = try DetailedCaptureFileStore.writeImportedVideo(
+                            data,
+                            panel: selectedPanel
+                        )
                         await MainActor.run {
-                            store(image)
                             selectedPhotoItem = nil
+                            prepareCapture(from: importedURL, for: selectedPanel, sourceIsPersistent: true)
                         }
                     } catch {
                         await MainActor.run {
-                            errorMessage = "The selected photo could not be opened: \(error.localizedDescription)"
+                            errorMessage = "The selected recording could not be opened: \(error.localizedDescription)"
                             selectedPhotoItem = nil
                         }
                     }
@@ -125,7 +143,7 @@ struct DetailedVehicleScanView: View {
             Text("\(carType.rawValue) · \(plate)")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            Text("Capture one close-up for each highlighted vehicle panel. This does not replace the four overview images.")
+            Text("Record one slow multi-angle sweep for each highlighted vehicle panel. This does not replace the four overview images.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -215,16 +233,28 @@ struct DetailedVehicleScanView: View {
 
     private var captureCard: some View {
         Group {
-            if let image = captures[selectedPanel] {
-                ZStack(alignment: .topTrailing) {
-                    Image(uiImage: image)
+            if let capture = captures[selectedPanel] {
+                Button {
+                    playbackCapture = capture
+                } label: {
+                    ZStack {
+                        Image(uiImage: capture.previewImage)
                         .resizable()
                         .scaledToFit()
                         .frame(maxWidth: .infinity)
                         .frame(maxHeight: 320)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                    Label("Captured", systemImage: "checkmark.circle.fill")
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 54))
+                            .foregroundStyle(.white, HTXTheme.primaryPurple.opacity(0.88))
+                            .shadow(radius: 5)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        Label(
+                            String(format: "%.1f s", capture.durationSeconds),
+                            systemImage: "checkmark.circle.fill"
+                        )
                         .font(.caption.bold())
                         .padding(.horizontal, 10)
                         .padding(.vertical, 7)
@@ -232,17 +262,21 @@ struct DetailedVehicleScanView: View {
                         .foregroundColor(.white)
                         .clipShape(Capsule())
                         .padding(10)
+                    }
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play recorded sweep for \(selectedPanel.displayName)")
             } else {
                 VStack(spacing: 10) {
-                    Image(systemName: "camera.viewfinder")
+                    Image(systemName: "video.fill")
                         .font(.system(size: 42))
                         .foregroundColor(HTXTheme.primaryPurple)
-                    Text("No photo captured for this panel")
+                    Text("No sweep recorded for this panel")
                         .font(.headline)
-                    Text("Keep the panel centred and fill most of the frame.")
+                    Text("Record for about five seconds while moving through the three demonstrated camera positions.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 190)
@@ -264,7 +298,7 @@ struct DetailedVehicleScanView: View {
                                 Circle()
                                     .fill(captures[panel] == nil ? Color(.systemGray5) : Color.green.opacity(0.18))
                                     .frame(width: 38, height: 38)
-                                Image(systemName: captures[panel] == nil ? "camera" : "checkmark")
+                                Image(systemName: captures[panel] == nil ? "video" : "checkmark")
                                     .font(.caption.bold())
                                     .foregroundColor(captures[panel] == nil ? .secondary : .green)
                             }
@@ -292,8 +326,8 @@ struct DetailedVehicleScanView: View {
             }
 
             HStack(spacing: 12) {
-                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Label("Choose Photo", systemImage: "photo.on.rectangle")
+                PhotosPicker(selection: $selectedPhotoItem, matching: .videos) {
+                    Label("Choose Recording", systemImage: "video.badge.plus")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -304,19 +338,29 @@ struct DetailedVehicleScanView: View {
 
                 Button {
                     guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
-                        errorMessage = "Camera is not available on this device. Choose a photo from the library instead."
+                        errorMessage = "Camera is not available on this device. Choose a recording from the library instead."
                         return
                     }
                     errorMessage = nil
                     showCamera = true
                 } label: {
-                    Label("Open Camera", systemImage: "camera.fill")
+                    Label("Record Guided Sweep", systemImage: "video.fill")
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
                         .background(HTXTheme.primaryPurple)
                         .foregroundColor(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+            }
+
+            if isPreparingCapture {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(HTXTheme.primaryPurple)
+                    Text("Preparing recording preview…")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -335,14 +379,280 @@ struct DetailedVehicleScanView: View {
         }
     }
 
-    private func store(_ image: UIImage) {
-        captures[selectedPanel] = image.htxNormalizedImage()
+    private func prepareCapture(
+        from sourceURL: URL,
+        for panel: DetailedVehiclePanel,
+        sourceIsPersistent: Bool = false
+    ) {
+        isPreparingCapture = true
         errorMessage = nil
 
+        Task {
+            do {
+                let storedURL = sourceIsPersistent
+                    ? sourceURL
+                    : try DetailedCaptureFileStore.copyRecordedVideo(from: sourceURL, panel: panel)
+                let metadata = try await DetailedCaptureFileStore.previewMetadata(for: storedURL)
+
+                guard DetailedVehicleScanSpecification.recordingDurationSeconds
+                    .contains(metadata.durationSeconds) else {
+                    try? FileManager.default.removeItem(at: storedURL)
+                    throw DetailedCaptureError.invalidDuration(metadata.durationSeconds)
+                }
+
+                await MainActor.run {
+                    if let previous = captures[panel], previous.videoURL != storedURL {
+                        try? FileManager.default.removeItem(at: previous.videoURL)
+                    }
+                    captures[panel] = DetailedPanelCapture(
+                        panel: panel,
+                        previewImage: metadata.preview,
+                        videoURL: storedURL,
+                        durationSeconds: metadata.durationSeconds
+                    )
+                    isPreparingCapture = false
+                    advanceAfterCapture(panel)
+                }
+            } catch {
+                await MainActor.run {
+                    isPreparingCapture = false
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func advanceAfterCapture(_ panel: DetailedVehiclePanel) {
+        let completedIndex = DetailedVehicleScanSpecification.panels.firstIndex(of: panel) ?? currentIndex
         guard let next = DetailedVehicleScanSpecification.panels
-            .dropFirst(currentIndex + 1)
+            .dropFirst(completedIndex + 1)
             .first(where: { captures[$0] == nil }) else { return }
         withAnimation { selectedPanel = next }
+    }
+
+    private func removeAllCaptureFiles() {
+        for capture in captures.values {
+            try? FileManager.default.removeItem(at: capture.videoURL)
+        }
+    }
+}
+
+private enum DetailedCaptureError: LocalizedError {
+    case invalidDuration(Double)
+    case previewUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidDuration(let duration):
+            return String(
+                format: "The recording is %.1f seconds. Record one slow sweep between 3 and 7 seconds.",
+                duration
+            )
+        case .previewUnavailable:
+            return "A preview could not be created from this recording. Please record the panel again."
+        }
+    }
+}
+
+private enum DetailedCaptureFileStore {
+    struct PreviewMetadata {
+        let preview: UIImage
+        let durationSeconds: Double
+    }
+
+    static func copyRecordedVideo(from sourceURL: URL, panel: DetailedVehiclePanel) throws -> URL {
+        let destination = try destinationURL(panel: panel, extension: sourceURL.pathExtension.isEmpty ? "mov" : sourceURL.pathExtension)
+        try FileManager.default.copyItem(at: sourceURL, to: destination)
+        return destination
+    }
+
+    static func writeImportedVideo(_ data: Data, panel: DetailedVehiclePanel) throws -> URL {
+        let destination = try destinationURL(panel: panel, extension: "mov")
+        try data.write(to: destination, options: .atomic)
+        return destination
+    }
+
+    static func previewMetadata(for url: URL) async throws -> PreviewMetadata {
+        let asset = AVURLAsset(url: url)
+        let duration = try await asset.load(.duration)
+        let durationSeconds = CMTimeGetSeconds(duration)
+        guard durationSeconds.isFinite, durationSeconds > 0 else {
+            throw DetailedCaptureError.previewUnavailable
+        }
+
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 1280, height: 1280)
+        let previewTime = CMTime(
+            seconds: min(max(0.25, durationSeconds * 0.5), durationSeconds),
+            preferredTimescale: 600
+        )
+        let cgImage = try generator.copyCGImage(at: previewTime, actualTime: nil)
+        return PreviewMetadata(
+            preview: UIImage(cgImage: cgImage).htxNormalizedImage(),
+            durationSeconds: durationSeconds
+        )
+    }
+
+    private static func destinationURL(panel: DetailedVehiclePanel, extension pathExtension: String) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("detailed-vehicle-scan", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory.appendingPathComponent(
+            "\(panel.rawValue)-\(UUID().uuidString).\(pathExtension.lowercased())"
+        )
+    }
+}
+
+private struct DetailedVideoPicker: UIViewControllerRepresentable {
+    let panel: DetailedVehiclePanel
+    let carType: CarType
+    let completionHandler: (URL) -> Void
+    let cancellationHandler: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.sourceType = .camera
+        picker.mediaTypes = [UTType.movie.identifier]
+        picker.cameraCaptureMode = .video
+        picker.videoQuality = .typeHigh
+        picker.videoMaximumDuration = DetailedVehicleScanSpecification.recordingDurationSeconds.upperBound
+        picker.showsCameraControls = true
+
+        let overlayController = UIHostingController(
+            rootView: DetailedCameraOverlay(panel: panel, carType: carType)
+        )
+        overlayController.view.backgroundColor = .clear
+        overlayController.view.isUserInteractionEnabled = false
+        overlayController.view.frame = UIScreen.main.bounds
+        overlayController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        picker.cameraOverlayView = overlayController.view
+        context.coordinator.overlayController = overlayController
+
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let parent: DetailedVideoPicker
+        var overlayController: UIViewController?
+
+        init(parent: DetailedVideoPicker) {
+            self.parent = parent
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            guard let url = info[.mediaURL] as? URL else {
+                parent.cancellationHandler()
+                return
+            }
+            parent.completionHandler(url)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.cancellationHandler()
+        }
+    }
+}
+
+private struct DetailedCameraOverlay: View {
+    let panel: DetailedVehiclePanel
+    let carType: CarType
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Label(panel.displayName, systemImage: "viewfinder")
+                    .font(.headline.bold())
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.68))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+                Spacer()
+                Text("3–7 seconds")
+                    .font(.subheadline.bold())
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(.black.opacity(0.68))
+                    .foregroundColor(.white)
+                    .clipShape(Capsule())
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+
+            Spacer()
+
+            ZStack {
+                CarSilhouetteView(
+                    carType: carType,
+                    angleId: panel.overviewAngle.rawValue
+                )
+                .opacity(0.48)
+
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(Color.white.opacity(0.90), style: StrokeStyle(lineWidth: 3, dash: [12, 9]))
+                DetailedPanelHighlightOverlay(panel: panel)
+            }
+            .frame(maxWidth: 760)
+            .frame(height: 260)
+            .padding(.horizontal, 34)
+
+            Spacer()
+
+            Text("Walk slowly: −20°  →  straight  →  +20°")
+                .font(.headline.bold())
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(.black.opacity(0.72))
+                .clipShape(Capsule())
+                .padding(.bottom, 120)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct DetailedVideoPlaybackView: View {
+    let capture: DetailedPanelCapture
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer
+
+    init(capture: DetailedPanelCapture) {
+        self.capture = capture
+        _player = State(initialValue: AVPlayer(url: capture.videoURL))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                VideoPlayer(player: player)
+                    .onAppear { player.play() }
+                    .onDisappear { player.pause() }
+            }
+            .navigationTitle(capture.panel.displayName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(.white)
+                }
+            }
+        }
     }
 }
 
