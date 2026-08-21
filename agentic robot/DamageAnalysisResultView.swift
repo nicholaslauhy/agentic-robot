@@ -87,6 +87,12 @@ private extension UIViewController {
 
 // MARK: - Mutable Detection Model
 
+enum DamageCaptureSource: String {
+    case overviewAnalysis
+    case detailedMultiAngle
+    case manual
+}
+
 class MutableDamageDetection: ObservableObject, Identifiable {
     let id: UUID
     @Published var angleIndex: Int
@@ -119,6 +125,14 @@ class MutableDamageDetection: ObservableObject, Identifiable {
     @Published var repairComplexity: String
     @Published var likelyFalsePositive: Bool
     @Published var explanation: String
+
+    // ── Capture provenance ──
+    // Detailed-scan findings are still normal report damage cases, but retaining
+    // this evidence lets the review screen and PDF explain how they were found.
+    @Published var captureSource: DamageCaptureSource
+    @Published var observedFrameCount: Int?
+    @Published var totalFrameCount: Int?
+    @Published var detailedPanelIDs: [String]
 
     init(from detection: DamageDetection) {
         self.id                    = detection.id
@@ -181,6 +195,10 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         self.repairComplexity      = detection.repairComplexity
         self.likelyFalsePositive   = detection.likelyFalsePositive
         self.explanation           = detection.explanation
+        self.captureSource         = .overviewAnalysis
+        self.observedFrameCount    = nil
+        self.totalFrameCount       = nil
+        self.detailedPanelIDs      = []
     }
 
     /// Manual / user-created detection (no VLM data available)
@@ -195,7 +213,11 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         normalizedBBox: CGRect?,
         isBaseline: Bool = false,
         explanation: String = "",
-        severity: String = "unassessed"
+        severity: String = "unassessed",
+        captureSource: DamageCaptureSource = .manual,
+        observedFrameCount: Int? = nil,
+        totalFrameCount: Int? = nil,
+        detailedPanelIDs: [String] = []
     ) {
         self.id                    = UUID()
         self.angleIndex            = angleIndex
@@ -221,6 +243,18 @@ class MutableDamageDetection: ObservableObject, Identifiable {
         self.repairComplexity      = ""
         self.likelyFalsePositive   = false
         self.explanation           = explanation
+        self.captureSource         = captureSource
+        self.observedFrameCount    = observedFrameCount
+        self.totalFrameCount       = totalFrameCount
+        self.detailedPanelIDs      = detailedPanelIDs
+    }
+
+    var detailedEvidenceDescription: String {
+        guard captureSource == .detailedMultiAngle else { return "Overview image" }
+        if let observedFrameCount, let totalFrameCount, totalFrameCount > 0 {
+            return "Confirmed from \(observedFrameCount) of \(totalFrameCount) multi-angle views"
+        }
+        return "Confirmed by the detailed multi-angle scan"
     }
 }
 
@@ -1416,6 +1450,10 @@ struct DamageDetailSheet: View {
                         if !detection.severity.isEmpty {
                             Divider()
                             metaRow(label: "Severity", value: detection.severity.capitalized)
+                        }
+                        if detection.captureSource == .detailedMultiAngle {
+                            Divider()
+                            metaRow(label: "Evidence", value: detection.detailedEvidenceDescription)
                         }
                         if !detection.repairComplexity.isEmpty {
                             Divider()

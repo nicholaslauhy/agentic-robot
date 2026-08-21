@@ -636,7 +636,10 @@ struct DamageReportGenerator {
                             detection.explanation,
                             fallback: "No detailed AI description is available for this damage."
                         )
-                        let caseText = "Damage Type: \(damageType)\nVehicle Angle: \(angleName)\nConfidence: \(confidence)\nSeverity: \(severity)\nAI Description: \(description)"
+                        let detailedEvidence = detection.captureSource == .detailedMultiAngle
+                            ? "\nCapture Evidence: \(detection.detailedEvidenceDescription)"
+                            : ""
+                        let caseText = "Damage Type: \(damageType)\nVehicle Angle: \(angleName)\nConfidence: \(confidence)\nSeverity: \(severity)\(detailedEvidence)\nAI Description: \(description)"
                         drawString(caseText, in: CGRect(x: left + 8, y: y + 26, width: 250, height: 118), font: .systemFont(ofSize: 8.6))
 
                         if let contextImage = detection.normalizedBBox == nil ? detection.contextImage : (detection.cleanContextImage ?? detection.contextImage) {
