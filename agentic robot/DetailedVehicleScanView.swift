@@ -10,6 +10,8 @@ struct DetailedPanelCapture: Identifiable {
     let previewImage: UIImage
     let videoURL: URL
     let durationSeconds: Double
+    let representativeFrames: [DetailedScanFrame]
+    let qualityAssessment: DetailedScanQualityAssessment
 
     var id: String { panel.id }
     var image: UIImage { previewImage }
@@ -234,38 +236,62 @@ struct DetailedVehicleScanView: View {
     private var captureCard: some View {
         Group {
             if let capture = captures[selectedPanel] {
-                Button {
-                    playbackCapture = capture
-                } label: {
-                    ZStack {
-                        Image(uiImage: capture.previewImage)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                        .frame(maxHeight: 320)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                VStack(alignment: .leading, spacing: 10) {
+                    Button {
+                        playbackCapture = capture
+                    } label: {
+                        ZStack {
+                            Image(uiImage: capture.previewImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .frame(maxHeight: 320)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 54))
-                            .foregroundStyle(.white, HTXTheme.primaryPurple.opacity(0.88))
-                            .shadow(radius: 5)
+                            Image(systemName: "play.circle.fill")
+                                .font(.system(size: 54))
+                                .foregroundStyle(.white, HTXTheme.primaryPurple.opacity(0.88))
+                                .shadow(radius: 5)
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            Label(
+                                String(format: "%.1f s", capture.durationSeconds),
+                                systemImage: "checkmark.circle.fill"
+                            )
+                            .font(.caption.bold())
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color.green.opacity(0.92))
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                            .padding(10)
+                        }
                     }
-                    .overlay(alignment: .topTrailing) {
-                        Label(
-                            String(format: "%.1f s", capture.durationSeconds),
-                            systemImage: "checkmark.circle.fill"
-                        )
-                        .font(.caption.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(Color.green.opacity(0.92))
-                        .foregroundColor(.white)
-                        .clipShape(Capsule())
-                        .padding(10)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Play recorded sweep for \(selectedPanel.displayName)")
+
+                    Label(capture.qualityAssessment.summary, systemImage: "checkmark.shield.fill")
+                        .font(.footnote.bold())
+                        .foregroundColor(.green)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Array(capture.representativeFrames.enumerated()), id: \.element.id) { index, frame in
+                                VStack(spacing: 4) {
+                                    Image(uiImage: frame.image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 112, height: 72)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                                    Text("View \(index + 1)")
+                                        .font(.caption2.bold())
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                        }
                     }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Play recorded sweep for \(selectedPanel.displayName)")
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "video.fill")
@@ -358,7 +384,7 @@ struct DetailedVehicleScanView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .tint(HTXTheme.primaryPurple)
-                    Text("Preparing recording preview…")
+                    Text("Checking lighting and sharpness, then extracting stable viewpoints…")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -388,10 +414,12 @@ struct DetailedVehicleScanView: View {
         errorMessage = nil
 
         Task {
+            var preparedURL: URL?
             do {
                 let storedURL = sourceIsPersistent
                     ? sourceURL
                     : try DetailedCaptureFileStore.copyRecordedVideo(from: sourceURL, panel: panel)
+                preparedURL = storedURL
                 let metadata = try await DetailedCaptureFileStore.previewMetadata(for: storedURL)
 
                 guard DetailedVehicleScanSpecification.recordingDurationSeconds
@@ -399,6 +427,11 @@ struct DetailedVehicleScanView: View {
                     try? FileManager.default.removeItem(at: storedURL)
                     throw DetailedCaptureError.invalidDuration(metadata.durationSeconds)
                 }
+
+                let processed = try await DetailedScanFrameProcessor.process(
+                    videoURL: storedURL,
+                    durationSeconds: metadata.durationSeconds
+                )
 
                 await MainActor.run {
                     if let previous = captures[panel], previous.videoURL != storedURL {
@@ -408,12 +441,17 @@ struct DetailedVehicleScanView: View {
                         panel: panel,
                         previewImage: metadata.preview,
                         videoURL: storedURL,
-                        durationSeconds: metadata.durationSeconds
+                        durationSeconds: metadata.durationSeconds,
+                        representativeFrames: processed.frames,
+                        qualityAssessment: processed.assessment
                     )
                     isPreparingCapture = false
                     advanceAfterCapture(panel)
                 }
             } catch {
+                if let preparedURL {
+                    try? FileManager.default.removeItem(at: preparedURL)
+                }
                 await MainActor.run {
                     isPreparingCapture = false
                     errorMessage = error.localizedDescription
@@ -487,9 +525,9 @@ private enum DetailedCaptureFileStore {
             seconds: min(max(0.25, durationSeconds * 0.5), durationSeconds),
             preferredTimescale: 600
         )
-        let cgImage = try generator.copyCGImage(at: previewTime, actualTime: nil)
+        let generated = try await generator.image(at: previewTime)
         return PreviewMetadata(
-            preview: UIImage(cgImage: cgImage).htxNormalizedImage(),
+            preview: UIImage(cgImage: generated.image).htxNormalizedImage(),
             durationSeconds: durationSeconds
         )
     }
