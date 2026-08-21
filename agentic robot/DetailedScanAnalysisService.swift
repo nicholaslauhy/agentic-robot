@@ -41,6 +41,73 @@ struct DetailedPanelDamageFinding: Decodable, Identifiable {
     }
 }
 
+struct DetailedProjectedDamageFinding: Decodable, Identifiable {
+    let id: UUID
+    let panelIds: [String]
+    let observedFrames: Int
+    let totalFrames: Int
+    let persistence: Double
+    let multiFrameStatus: String
+    let projectionMethod: String
+    let projectionConfidence: Double
+    let projectionInliers: Int
+    let projectionInlierRatio: Double
+    let damage: DamageDetection
+
+    enum CodingKeys: String, CodingKey {
+        case panelId
+        case observedFrames
+        case totalFrames
+        case persistence
+        case multiFrameStatus
+        case projectionMethod
+        case projectionConfidence
+        case projectionInliers
+        case projectionInlierRatio
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = UUID()
+        panelIds = [try container.decode(String.self, forKey: .panelId)]
+        observedFrames = try container.decode(Int.self, forKey: .observedFrames)
+        totalFrames = try container.decode(Int.self, forKey: .totalFrames)
+        persistence = try container.decode(Double.self, forKey: .persistence)
+        multiFrameStatus = try container.decode(String.self, forKey: .multiFrameStatus)
+        projectionMethod = try container.decode(String.self, forKey: .projectionMethod)
+        projectionConfidence = try container.decode(Double.self, forKey: .projectionConfidence)
+        projectionInliers = try container.decodeIfPresent(Int.self, forKey: .projectionInliers) ?? 0
+        projectionInlierRatio = try container.decodeIfPresent(Double.self, forKey: .projectionInlierRatio) ?? 0
+        damage = try DamageDetection(from: decoder)
+    }
+
+    init(
+        id: UUID = UUID(),
+        panelIds: [String],
+        observedFrames: Int,
+        totalFrames: Int,
+        persistence: Double,
+        multiFrameStatus: String,
+        projectionMethod: String,
+        projectionConfidence: Double,
+        projectionInliers: Int,
+        projectionInlierRatio: Double,
+        damage: DamageDetection
+    ) {
+        self.id = id
+        self.panelIds = panelIds
+        self.observedFrames = observedFrames
+        self.totalFrames = totalFrames
+        self.persistence = persistence
+        self.multiFrameStatus = multiFrameStatus
+        self.projectionMethod = projectionMethod
+        self.projectionConfidence = projectionConfidence
+        self.projectionInliers = projectionInliers
+        self.projectionInlierRatio = projectionInlierRatio
+        self.damage = damage
+    }
+}
+
 enum DetailedScanAnalysisError: LocalizedError {
     case backendNotConfigured
     case invalidResponse
@@ -76,6 +143,35 @@ final class DetailedScanAnalysisService {
             progress(index + 1, captures.count, capture.panel)
         }
         return findings
+    }
+
+    func projectToOverview(
+        findings: [DetailedPanelDamageFinding],
+        captures: [DetailedPanelCapture],
+        overviewImages: [UIImage],
+        progress: @MainActor @escaping (_ completed: Int, _ total: Int, _ finding: DetailedPanelDamageFinding) -> Void
+    ) async throws -> [DetailedProjectedDamageFinding] {
+        let capturesByPanel = Dictionary(uniqueKeysWithValues: captures.map { ($0.panel.rawValue, $0) })
+        var projected: [DetailedProjectedDamageFinding] = []
+
+        for (index, finding) in findings.enumerated() {
+            try Task.checkCancellation()
+            progress(index, findings.count, finding)
+            guard let capture = capturesByPanel[finding.panelId],
+                  capture.representativeFrames.indices.contains(finding.frameIndex),
+                  overviewImages.indices.contains(finding.damage.angleIndex) else {
+                continue
+            }
+            let result = try await project(
+                finding: finding,
+                sourceImage: capture.representativeFrames[finding.frameIndex].image,
+                overviewImage: overviewImages[finding.damage.angleIndex]
+            )
+            projected.append(result)
+            progress(index + 1, findings.count, finding)
+        }
+
+        return DetailedScanDuplicateMerger.merge(projected)
     }
 
     private func analyze(capture: DetailedPanelCapture) async throws -> DetailedPanelAnalysisResponse {
@@ -135,8 +231,182 @@ final class DetailedScanAnalysisService {
         }
     }
 
+    private func project(
+        finding: DetailedPanelDamageFinding,
+        sourceImage: UIImage,
+        overviewImage: UIImage
+    ) async throws -> DetailedProjectedDamageFinding {
+        guard let url = BackendConfiguration.endpointURL(path: "project-detailed-damage"),
+              let x1 = finding.damage.x1,
+              let y1 = finding.damage.y1,
+              let x2 = finding.damage.x2,
+              let y2 = finding.damage.y2 else {
+            throw DetailedScanAnalysisError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 180
+        let boundary = "DetailedProjection-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        let fields = [
+            "panel_id": finding.panelId,
+            "angle_index": String(finding.damage.angleIndex),
+            "angle_name": finding.damage.angleName,
+            "x1": String(x1),
+            "y1": String(y1),
+            "x2": String(x2),
+            "y2": String(y2),
+            "damage_type": finding.damage.damageType,
+            "confidence": String(finding.damage.confidence),
+            "explanation": finding.damage.explanation,
+            "severity": finding.damage.severity.isEmpty ? "unassessed" : finding.damage.severity,
+            "verification_status": finding.damage.likelyFalsePositive
+                ? "likely_false_positive"
+                : (finding.damage.isVerifiedDamage ? "verified_damage" : "possible_damage"),
+            "observed_frames": String(finding.observedFrames),
+            "total_frames": String(finding.totalFrames),
+            "persistence": String(finding.persistence),
+            "multi_frame_status": finding.multiFrameStatus,
+        ]
+        for (name, value) in fields {
+            body.appendFormField(name: name, value: value, boundary: boundary)
+        }
+
+        guard let sourceData = sourceImage.htxNormalizedImage().jpegData(compressionQuality: 0.86),
+              let overviewData = overviewImage.htxNormalizedImage().jpegData(compressionQuality: 0.86) else {
+            throw DetailedScanAnalysisError.invalidResponse
+        }
+        body.appendFile(
+            fieldName: "source_file",
+            filename: "detailed-source.jpg",
+            mimeType: "image/jpeg",
+            data: sourceData,
+            boundary: boundary
+        )
+        body.appendFile(
+            fieldName: "overview_file",
+            filename: "vehicle-overview.jpg",
+            mimeType: "image/jpeg",
+            data: overviewData,
+            boundary: boundary
+        )
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+
+        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        try Task.checkCancellation()
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw DetailedScanAnalysisError.invalidResponse
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let detail = (try? JSONDecoder().decode(ServerDetail.self, from: data).detail)
+                ?? "Detailed damage mapping failed with status \(httpResponse.statusCode)."
+            throw DetailedScanAnalysisError.server(detail)
+        }
+
+        struct ProjectionResponse: Decodable {
+            let result: DetailedProjectedDamageFinding
+        }
+        return try JSONDecoder().decode(ProjectionResponse.self, from: data).result
+    }
+
     private struct ServerDetail: Decodable {
         let detail: String
+    }
+}
+
+enum DetailedScanDuplicateMerger {
+    private static let scratchFamily = [
+        "scratch", "scuff", "crack", "paint damage", "paint chip",
+        "paint chipping", "paint peel", "paint peeling", "peeling",
+    ]
+
+    static func merge(_ findings: [DetailedProjectedDamageFinding]) -> [DetailedProjectedDamageFinding] {
+        var merged: [DetailedProjectedDamageFinding] = []
+        for finding in findings.sorted(by: { qualityScore($0) > qualityScore($1) }) {
+            guard let duplicateIndex = merged.firstIndex(where: { isDuplicate($0, finding) }) else {
+                merged.append(finding)
+                continue
+            }
+
+            let existing = merged[duplicateIndex]
+            let best = qualityScore(finding) > qualityScore(existing) ? finding : existing
+            let panelIds = Array(Set(existing.panelIds + finding.panelIds)).sorted()
+            let observedFrames = existing.observedFrames + finding.observedFrames
+            let totalFrames = existing.totalFrames + finding.totalFrames
+            merged[duplicateIndex] = DetailedProjectedDamageFinding(
+                panelIds: panelIds,
+                observedFrames: observedFrames,
+                totalFrames: totalFrames,
+                persistence: Double(observedFrames) / Double(max(1, totalFrames)),
+                multiFrameStatus: observedFrames >= 3 ? "corroborated" : best.multiFrameStatus,
+                projectionMethod: best.projectionMethod,
+                projectionConfidence: best.projectionConfidence,
+                projectionInliers: best.projectionInliers,
+                projectionInlierRatio: best.projectionInlierRatio,
+                damage: best.damage
+            )
+        }
+        return merged
+    }
+
+    private static func qualityScore(_ finding: DetailedProjectedDamageFinding) -> Double {
+        finding.projectionConfidence * 0.50
+            + finding.persistence * 0.30
+            + finding.damage.confidence * 0.20
+    }
+
+    private static func canonicalLabel(_ label: String) -> String {
+        let normalised = label.lowercased().replacingOccurrences(of: "_", with: " ")
+        return scratchFamily.contains(normalised) ? "scratch" : normalised
+    }
+
+    private static func normalisedBox(_ finding: DetailedProjectedDamageFinding) -> CGRect? {
+        guard let x1 = finding.damage.x1,
+              let y1 = finding.damage.y1,
+              let x2 = finding.damage.x2,
+              let y2 = finding.damage.y2,
+              let width = finding.damage.imageWidth,
+              let height = finding.damage.imageHeight,
+              width > 0,
+              height > 0,
+              x2 > x1,
+              y2 > y1 else { return nil }
+        return CGRect(
+            x: Double(x1) / Double(width),
+            y: Double(y1) / Double(height),
+            width: Double(x2 - x1) / Double(width),
+            height: Double(y2 - y1) / Double(height)
+        )
+    }
+
+    private static func isDuplicate(
+        _ first: DetailedProjectedDamageFinding,
+        _ second: DetailedProjectedDamageFinding
+    ) -> Bool {
+        guard first.damage.angleIndex == second.damage.angleIndex,
+              canonicalLabel(first.damage.damageType) == canonicalLabel(second.damage.damageType),
+              let firstBox = normalisedBox(first),
+              let secondBox = normalisedBox(second) else { return false }
+
+        let intersection = firstBox.intersection(secondBox)
+        if !intersection.isNull {
+            let intersectionArea = intersection.width * intersection.height
+            let unionArea = firstBox.width * firstBox.height
+                + secondBox.width * secondBox.height
+                - intersectionArea
+            if unionArea > 0, intersectionArea / unionArea >= 0.15 {
+                return true
+            }
+        }
+
+        guard canonicalLabel(first.damage.damageType) == "scratch" else { return false }
+        let horizontalGap = max(0, max(firstBox.minX, secondBox.minX) - min(firstBox.maxX, secondBox.maxX))
+        let verticalOverlap = max(0, min(firstBox.maxY, secondBox.maxY) - max(firstBox.minY, secondBox.minY))
+        let smallerHeight = max(0.0001, min(firstBox.height, secondBox.height))
+        return horizontalGap <= 0.015 && verticalOverlap / smallerHeight >= 0.35
     }
 }
 
@@ -165,17 +435,15 @@ private extension Data {
 
 struct DetailedScanAnalysisProgressView: View {
     let captures: [DetailedPanelCapture]
-    let onComplete: ([DetailedPanelDamageFinding]) -> Void
+    let overviewImages: [UIImage]
+    let onComplete: ([DetailedProjectedDamageFinding]) -> Void
     let onSkip: () -> Void
 
-    @State private var completedPanels = 0
+    @State private var progressValue = 0.0
+    @State private var stageLabel = "Step 1 of 2 · Multi-frame damage check"
     @State private var currentPanel: DetailedVehiclePanel?
     @State private var analysisTask: Task<Void, Never>?
     @State private var errorMessage: String?
-
-    private var progress: Double {
-        Double(completedPanels) / Double(max(1, captures.count))
-    }
 
     var body: some View {
         ZStack {
@@ -196,12 +464,12 @@ struct DetailedScanAnalysisProgressView: View {
                     .multilineTextAlignment(.center)
 
                 VStack(spacing: 10) {
-                    ProgressView(value: progress)
+                    ProgressView(value: progressValue)
                         .tint(HTXTheme.primaryPurple)
                     HStack {
-                        Text("Multi-frame damage check")
+                        Text(stageLabel)
                         Spacer()
-                        Text("\(Int((progress * 100).rounded()))%")
+                        Text("\(Int((progressValue * 100).rounded()))%")
                             .fontWeight(.bold)
                     }
                     .font(.subheadline)
@@ -243,22 +511,41 @@ struct DetailedScanAnalysisProgressView: View {
 
     private func startAnalysis() {
         analysisTask?.cancel()
-        completedPanels = 0
+        progressValue = 0
+        stageLabel = "Step 1 of 2 · Multi-frame damage check"
         currentPanel = nil
         errorMessage = nil
         analysisTask = Task {
             do {
                 let findings = try await DetailedScanAnalysisService.shared.analyze(
                     captures: captures
-                ) { completed, _, panel in
-                    completedPanels = completed
+                ) { completed, total, panel in
+                    progressValue = 0.72 * Double(completed) / Double(max(1, total))
                     currentPanel = panel
                 }
                 guard !Task.isCancelled else { return }
-                completedPanels = captures.count
+                stageLabel = "Step 2 of 2 · Mapping to overview images"
+                progressValue = 0.72
+                if findings.isEmpty {
+                    progressValue = 1
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard !Task.isCancelled else { return }
+                    onComplete([])
+                    return
+                }
+
+                let projected = try await DetailedScanAnalysisService.shared.projectToOverview(
+                    findings: findings,
+                    captures: captures,
+                    overviewImages: overviewImages
+                ) { completed, total, finding in
+                    progressValue = 0.72 + 0.28 * Double(completed) / Double(max(1, total))
+                    currentPanel = DetailedVehiclePanel(rawValue: finding.panelId)
+                }
+                progressValue = 1
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
-                onComplete(findings)
+                onComplete(projected)
             } catch is CancellationError {
                 return
             } catch {

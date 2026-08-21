@@ -249,7 +249,7 @@ struct DamageAnalysisResultView: View {
     @State private var showDetailedVehicleScan = false
     @State private var detailedPanelCaptures: [DetailedPanelCapture] = []
     @State private var showDetailedScanAnalysis = false
-    @State private var detailedScanFindings: [DetailedPanelDamageFinding] = []
+    @State private var detailedScanFindings: [DetailedProjectedDamageFinding] = []
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -510,6 +510,7 @@ struct DamageAnalysisResultView: View {
         .fullScreenCover(isPresented: $showDetailedScanAnalysis) {
             DetailedScanAnalysisProgressView(
                 captures: detailedPanelCaptures,
+                overviewImages: scanImages,
                 onComplete: { findings in
                     detailedScanFindings = findings
                     showDetailedScanAnalysis = false
