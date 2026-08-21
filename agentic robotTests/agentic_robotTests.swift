@@ -6,6 +6,7 @@
 //
 
 import XCTest
+@testable import HTX_Inspect
 
 final class agentic_robotTests: XCTestCase {
 
@@ -17,14 +18,50 @@ final class agentic_robotTests: XCTestCase {
         // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
-    func testExample() throws {
-        // This is an example of a functional test case.
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // Any test you write for XCTest can be annotated as throws and async.
-        // Mark your test throws to produce an unexpected failure when your test encounters an uncaught error.
-        // Mark your test async to allow awaiting for asynchronous code to complete. Check the results with assertions afterwards.
-        // XCTest Documentation
-        // https://developer.apple.com/documentation/xctest
+    func testDetailedScanRemainsAnAdditionToFourOverviewAngles() {
+        XCTAssertTrue(DetailedVehicleScanSpecification.isOptional)
+        XCTAssertTrue(DetailedVehicleScanSpecification.beginsOnlyAfterOverviewCapture)
+        XCTAssertEqual(DetailedVehicleScanSpecification.requiredOverviewCaptureCount, 4)
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.baselinePolicy,
+            .retainFourOverviewAngles
+        )
+    }
+
+    func testDetailedScanHasStableTwelvePanelWalkAround() {
+        let panels = DetailedVehicleScanSpecification.panels
+
+        XCTAssertEqual(panels.count, 12)
+        XCTAssertEqual(Set(panels.map(\.id)).count, panels.count)
+        XCTAssertEqual(panels.map(\.sequenceNumber), Array(1...12))
+        XCTAssertEqual(panels.first, .frontUpper)
+        XCTAssertEqual(panels.last, .rightFrontQuarter)
+    }
+
+    func testEveryDetailedPanelMapsBackToOneOverviewAngle() {
+        XCTAssertEqual(DetailedVehicleScanSpecification.panels(for: .front).count, 2)
+        XCTAssertEqual(DetailedVehicleScanSpecification.panels(for: .rear).count, 2)
+        XCTAssertEqual(DetailedVehicleScanSpecification.panels(for: .leftSide).count, 4)
+        XCTAssertEqual(DetailedVehicleScanSpecification.panels(for: .rightSide).count, 4)
+    }
+
+    func testCaptureSweepProvidesFiveOrderedViewpoints() {
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.capturePoses.map(\.nominalDegrees),
+            [-20, -10, 0, 10, 20]
+        )
+        XCTAssertFalse(DetailedVehicleScanSpecification.automaticallyEnableTorch)
+    }
+
+    func testBaselineUpdatesOnlyAfterNP299IsFiled() {
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.baselineUpdateTrigger,
+            .np299ReportFiled
+        )
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.duplicatePolicy,
+            .mapToOverviewThenMerge
+        )
     }
 
     func testPerformanceExample() throws {
