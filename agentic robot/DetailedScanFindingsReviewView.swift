@@ -33,8 +33,13 @@ struct DetailedScanFindingsReviewView: View {
         self.scanImages = scanImages
         self.onComplete = onComplete
         self.onBack = onBack
-        _candidates = State(initialValue: findings.map {
-            DetailedReviewCandidate(id: $0.id, finding: $0, detection: MutableDamageDetection(from: $0.damage))
+        _candidates = State(initialValue: findings.map { finding in
+            let detection = MutableDamageDetection(from: finding.damage)
+            detection.captureSource = .detailedMultiAngle
+            detection.observedFrameCount = finding.observedFrames
+            detection.totalFrameCount = finding.totalFrames
+            detection.detailedPanelIDs = finding.panelIds
+            return DetailedReviewCandidate(id: finding.id, finding: finding, detection: detection)
         })
     }
 
