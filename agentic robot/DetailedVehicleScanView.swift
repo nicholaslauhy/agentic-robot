@@ -173,12 +173,19 @@ struct DetailedVehicleScanView: View {
                     .clipShape(Capsule())
             }
 
-            CarSilhouetteView(
-                carType: carType,
-                angleId: selectedPanel.overviewAngle.rawValue
-            )
-            .frame(height: 190)
-            .padding(.horizontal, 12)
+            ZStack {
+                CarSilhouetteView(
+                    carType: carType,
+                    angleId: selectedPanel.overviewAngle.rawValue
+                )
+
+                DetailedPanelHighlightOverlay(panel: selectedPanel)
+            }
+            .frame(maxWidth: 780)
+            .frame(height: 280)
+            .frame(maxWidth: .infinity)
+            .background(HTXTheme.softPurpleCard.opacity(0.45))
+            .clipShape(RoundedRectangle(cornerRadius: 18))
             .overlay(alignment: .topLeading) {
                 Label(selectedPanel.displayName, systemImage: "viewfinder")
                     .font(.caption.bold())
@@ -187,15 +194,14 @@ struct DetailedVehicleScanView: View {
                     .background(.ultraThinMaterial)
                     .foregroundColor(HTXTheme.primaryPurple)
                     .clipShape(Capsule())
-                    .padding(8)
+                    .padding(10)
             }
+
+            DetailedScanSweepGuide()
 
             VStack(alignment: .leading, spacing: 6) {
                 Label(selectedPanel.coverageHint, systemImage: "camera.viewfinder")
-                Label(
-                    "Take the photo from a slight angle so surface reflections remain visible.",
-                    systemImage: "arrow.left.and.right"
-                )
+                Label(DetailedVehicleScanSpecification.operatorInstruction, systemImage: "arrow.left.and.right")
             }
             .font(.footnote)
             .foregroundColor(.secondary)
@@ -337,5 +343,125 @@ struct DetailedVehicleScanView: View {
             .dropFirst(currentIndex + 1)
             .first(where: { captures[$0] == nil }) else { return }
         withAnimation { selectedPanel = next }
+    }
+}
+
+private struct DetailedPanelHighlightOverlay: View {
+    let panel: DetailedVehiclePanel
+
+    var body: some View {
+        GeometryReader { geometry in
+            let rect = highlightRect(in: geometry.size)
+
+            RoundedRectangle(cornerRadius: 12)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            HTXTheme.primaryPurple.opacity(0.10),
+                            HTXTheme.primaryPurple.opacity(0.38),
+                            Color.cyan.opacity(0.20)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(HTXTheme.primaryPurple, style: StrokeStyle(lineWidth: 3, dash: [9, 6]))
+                )
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .shadow(color: HTXTheme.primaryPurple.opacity(0.20), radius: 8)
+                .allowsHitTesting(false)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func highlightRect(in size: CGSize) -> CGRect {
+        let normalized: CGRect
+
+        switch panel {
+        case .frontUpper, .rearUpper:
+            normalized = CGRect(x: 0.30, y: 0.31, width: 0.40, height: 0.25)
+        case .frontLower, .rearLower:
+            normalized = CGRect(x: 0.25, y: 0.57, width: 0.50, height: 0.20)
+        case .leftFrontQuarter, .rightRearQuarter:
+            normalized = CGRect(x: 0.15, y: 0.49, width: 0.18, height: 0.25)
+        case .leftFrontDoor, .rightRearDoor:
+            normalized = CGRect(x: 0.31, y: 0.47, width: 0.19, height: 0.27)
+        case .leftRearDoor, .rightFrontDoor:
+            normalized = CGRect(x: 0.50, y: 0.47, width: 0.18, height: 0.27)
+        case .leftRearQuarter, .rightFrontQuarter:
+            normalized = CGRect(x: 0.67, y: 0.49, width: 0.18, height: 0.25)
+        }
+
+        return CGRect(
+            x: normalized.minX * size.width,
+            y: normalized.minY * size.height,
+            width: normalized.width * size.width,
+            height: normalized.height * size.height
+        )
+    }
+}
+
+private struct DetailedScanSweepGuide: View {
+    @State private var sweepToRight = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Label("Start −20°", systemImage: "camera.fill")
+                Spacer()
+                Text("Straight")
+                Spacer()
+                Label("End +20°", systemImage: "camera.fill")
+            }
+            .font(.caption.bold())
+            .foregroundColor(.secondary)
+
+            GeometryReader { geometry in
+                let markerSize: CGFloat = 34
+                let travel = max(0, geometry.size.width - markerSize)
+
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.cyan.opacity(0.28),
+                                    HTXTheme.primaryPurple.opacity(0.72),
+                                    Color.cyan.opacity(0.28)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(height: 12)
+
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.system(size: markerSize))
+                        .foregroundStyle(.white, HTXTheme.primaryPurple)
+                        .offset(x: sweepToRight ? travel : 0)
+                }
+                .frame(height: markerSize)
+                .onAppear {
+                    guard !sweepToRight else { return }
+                    withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
+                        sweepToRight = true
+                    }
+                }
+            }
+            .frame(height: 34)
+
+            Text("Move around the highlighted panel in one slow sweep. Keep the panel centred; do not only rotate the iPad from one spot.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(12)
+        .background(HTXTheme.softPurpleCard)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Move from minus 20 degrees through straight on to plus 20 degrees around the highlighted panel")
     }
 }
