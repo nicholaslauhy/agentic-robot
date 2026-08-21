@@ -53,6 +53,17 @@ final class agentic_robotTests: XCTestCase {
         XCTAssertFalse(DetailedVehicleScanSpecification.automaticallyEnableTorch)
     }
 
+    func testGuidedRecordingUsesShortControlledSweep() {
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.recordingDurationSeconds,
+            3.0...7.0
+        )
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.preferredRecordingDurationSeconds,
+            5.0
+        )
+    }
+
     func testBaselineUpdatesOnlyAfterNP299IsFiled() {
         XCTAssertEqual(
             DetailedVehicleScanSpecification.baselineUpdateTrigger,
