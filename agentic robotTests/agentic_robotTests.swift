@@ -90,6 +90,35 @@ final class agentic_robotTests: XCTestCase {
         XCTAssertTrue(rejected.issues.contains { $0.localizedCaseInsensitiveContains("shaky") })
     }
 
+    func testDetailedPanelResponsePreservesPersistenceMetadata() throws {
+        let json = """
+        {
+          "panelId": "left_front_door",
+          "processedFrames": 5,
+          "results": [{
+            "panelId": "left_front_door",
+            "frameIndex": 2,
+            "observedFrames": 4,
+            "totalFrames": 5,
+            "persistence": 0.8,
+            "multiFrameStatus": "corroborated",
+            "normalisedTrackBox": [0.2, 0.3, 0.4, 0.5],
+            "angleIndex": 2,
+            "angleName": "Left Side",
+            "damageType": "scratch",
+            "confidence": 0.81,
+            "cropBase64": "",
+            "contextBase64": "",
+            "cleanContextBase64": ""
+          }]
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(DetailedPanelAnalysisResponse.self, from: json)
+        XCTAssertEqual(decoded.results.first?.observedFrames, 4)
+        XCTAssertEqual(decoded.results.first?.damage.damageType, "scratch")
+    }
+
     func testBaselineUpdatesOnlyAfterNP299IsFiled() {
         XCTAssertEqual(
             DetailedVehicleScanSpecification.baselineUpdateTrigger,
