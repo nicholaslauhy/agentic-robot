@@ -4,6 +4,12 @@
 <dict>
 	<key>HTXBackendBaseURL</key>
 	<string>http://192.168.86.27:8000</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Camera access is used to photograph vehicles and record guided vehicle-panel inspections.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is required by the iOS video recorder during guided vehicle-panel inspections.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Photo library access is used to attach existing vehicle photos and inspection videos.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
