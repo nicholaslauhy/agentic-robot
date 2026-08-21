@@ -15,6 +15,10 @@ struct DetailedPanelCapture: Identifiable {
 
     var id: String { panel.id }
     var image: UIImage { previewImage }
+
+    func removeTemporaryVideo() {
+        try? FileManager.default.removeItem(at: videoURL)
+    }
 }
 
 /// Optional close-up capture performed after the four overview photographs.
@@ -34,6 +38,7 @@ struct DetailedVehicleScanView: View {
     @State private var errorMessage: String?
     @State private var isPreparingCapture = false
     @State private var playbackCapture: DetailedPanelCapture?
+    @State private var preparationTask: Task<Void, Never>?
 
     private var currentIndex: Int {
         DetailedVehicleScanSpecification.panels.firstIndex(of: selectedPanel) ?? 0
@@ -71,7 +76,7 @@ struct DetailedVehicleScanView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Back") {
-                        if captures.isEmpty {
+                        if captures.isEmpty && !isPreparingCapture {
                             onCancel()
                         } else {
                             showExitConfirmation = true
@@ -85,6 +90,7 @@ struct DetailedVehicleScanView: View {
                 titleVisibility: .visible
             ) {
                 Button("Discard Detailed Recordings", role: .destructive) {
+                    preparationTask?.cancel()
                     removeAllCaptureFiles()
                     onCancel()
                 }
@@ -133,6 +139,9 @@ struct DetailedVehicleScanView: View {
                         }
                     }
                 }
+            }
+            .task {
+                DetailedCaptureFileStore.removeStaleFiles()
             }
         }
     }
@@ -401,7 +410,10 @@ struct DetailedVehicleScanView: View {
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            .disabled(captures.count != DetailedVehicleScanSpecification.panels.count)
+            .disabled(
+                captures.count != DetailedVehicleScanSpecification.panels.count
+                    || isPreparingCapture
+            )
         }
     }
 
@@ -413,14 +425,17 @@ struct DetailedVehicleScanView: View {
         isPreparingCapture = true
         errorMessage = nil
 
-        Task {
+        preparationTask?.cancel()
+        preparationTask = Task {
             var preparedURL: URL?
             do {
                 let storedURL = sourceIsPersistent
                     ? sourceURL
                     : try DetailedCaptureFileStore.copyRecordedVideo(from: sourceURL, panel: panel)
                 preparedURL = storedURL
+                try Task.checkCancellation()
                 let metadata = try await DetailedCaptureFileStore.previewMetadata(for: storedURL)
+                try Task.checkCancellation()
 
                 guard DetailedVehicleScanSpecification.recordingDurationSeconds
                     .contains(metadata.durationSeconds) else {
@@ -432,6 +447,7 @@ struct DetailedVehicleScanView: View {
                     videoURL: storedURL,
                     durationSeconds: metadata.durationSeconds
                 )
+                try Task.checkCancellation()
 
                 await MainActor.run {
                     if let previous = captures[panel], previous.videoURL != storedURL {
@@ -446,7 +462,16 @@ struct DetailedVehicleScanView: View {
                         qualityAssessment: processed.assessment
                     )
                     isPreparingCapture = false
+                    preparationTask = nil
                     advanceAfterCapture(panel)
+                }
+            } catch is CancellationError {
+                if let preparedURL {
+                    try? FileManager.default.removeItem(at: preparedURL)
+                }
+                await MainActor.run {
+                    isPreparingCapture = false
+                    preparationTask = nil
                 }
             } catch {
                 if let preparedURL {
@@ -454,6 +479,7 @@ struct DetailedVehicleScanView: View {
                 }
                 await MainActor.run {
                     isPreparingCapture = false
+                    preparationTask = nil
                     errorMessage = error.localizedDescription
                 }
             }
@@ -470,8 +496,9 @@ struct DetailedVehicleScanView: View {
 
     private func removeAllCaptureFiles() {
         for capture in captures.values {
-            try? FileManager.default.removeItem(at: capture.videoURL)
+            capture.removeTemporaryVideo()
         }
+        captures.removeAll()
     }
 }
 
@@ -530,6 +557,26 @@ private enum DetailedCaptureFileStore {
             preview: UIImage(cgImage: generated.image).htxNormalizedImage(),
             durationSeconds: durationSeconds
         )
+    }
+
+    /// A crash or force-quit can bypass the normal cancellation cleanup. Remove
+    /// abandoned recordings on the next scan without touching recent active work.
+    static func removeStaleFiles(olderThan age: TimeInterval = 24 * 60 * 60) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("detailed-vehicle-scan", isDirectory: true)
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let cutoff = Date().addingTimeInterval(-age)
+        for file in files {
+            let modified = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            if modified.map({ $0 < cutoff }) ?? true {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 
     private static func destinationURL(panel: DetailedVehiclePanel, extension pathExtension: String) throws -> URL {

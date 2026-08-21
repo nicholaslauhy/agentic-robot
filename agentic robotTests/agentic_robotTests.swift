@@ -165,6 +165,61 @@ final class agentic_robotTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testReviewedDetailedDamageAvoidsDuplicateOverviewCaseButKeepsManualCase() {
+        func detection(x: CGFloat, source: DamageCaptureSource) -> MutableDamageDetection {
+            MutableDamageDetection(
+                angleIndex: 2,
+                angleName: "Left Side",
+                damageType: "scratch",
+                confidence: 0.8,
+                cropImage: nil,
+                contextImage: nil,
+                cleanContextImage: nil,
+                normalizedBBox: CGRect(x: x, y: 0.30, width: 0.15, height: 0.08),
+                captureSource: source
+            )
+        }
+
+        let overview = detection(x: 0.20, source: .overviewAnalysis)
+        let duplicateDetailed = detection(x: 0.21, source: .detailedMultiAngle)
+        let manual = detection(x: 0.21, source: .manual)
+        let result = DetailedFindingIntegrator.integrating(
+            existing: [overview],
+            outcome: DetailedScanReviewOutcome(
+                acceptedFindings: [duplicateDetailed],
+                manualDetections: [manual]
+            )
+        )
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertTrue(result.contains { $0.id == overview.id })
+        XCTAssertTrue(result.contains { $0.id == manual.id })
+        XCTAssertFalse(result.contains { $0.id == duplicateDetailed.id })
+    }
+
+    @MainActor
+    func testDetailedEvidenceDescriptionRetainsViewCount() {
+        let detection = MutableDamageDetection(
+            angleIndex: 0,
+            angleName: "Front",
+            damageType: "dent",
+            confidence: 0.75,
+            cropImage: nil,
+            contextImage: nil,
+            cleanContextImage: nil,
+            normalizedBBox: CGRect(x: 0.2, y: 0.3, width: 0.1, height: 0.1),
+            captureSource: .detailedMultiAngle,
+            observedFrameCount: 4,
+            totalFrameCount: 5
+        )
+
+        XCTAssertEqual(
+            detection.detailedEvidenceDescription,
+            "Confirmed from 4 of 5 multi-angle views"
+        )
+    }
+
     func testPerformanceExample() throws {
         // This is an example of a performance test case.
         measure {
