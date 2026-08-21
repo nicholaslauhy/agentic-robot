@@ -64,6 +64,32 @@ final class agentic_robotTests: XCTestCase {
         )
     }
 
+    func testDetailedScanQualityRequiresThreeUsableViewpoints() {
+        let clearFrames = (0..<5).map { index in
+            DetailedScanFrame(
+                timestampSeconds: Double(index),
+                image: UIImage(),
+                brightness: 0.50,
+                sharpness: 0.03,
+                clippedPixelRatio: 0.02
+            )
+        }
+        XCTAssertTrue(DetailedScanFrameProcessor.assess(clearFrames).passed)
+
+        let blurredFrames = (0..<5).map { index in
+            DetailedScanFrame(
+                timestampSeconds: Double(index),
+                image: UIImage(),
+                brightness: 0.50,
+                sharpness: 0.002,
+                clippedPixelRatio: 0.02
+            )
+        }
+        let rejected = DetailedScanFrameProcessor.assess(blurredFrames)
+        XCTAssertFalse(rejected.passed)
+        XCTAssertTrue(rejected.issues.contains { $0.localizedCaseInsensitiveContains("shaky") })
+    }
+
     func testBaselineUpdatesOnlyAfterNP299IsFiled() {
         XCTAssertEqual(
             DetailedVehicleScanSpecification.baselineUpdateTrigger,
