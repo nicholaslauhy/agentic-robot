@@ -405,55 +405,31 @@ private struct DetailedPanelHighlightOverlay: View {
 }
 
 private struct DetailedScanSweepGuide: View {
-    @State private var sweepToRight = false
-
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             HStack {
-                Label("Start −20°", systemImage: "camera.fill")
+                Label("Camera movement demonstration", systemImage: "figure.walk.motion")
+                    .font(.caption.bold())
+                    .foregroundColor(HTXTheme.primaryPurple)
                 Spacer()
-                Text("Straight")
-                Spacer()
-                Label("End +20°", systemImage: "camera.fill")
+                Text("NOT A CONTROL")
+                    .font(.caption2.bold())
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color(.systemGray5))
+                    .clipShape(Capsule())
             }
-            .font(.caption.bold())
-            .foregroundColor(.secondary)
 
-            GeometryReader { geometry in
-                let markerSize: CGFloat = 34
-                let travel = max(0, geometry.size.width - markerSize)
-
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.cyan.opacity(0.28),
-                                    HTXTheme.primaryPurple.opacity(0.72),
-                                    Color.cyan.opacity(0.28)
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(height: 12)
-
-                    Image(systemName: "chevron.right.circle.fill")
-                        .font(.system(size: markerSize))
-                        .foregroundStyle(.white, HTXTheme.primaryPurple)
-                        .offset(x: sweepToRight ? travel : 0)
-                }
-                .frame(height: markerSize)
-                .onAppear {
-                    guard !sweepToRight else { return }
-                    withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-                        sweepToRight = true
-                    }
-                }
+            HStack(spacing: 8) {
+                cameraPosition(title: "Start", degrees: "−20°", symbol: "camera.fill")
+                movementArrow
+                cameraPosition(title: "Centre", degrees: "0°", symbol: "camera.fill")
+                movementArrow
+                cameraPosition(title: "Finish", degrees: "+20°", symbol: "camera.fill")
             }
-            .frame(height: 34)
 
-            Text("Move around the highlighted panel in one slow sweep. Keep the panel centred; do not only rotate the iPad from one spot.")
+            Text("Do not drag anything on this screen. When recording starts, physically walk with the iPad from the first position to the last while keeping the highlighted panel centred.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -463,5 +439,30 @@ private struct DetailedScanSweepGuide: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Move from minus 20 degrees through straight on to plus 20 degrees around the highlighted panel")
+    }
+
+    private var movementArrow: some View {
+        Image(systemName: "arrow.right")
+            .font(.headline.bold())
+            .foregroundColor(HTXTheme.primaryPurple)
+            .frame(maxWidth: .infinity)
+            .accessibilityHidden(true)
+    }
+
+    private func cameraPosition(title: String, degrees: String, symbol: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundColor(HTXTheme.primaryPurple)
+                .frame(width: 44, height: 36)
+                .background(HTXTheme.primaryPurple.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            Text(title)
+                .font(.caption2.bold())
+            Text(degrees)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+        .frame(minWidth: 62)
     }
 }
