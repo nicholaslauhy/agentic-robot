@@ -119,6 +119,41 @@ final class agentic_robotTests: XCTestCase {
         XCTAssertEqual(decoded.results.first?.damage.damageType, "scratch")
     }
 
+    func testAdjacentPanelFragmentsMergeAfterOverviewProjection() {
+        func finding(panel: String, x1: Int, x2: Int) -> DetailedProjectedDamageFinding {
+            DetailedProjectedDamageFinding(
+                panelIds: [panel],
+                observedFrames: 3,
+                totalFrames: 5,
+                persistence: 0.6,
+                multiFrameStatus: "corroborated",
+                projectionMethod: "feature_affine",
+                projectionConfidence: 0.8,
+                projectionInliers: 12,
+                projectionInlierRatio: 0.6,
+                damage: DamageDetection(
+                    angleIndex: 2,
+                    angleName: "Left Side",
+                    damageType: "scratch",
+                    confidence: 0.8,
+                    x1: x1,
+                    y1: 300,
+                    x2: x2,
+                    y2: 350,
+                    imageWidth: 1000,
+                    imageHeight: 700
+                )
+            )
+        }
+
+        let merged = DetailedScanDuplicateMerger.merge([
+            finding(panel: "left_front_door", x1: 400, x2: 505),
+            finding(panel: "left_rear_door", x1: 510, x2: 620),
+        ])
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(Set(merged[0].panelIds).count, 2)
+    }
+
     func testBaselineUpdatesOnlyAfterNP299IsFiled() {
         XCTAssertEqual(
             DetailedVehicleScanSpecification.baselineUpdateTrigger,
