@@ -548,6 +548,7 @@ struct DamageAnalysisResultView: View {
                 overviewImages: scanImages,
                 onComplete: { findings in
                     detailedScanFindings = findings
+                    cleanupDetailedCaptureFiles()
                     showDetailedScanAnalysis = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         showDetailedFindingsReview = true
@@ -555,6 +556,7 @@ struct DamageAnalysisResultView: View {
                 },
                 onSkip: {
                     detailedScanFindings = []
+                    cleanupDetailedCaptureFiles()
                     showDetailedScanAnalysis = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         showIncidentStageOne = true
@@ -578,6 +580,7 @@ struct DamageAnalysisResultView: View {
                     }
                 },
                 onBack: {
+                    cleanupDetailedCaptureFiles()
                     showDetailedFindingsReview = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         showDetailedVehicleScan = true
@@ -609,6 +612,11 @@ struct DamageAnalysisResultView: View {
         withAnimation {
             mutableDetections.removeAll { $0.id == detection.id }
         }
+    }
+
+    private func cleanupDetailedCaptureFiles() {
+        detailedPanelCaptures.forEach { $0.removeTemporaryVideo() }
+        detailedPanelCaptures = []
     }
 }
 

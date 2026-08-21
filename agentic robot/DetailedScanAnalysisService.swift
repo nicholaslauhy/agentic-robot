@@ -213,11 +213,8 @@ final class DetailedScanAnalysisService {
         }
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
-        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        let (data, httpResponse) = try await uploadWithRetry(request: request, body: body)
         try Task.checkCancellation()
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DetailedScanAnalysisError.invalidResponse
-        }
         guard (200...299).contains(httpResponse.statusCode) else {
             let detail = (try? JSONDecoder().decode(ServerDetail.self, from: data).detail)
                 ?? "Detailed scan analysis failed with status \(httpResponse.statusCode)."
@@ -295,11 +292,8 @@ final class DetailedScanAnalysisService {
         )
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
-        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        let (data, httpResponse) = try await uploadWithRetry(request: request, body: body)
         try Task.checkCancellation()
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw DetailedScanAnalysisError.invalidResponse
-        }
         guard (200...299).contains(httpResponse.statusCode) else {
             let detail = (try? JSONDecoder().decode(ServerDetail.self, from: data).detail)
                 ?? "Detailed damage mapping failed with status \(httpResponse.statusCode)."
@@ -310,6 +304,56 @@ final class DetailedScanAnalysisService {
             let result: DetailedProjectedDamageFinding
         }
         return try JSONDecoder().decode(ProjectionResponse.self, from: data).result
+    }
+
+    private func uploadWithRetry(
+        request: URLRequest,
+        body: Data,
+        maximumAttempts: Int = 2
+    ) async throws -> (Data, HTTPURLResponse) {
+        var lastError: Error?
+
+        for attempt in 1...maximumAttempts {
+            try Task.checkCancellation()
+            do {
+                let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+                try Task.checkCancellation()
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw DetailedScanAnalysisError.invalidResponse
+                }
+
+                let retryableStatus = httpResponse.statusCode == 408
+                    || httpResponse.statusCode == 429
+                    || (500...599).contains(httpResponse.statusCode)
+                if retryableStatus, attempt < maximumAttempts {
+                    try await Task.sleep(for: .seconds(1))
+                    continue
+                }
+                return (data, httpResponse)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                lastError = error
+                guard attempt < maximumAttempts, isRetryableTransportError(error) else {
+                    throw error
+                }
+                try await Task.sleep(for: .seconds(1))
+            }
+        }
+
+        throw lastError ?? DetailedScanAnalysisError.invalidResponse
+    }
+
+    private func isRetryableTransportError(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        return [
+            .timedOut,
+            .networkConnectionLost,
+            .notConnectedToInternet,
+            .cannotConnectToHost,
+            .cannotFindHost,
+            .dnsLookupFailed,
+        ].contains(urlError.code)
     }
 
     private struct ServerDetail: Decodable {
