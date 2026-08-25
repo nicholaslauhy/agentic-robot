@@ -854,55 +854,68 @@ private struct DetailedCameraOverlay: View {
     let carType: CarType
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Label(panel.displayName, systemImage: "viewfinder")
-                    .font(.headline.bold())
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.black.opacity(0.68))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-                Spacer()
-                Text("3–7 seconds")
-                    .font(.subheadline.bold())
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(.black.opacity(0.68))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-
-            Spacer()
+        GeometryReader { geometry in
+            let horizontalInset = max(34, geometry.size.width * 0.035)
+            let topInset = max(110, geometry.size.height * 0.12)
+            let bottomInset = max(145, geometry.size.height * 0.15)
+            let guideWidth = max(320, geometry.size.width - (horizontalInset * 2))
+            let availableHeight = geometry.size.height - topInset - bottomInset
+            let guideHeight = max(240, min(availableHeight, guideWidth * 0.56))
 
             ZStack {
-                CarSilhouetteView(
-                    carType: carType,
-                    angleId: panel.overviewAngle.rawValue
+                ZStack {
+                    CarSilhouetteView(
+                        carType: carType,
+                        angleId: panel.overviewAngle.rawValue
+                    )
+                    .opacity(0.48)
+
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(
+                            Color.white.opacity(0.92),
+                            style: StrokeStyle(lineWidth: 3, dash: [12, 9])
+                        )
+                    DetailedPanelHighlightOverlay(panel: panel)
+                    DetailedPanelSweepDirectionOverlay(panel: panel)
+                }
+                .frame(width: guideWidth, height: guideHeight)
+                .position(
+                    x: geometry.size.width / 2,
+                    y: topInset + (availableHeight / 2)
                 )
-                .opacity(0.48)
 
-                RoundedRectangle(cornerRadius: 24)
-                    .stroke(Color.white.opacity(0.90), style: StrokeStyle(lineWidth: 3, dash: [12, 9]))
-                DetailedPanelHighlightOverlay(panel: panel)
-                DetailedPanelSweepDirectionOverlay(panel: panel)
+                HStack {
+                    Label(panel.displayName, systemImage: "viewfinder")
+                        .font(.headline.bold())
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.black.opacity(0.68))
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                    Spacer()
+                    Text("3–7 seconds")
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(.black.opacity(0.68))
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                }
+                .padding(.horizontal, 20)
+                .position(x: geometry.size.width / 2, y: 54)
+
+                Text("Move with the arrow:  −20°  →  straight  →  +20°")
+                    .font(.headline.bold())
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(.black.opacity(0.72))
+                    .clipShape(Capsule())
+                    .position(
+                        x: geometry.size.width / 2,
+                        y: geometry.size.height - max(54, bottomInset * 0.42)
+                    )
             }
-            .frame(maxWidth: 760)
-            .frame(height: 260)
-            .padding(.horizontal, 34)
-
-            Spacer()
-
-            Text("Walk slowly: −20°  →  straight  →  +20°")
-                .font(.headline.bold())
-                .foregroundColor(.white)
-                .padding(.horizontal, 18)
-                .padding(.vertical, 12)
-                .background(.black.opacity(0.72))
-                .clipShape(Capsule())
-                .padding(.bottom, 120)
         }
         .accessibilityHidden(true)
     }
@@ -973,28 +986,36 @@ private struct DetailedPanelHighlightOverlay: View {
 
 private struct DetailedPanelSweepDirectionOverlay: View {
     let panel: DetailedVehiclePanel
-    @State private var isAtEnd = false
 
     var body: some View {
-        GeometryReader { geometry in
-            let rect = detailedPanelHighlightRect(panel, in: geometry.size)
-            let horizontalPadding = min(24, rect.width * 0.20)
-            let travel = max(0, rect.width - horizontalPadding * 2)
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+            GeometryReader { geometry in
+                let rect = detailedPanelHighlightRect(panel, in: geometry.size)
+                let horizontalPadding = min(18, rect.width * 0.12)
+                let travel = max(0, rect.width - horizontalPadding * 2)
+                let cycle = timeline.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: 3.6) / 3.6
+                let progress = min(1, cycle / 0.82)
 
-            Image(systemName: "arrow.right.circle.fill")
-                .font(.system(size: min(34, max(20, rect.height * 0.32))))
-                .foregroundStyle(.white, HTXTheme.primaryPurple)
-                .shadow(color: .black.opacity(0.25), radius: 3)
-                .position(
-                    x: rect.minX + horizontalPadding + (isAtEnd ? travel : 0),
-                    y: rect.midY
-                )
+                ZStack {
+                    Capsule()
+                        .stroke(
+                            Color.white.opacity(0.80),
+                            style: StrokeStyle(lineWidth: 2, dash: [7, 6])
+                        )
+                        .frame(width: travel, height: 1)
+                        .position(x: rect.midX, y: rect.midY)
+
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.system(size: min(48, max(28, rect.height * 0.34))))
+                        .foregroundStyle(.white, HTXTheme.primaryPurple)
+                        .shadow(color: .black.opacity(0.35), radius: 4)
+                        .position(
+                            x: rect.minX + horizontalPadding + (travel * progress),
+                            y: rect.midY
+                        )
+                }
                 .allowsHitTesting(false)
-        }
-        .onAppear {
-            isAtEnd = false
-            withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
-                isAtEnd = true
             }
         }
         .accessibilityHidden(true)
