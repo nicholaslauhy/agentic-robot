@@ -998,13 +998,24 @@ private struct DetailedPanelSweepDirectionOverlay: View {
                 let progress = min(1, cycle / 0.82)
 
                 ZStack {
-                    Capsule()
+                    Path { path in
+                        path.move(
+                            to: CGPoint(
+                                x: rect.minX + horizontalPadding,
+                                y: rect.midY
+                            )
+                        )
+                        path.addLine(
+                            to: CGPoint(
+                                x: rect.maxX - horizontalPadding,
+                                y: rect.midY
+                            )
+                        )
+                    }
                         .stroke(
                             Color.white.opacity(0.80),
                             style: StrokeStyle(lineWidth: 2, dash: [7, 6])
                         )
-                        .frame(width: travel, height: 1)
-                        .position(x: rect.midX, y: rect.midY)
 
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: min(48, max(28, rect.height * 0.34))))
@@ -1052,8 +1063,6 @@ private func detailedPanelHighlightRect(
 }
 
 private struct DetailedScanSweepGuide: View {
-    @State private var movementProgress: CGFloat = 0
-
     var body: some View {
         VStack(spacing: 12) {
             HStack {
@@ -1070,55 +1079,66 @@ private struct DetailedScanSweepGuide: View {
                     .clipShape(Capsule())
             }
 
-            GeometryReader { geometry in
-                let startX: CGFloat = 42
-                let endX = max(startX, geometry.size.width - 42)
-                let x = startX + ((endX - startX) * movementProgress)
-                let arc = CGFloat(sin(Double(movementProgress) * .pi))
-                let y = 76 - (arc * 34)
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                GeometryReader { geometry in
+                    let startX: CGFloat = 64
+                    let endX = max(startX, geometry.size.width - 64)
+                    let startY: CGFloat = 94
+                    let controlY: CGFloat = 14
+                    let cycle = timeline.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: 4.2) / 4.2
+                    let progress = CGFloat(min(1, cycle / 0.80))
+                    let inverse = 1 - progress
+                    let x = startX + ((endX - startX) * progress)
+                    let y = (inverse * inverse * startY)
+                        + (2 * inverse * progress * controlY)
+                        + (progress * progress * startY)
 
-                ZStack {
-                    Path { path in
-                        path.move(to: CGPoint(x: startX, y: 76))
-                        path.addQuadCurve(
-                            to: CGPoint(x: endX, y: 76),
-                            control: CGPoint(x: geometry.size.width / 2, y: 8)
+                    ZStack {
+                        Path { path in
+                            path.move(to: CGPoint(x: startX, y: startY))
+                            path.addQuadCurve(
+                                to: CGPoint(x: endX, y: startY),
+                                control: CGPoint(x: geometry.size.width / 2, y: controlY)
+                            )
+                        }
+                        .stroke(
+                            HTXTheme.primaryPurple.opacity(0.55),
+                            style: StrokeStyle(lineWidth: 3, dash: [8, 6])
                         )
+
+                        Image(systemName: "chevron.right.2")
+                            .font(.caption.bold())
+                            .foregroundColor(HTXTheme.primaryPurple)
+                            .position(x: geometry.size.width * 0.35, y: 42)
+                        Image(systemName: "chevron.right.2")
+                            .font(.caption.bold())
+                            .foregroundColor(HTXTheme.primaryPurple)
+                            .position(x: geometry.size.width * 0.65, y: 42)
+
+                        VStack(spacing: 2) {
+                            Image(systemName: "car.side.fill")
+                                .font(.system(size: 42))
+                            Text("KEEP PANEL CENTRED")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .foregroundColor(.secondary.opacity(0.72))
+                        .position(x: geometry.size.width / 2, y: 98)
+
+                        operatorBadge
+                            .position(x: x, y: y)
+
+                        marker("START", degrees: "−20°")
+                            .position(x: startX, y: 136)
+                        marker("FINISH & STOP", degrees: "+20°")
+                            .position(x: endX, y: 136)
                     }
-                    .stroke(
-                        HTXTheme.primaryPurple.opacity(0.55),
-                        style: StrokeStyle(lineWidth: 3, dash: [7, 6])
-                    )
-
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 30))
-                        .foregroundColor(.secondary.opacity(0.65))
-                        .position(x: geometry.size.width / 2, y: 80)
-
-                    HStack(spacing: 3) {
-                        Image(systemName: "figure.walk")
-                        Image(systemName: "video.fill")
-                    }
-                    .font(.title3.bold())
-                    .foregroundColor(HTXTheme.primaryPurple)
-                    .padding(7)
-                    .background(.regularMaterial)
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.14), radius: 3)
-                    .position(x: x, y: y)
-
-                    marker("START", degrees: "−20°")
-                        .position(x: startX, y: 112)
-                    marker("CENTRE", degrees: "0°")
-                        .position(x: geometry.size.width / 2, y: 112)
-                    marker("FINISH", degrees: "+20°")
-                        .position(x: endX, y: 112)
                 }
             }
-            .frame(height: 132)
+            .frame(height: 154)
             .clipped()
 
-            Text("Watch the person-and-camera animation; it moves automatically. During recording, copy that short sideways path while keeping the same highlighted panel centred.")
+            Text("Record once from START to FINISH, then stop. Do not record the return journey. The demonstration pauses at FINISH and resets to START for the next example.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -1127,12 +1147,28 @@ private struct DetailedScanSweepGuide: View {
         .background(HTXTheme.softPurpleCard)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Move from minus 20 degrees through straight on to plus 20 degrees around the highlighted panel")
-        .onAppear {
-            movementProgress = 0
-            withAnimation(.linear(duration: 3.2).repeatForever(autoreverses: true)) {
-                movementProgress = 1
-            }
+        .accessibilityLabel("Record once from minus 20 degrees to plus 20 degrees around the highlighted panel, then stop")
+    }
+
+    private var operatorBadge: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Circle()
+                .fill(.regularMaterial)
+                .frame(width: 48, height: 48)
+                .shadow(color: .black.opacity(0.16), radius: 4, y: 2)
+
+            Image(systemName: "figure.walk.motion")
+                .font(.system(size: 25, weight: .semibold))
+                .foregroundColor(HTXTheme.primaryPurple)
+                .frame(width: 48, height: 48)
+
+            Image(systemName: "video.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 20, height: 20)
+                .background(HTXTheme.primaryPurple)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(.white, lineWidth: 2))
         }
     }
 
