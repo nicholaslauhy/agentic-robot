@@ -206,7 +206,7 @@ struct DetailedScanFindingsReviewView: View {
                     Text(
                         "\(analysisResult.rejectedProjectionCount) suggestion"
                             + "\(analysisResult.rejectedProjectionCount == 1 ? " was" : "s were") "
-                            + "excluded because the location did not match the selected panel."
+                            + "excluded because an exact overview location could not be verified."
                     )
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.orange)
@@ -245,9 +245,17 @@ struct DetailedScanFindingsReviewView: View {
             Image(systemName: "magnifyingglass.circle")
                 .font(.system(size: 42))
                 .foregroundColor(HTXTheme.primaryPurple)
-            Text("No persistent damage was found")
+            Text(
+                analysisResult.rejectedProjectionCount > 0
+                    ? "No verified damage location was found"
+                    : "No persistent damage was found"
+            )
                 .font(.headline)
-            Text("The completed backend analysis returned no persistent damage suggestions. If you can see damage that it missed, draw its location manually below. Otherwise, continue without adding damage.")
+            Text(
+                analysisResult.rejectedProjectionCount > 0
+                    ? "The scan produced a possible finding, but it could not be matched reliably to the overview image, so no guessed bounding box is shown. If damage is visible, draw its location manually below."
+                    : "The completed backend analysis returned no persistent damage suggestions. If you can see damage that it missed, draw its location manually below. Otherwise, continue without adding damage."
+            )
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
