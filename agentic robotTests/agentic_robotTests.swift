@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import UIKit
 import XCTest
 @testable import HTX_Inspect
 
@@ -94,6 +95,57 @@ final class agentic_robotTests: XCTestCase {
             layout.silhouetteRect.width / layout.silhouetteRect.height,
             2.05,
             accuracy: 0.01
+        )
+    }
+
+    func testDetailedZoomCentersLandscapeImageInPortraitViewport() {
+        let imageSize = CGSize(width: 1600, height: 900)
+        let viewport = CGSize(width: 800, height: 1100)
+        let scale = DetailedScanZoomGeometry.aspectFitScale(
+            imageSize: imageSize,
+            viewportSize: viewport
+        )
+        let contentSize = CGSize(
+            width: imageSize.width * scale,
+            height: imageSize.height * scale
+        )
+        let insets = DetailedScanZoomGeometry.centeredInsets(
+            contentSize: contentSize,
+            viewportSize: viewport
+        )
+
+        XCTAssertEqual(scale, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(insets.left, 0, accuracy: 0.0001)
+        XCTAssertEqual(insets.right, 0, accuracy: 0.0001)
+        XCTAssertEqual(insets.top, 325, accuracy: 0.0001)
+        XCTAssertEqual(insets.bottom, 325, accuracy: 0.0001)
+    }
+
+    func testDetailedZoomCentersPortraitImageInLandscapeViewport() {
+        let imageSize = CGSize(width: 900, height: 1600)
+        let viewport = CGSize(width: 1200, height: 700)
+        let scale = DetailedScanZoomGeometry.aspectFitScale(
+            imageSize: imageSize,
+            viewportSize: viewport
+        )
+        let contentSize = CGSize(
+            width: imageSize.width * scale,
+            height: imageSize.height * scale
+        )
+        let insets = DetailedScanZoomGeometry.centeredInsets(
+            contentSize: contentSize,
+            viewportSize: viewport
+        )
+
+        XCTAssertEqual(scale, 0.4375, accuracy: 0.0001)
+        XCTAssertEqual(insets.left, 403.125, accuracy: 0.0001)
+        XCTAssertEqual(insets.right, 403.125, accuracy: 0.0001)
+        XCTAssertEqual(insets.top, 0, accuracy: 0.0001)
+        XCTAssertEqual(insets.bottom, 0, accuracy: 0.0001)
+        XCTAssertEqual(
+            DetailedScanZoomGeometry.maximumScale(minimumScale: scale),
+            scale * 6,
+            accuracy: 0.0001
         )
     }
 
@@ -495,6 +547,9 @@ final class agentic_robotTests: XCTestCase {
                 projectionConfidence: 0.8,
                 projectionInliers: 12,
                 projectionInlierRatio: 0.6,
+                panelValidation: "matched",
+                projectionRequiresReview: false,
+                projectionReason: "Feature projection matched the selected panel.",
                 damage: DamageDetection(
                     angleIndex: 2,
                     angleName: "Left Side",
@@ -516,6 +571,155 @@ final class agentic_robotTests: XCTestCase {
         ])
         XCTAssertEqual(merged.count, 1)
         XCTAssertEqual(Set(merged[0].panelIds).count, 2)
+    }
+
+    @MainActor
+    func testProjectedFindingDecodesBackendPanelValidationReceipt() throws {
+        let json = """
+        {
+          "panelId": "left_front_door",
+          "observedFrames": 4,
+          "totalFrames": 5,
+          "persistence": 0.8,
+          "multiFrameStatus": "corroborated",
+          "projectionMethod": "feature_affine",
+          "projectionConfidence": 0.86,
+          "projectionInliers": 18,
+          "projectionInlierRatio": 0.72,
+          "panelValidation": "matched",
+          "projectionRequiresReview": false,
+          "projectionReason": "Feature projection matched the selected panel.",
+          "projectionVehicleMaskOverlap": 0.94,
+          "projectionPanelZoneOverlap": 0.81,
+          "projectionPanelZoneBounds": [100, 200, 700, 650],
+          "angleIndex": 2,
+          "angleName": "Left Side",
+          "damageType": "scratch",
+          "confidence": 0.83,
+          "x1": 250,
+          "y1": 310,
+          "x2": 390,
+          "y2": 350,
+          "imageWidth": 1000,
+          "imageHeight": 700,
+          "cropBase64": "",
+          "contextBase64": "",
+          "cleanContextBase64": ""
+        }
+        """.data(using: .utf8)!
+
+        let finding = try JSONDecoder().decode(DetailedProjectedDamageFinding.self, from: json)
+        XCTAssertEqual(finding.panelValidation, "matched")
+        XCTAssertFalse(finding.projectionRequiresReview)
+        XCTAssertEqual(finding.projectionVehicleMaskOverlap, 0.94, accuracy: 0.001)
+        XCTAssertEqual(finding.projectionPanelZoneOverlap, 0.81, accuracy: 0.001)
+        XCTAssertEqual(finding.projectionPanelZoneBounds, [100, 200, 700, 650])
+        XCTAssertFalse(DetailedProjectionReviewPolicy.requiresManualConfirmation(finding))
+        XCTAssertTrue(
+            DetailedProjectionReviewPolicy.canAccept(finding, manuallyConfirmed: false)
+        )
+    }
+
+    @MainActor
+    func testUnverifiedProjectionCannotBeAcceptedUntilManuallyConfirmed() {
+        let finding = DetailedProjectedDamageFinding(
+            panelIds: [DetailedVehiclePanel.leftFrontDoor.rawValue],
+            observedFrames: 3,
+            totalFrames: 5,
+            persistence: 0.6,
+            multiFrameStatus: "corroborated",
+            projectionMethod: "feature_affine",
+            projectionConfidence: 0.54,
+            projectionInliers: 5,
+            projectionInlierRatio: 0.25,
+            panelValidation: "unverified",
+            projectionRequiresReview: true,
+            projectionReason: "The matched features did not overlap the selected panel.",
+            damage: DamageDetection(
+                angleIndex: 2,
+                angleName: "Left Side",
+                damageType: "scratch"
+            )
+        )
+
+        XCTAssertTrue(DetailedProjectionReviewPolicy.requiresManualConfirmation(finding))
+        XCTAssertFalse(
+            DetailedProjectionReviewPolicy.canAccept(finding, manuallyConfirmed: false)
+        )
+        XCTAssertTrue(
+            DetailedProjectionReviewPolicy.canAccept(finding, manuallyConfirmed: true)
+        )
+    }
+
+    @MainActor
+    func testOlderProjectionResponseDefaultsToManualReview() throws {
+        let json = """
+        {
+          "panelId": "left_front_door",
+          "observedFrames": 3,
+          "totalFrames": 5,
+          "persistence": 0.6,
+          "multiFrameStatus": "corroborated",
+          "projectionMethod": "feature_affine",
+          "projectionConfidence": 0.75,
+          "angleIndex": 2,
+          "angleName": "Left Side",
+          "damageType": "scratch",
+          "confidence": 0.8,
+          "cropBase64": "",
+          "contextBase64": "",
+          "cleanContextBase64": ""
+        }
+        """.data(using: .utf8)!
+
+        let finding = try JSONDecoder().decode(DetailedProjectedDamageFinding.self, from: json)
+        XCTAssertEqual(finding.panelValidation, "unverified")
+        XCTAssertTrue(finding.projectionRequiresReview)
+        XCTAssertFalse(
+            DetailedProjectionReviewPolicy.canAccept(finding, manuallyConfirmed: false)
+        )
+    }
+
+    @MainActor
+    func testProjectedDetailedFindingRetainsOriginalCloseUpEvidence() {
+        let source = DamageDetection(
+            angleIndex: 2,
+            angleName: "Left Side",
+            damageType: "scratch",
+            cropBase64: "original-detailed-close-up"
+        )
+        let projected = DamageDetection(
+            angleIndex: 2,
+            angleName: "Left Side",
+            damageType: "scratch",
+            cropBase64: "projected-overview-crop",
+            x1: 100,
+            y1: 100,
+            x2: 200,
+            y2: 160,
+            imageWidth: 1000,
+            imageHeight: 700
+        )
+        let finding = DetailedProjectedDamageFinding(
+            panelIds: [DetailedVehiclePanel.leftFrontDoor.rawValue],
+            observedFrames: 3,
+            totalFrames: 5,
+            persistence: 0.6,
+            multiFrameStatus: "corroborated",
+            projectionMethod: "feature_affine",
+            projectionConfidence: 0.8,
+            projectionInliers: 12,
+            projectionInlierRatio: 0.7,
+            damage: projected,
+            sourceDamage: source
+        )
+
+        let retained = DetailedScanDuplicateMerger.merge([finding])
+        XCTAssertEqual(retained.first?.damage.cropBase64, "projected-overview-crop")
+        XCTAssertEqual(
+            retained.first?.sourceDamage?.cropBase64,
+            "original-detailed-close-up"
+        )
     }
 
     func testBaselineUpdatesOnlyAfterNP299IsFiled() {

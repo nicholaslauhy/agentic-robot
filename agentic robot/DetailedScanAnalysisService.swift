@@ -49,6 +49,17 @@ enum DetailedPanelAnalysisStatusResolver {
 struct DetailedScanAnalysisBatchResult {
     let findings: [DetailedProjectedDamageFinding]
     let receipts: [DetailedPanelAnalysisReceipt]
+    let rejectedProjectionCount: Int
+
+    init(
+        findings: [DetailedProjectedDamageFinding],
+        receipts: [DetailedPanelAnalysisReceipt],
+        rejectedProjectionCount: Int = 0
+    ) {
+        self.findings = findings
+        self.receipts = receipts
+        self.rejectedProjectionCount = rejectedProjectionCount
+    }
 
     var processedFrameCount: Int {
         receipts.reduce(0) { $0 + $1.processedFrames }
@@ -100,7 +111,19 @@ struct DetailedProjectedDamageFinding: Decodable, Identifiable {
     let projectionConfidence: Double
     let projectionInliers: Int
     let projectionInlierRatio: Double
+    /// Whether the backend verified that the projected box belongs to the
+    /// panel that was actually recorded. Older backends are treated as
+    /// unverified so an approximate location can never be accepted silently.
+    let panelValidation: String
+    let projectionRequiresReview: Bool
+    let projectionReason: String
+    let projectionVehicleMaskOverlap: Double
+    let projectionPanelZoneOverlap: Double
+    let projectionPanelZoneBounds: [Int]
     let damage: DamageDetection
+    /// Original evidence from the detailed video frame. `damage` contains the
+    /// projected four-angle overview coordinates used by the report/baseline.
+    let sourceDamage: DamageDetection?
 
     enum CodingKeys: String, CodingKey {
         case panelId
@@ -112,6 +135,12 @@ struct DetailedProjectedDamageFinding: Decodable, Identifiable {
         case projectionConfidence
         case projectionInliers
         case projectionInlierRatio
+        case panelValidation
+        case projectionRequiresReview
+        case projectionReason
+        case projectionVehicleMaskOverlap
+        case projectionPanelZoneOverlap
+        case projectionPanelZoneBounds
     }
 
     init(from decoder: Decoder) throws {
@@ -126,7 +155,28 @@ struct DetailedProjectedDamageFinding: Decodable, Identifiable {
         projectionConfidence = try container.decode(Double.self, forKey: .projectionConfidence)
         projectionInliers = try container.decodeIfPresent(Int.self, forKey: .projectionInliers) ?? 0
         projectionInlierRatio = try container.decodeIfPresent(Double.self, forKey: .projectionInlierRatio) ?? 0
+        panelValidation = try container.decodeIfPresent(String.self, forKey: .panelValidation)
+            ?? "unverified"
+        projectionRequiresReview = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .projectionRequiresReview
+        ) ?? true
+        projectionReason = try container.decodeIfPresent(String.self, forKey: .projectionReason)
+            ?? "The backend did not verify this location against the selected panel."
+        projectionVehicleMaskOverlap = try container.decodeIfPresent(
+            Double.self,
+            forKey: .projectionVehicleMaskOverlap
+        ) ?? 0
+        projectionPanelZoneOverlap = try container.decodeIfPresent(
+            Double.self,
+            forKey: .projectionPanelZoneOverlap
+        ) ?? 0
+        projectionPanelZoneBounds = try container.decodeIfPresent(
+            [Int].self,
+            forKey: .projectionPanelZoneBounds
+        ) ?? []
         damage = try DamageDetection(from: decoder)
+        sourceDamage = nil
     }
 
     init(
@@ -140,7 +190,14 @@ struct DetailedProjectedDamageFinding: Decodable, Identifiable {
         projectionConfidence: Double,
         projectionInliers: Int,
         projectionInlierRatio: Double,
-        damage: DamageDetection
+        panelValidation: String = "unverified",
+        projectionRequiresReview: Bool = true,
+        projectionReason: String = "The backend did not verify this location against the selected panel.",
+        projectionVehicleMaskOverlap: Double = 0,
+        projectionPanelZoneOverlap: Double = 0,
+        projectionPanelZoneBounds: [Int] = [],
+        damage: DamageDetection,
+        sourceDamage: DamageDetection? = nil
     ) {
         self.id = id
         self.panelIds = panelIds
@@ -152,7 +209,14 @@ struct DetailedProjectedDamageFinding: Decodable, Identifiable {
         self.projectionConfidence = projectionConfidence
         self.projectionInliers = projectionInliers
         self.projectionInlierRatio = projectionInlierRatio
+        self.panelValidation = panelValidation
+        self.projectionRequiresReview = projectionRequiresReview
+        self.projectionReason = projectionReason
+        self.projectionVehicleMaskOverlap = projectionVehicleMaskOverlap
+        self.projectionPanelZoneOverlap = projectionPanelZoneOverlap
+        self.projectionPanelZoneBounds = projectionPanelZoneBounds
         self.damage = damage
+        self.sourceDamage = sourceDamage
     }
 }
 
@@ -169,6 +233,7 @@ enum DetailedScanAnalysisError: LocalizedError {
     case mismatchedProcessedFrameCount(panel: DetailedVehiclePanel, expected: Int, actual: Int)
     case backendAnalysisNotConfirmed(DetailedVehiclePanel)
     case invalidFindingReference(panel: String)
+    case projectionRejected(panel: String, reason: String)
     case invalidResponse
     case server(String)
 
@@ -202,6 +267,8 @@ enum DetailedScanAnalysisError: LocalizedError {
             return "The backend did not confirm that damage analysis ran for \(panel.displayName). No result was accepted."
         case .invalidFindingReference(let panel):
             return "A detailed finding for \(panel) could not be mapped back to its source image. No incomplete result was accepted."
+        case .projectionRejected(let panel, let reason):
+            return "A finding for \(panel) was excluded because its location could not be verified. \(reason)"
         case .invalidResponse:
             return "The detailed damage-analysis response could not be read."
         case .server(let message):
@@ -335,7 +402,7 @@ final class DetailedScanAnalysisService {
         captures: [DetailedPanelCapture],
         overviewImages: [UIImage],
         progress: @MainActor @escaping (_ completed: Int, _ total: Int, _ finding: DetailedPanelDamageFinding) -> Void
-    ) async throws -> [DetailedProjectedDamageFinding] {
+    ) async throws -> (findings: [DetailedProjectedDamageFinding], rejectedCount: Int) {
         let expectedOverviewCount = DetailedVehicleScanSpecification.requiredOverviewCaptureCount
         guard overviewImages.count >= expectedOverviewCount else {
             throw DetailedScanAnalysisError.incompleteOverviewImages(
@@ -345,6 +412,7 @@ final class DetailedScanAnalysisService {
         }
         let capturesByPanel = Dictionary(uniqueKeysWithValues: captures.map { ($0.panel.rawValue, $0) })
         var projected: [DetailedProjectedDamageFinding] = []
+        var rejectedCount = 0
 
         for (index, finding) in findings.enumerated() {
             try Task.checkCancellation()
@@ -354,16 +422,24 @@ final class DetailedScanAnalysisService {
                   overviewImages.indices.contains(finding.damage.angleIndex) else {
                 throw DetailedScanAnalysisError.invalidFindingReference(panel: finding.panelId)
             }
-            let result = try await project(
-                finding: finding,
-                sourceImage: capture.representativeFrames[finding.frameIndex].image,
-                overviewImage: overviewImages[finding.damage.angleIndex]
-            )
-            projected.append(result)
+            do {
+                let result = try await project(
+                    finding: finding,
+                    sourceImage: capture.representativeFrames[finding.frameIndex].image,
+                    overviewImage: overviewImages[finding.damage.angleIndex]
+                )
+                projected.append(result)
+            } catch DetailedScanAnalysisError.projectionRejected {
+                // A candidate that maps to a different panel is not allowed to
+                // invalidate already verified findings from the other panels.
+                // The review screen reports how many were excluded and still
+                // allows the officer to add a manual box if damage is visible.
+                rejectedCount += 1
+            }
             progress(index + 1, findings.count, finding)
         }
 
-        return DetailedScanDuplicateMerger.merge(projected)
+        return (DetailedScanDuplicateMerger.merge(projected), rejectedCount)
     }
 
     private func analyze(capture: DetailedPanelCapture) async throws -> DetailedPanelAnalysisResponse {
@@ -516,13 +592,39 @@ final class DetailedScanAnalysisService {
         guard (200...299).contains(httpResponse.statusCode) else {
             let detail = (try? JSONDecoder().decode(ServerDetail.self, from: data).detail)
                 ?? "Detailed damage mapping failed with status \(httpResponse.statusCode)."
+            if httpResponse.statusCode == 422 {
+                throw DetailedScanAnalysisError.projectionRejected(
+                    panel: finding.panelId,
+                    reason: detail
+                )
+            }
             throw DetailedScanAnalysisError.server(detail)
         }
 
         struct ProjectionResponse: Decodable {
             let result: DetailedProjectedDamageFinding
         }
-        return try JSONDecoder().decode(ProjectionResponse.self, from: data).result
+        let projected = try JSONDecoder().decode(ProjectionResponse.self, from: data).result
+        return DetailedProjectedDamageFinding(
+            id: projected.id,
+            panelIds: projected.panelIds,
+            observedFrames: projected.observedFrames,
+            totalFrames: projected.totalFrames,
+            persistence: projected.persistence,
+            multiFrameStatus: projected.multiFrameStatus,
+            projectionMethod: projected.projectionMethod,
+            projectionConfidence: projected.projectionConfidence,
+            projectionInliers: projected.projectionInliers,
+            projectionInlierRatio: projected.projectionInlierRatio,
+            panelValidation: projected.panelValidation,
+            projectionRequiresReview: projected.projectionRequiresReview,
+            projectionReason: projected.projectionReason,
+            projectionVehicleMaskOverlap: projected.projectionVehicleMaskOverlap,
+            projectionPanelZoneOverlap: projected.projectionPanelZoneOverlap,
+            projectionPanelZoneBounds: projected.projectionPanelZoneBounds,
+            damage: projected.damage,
+            sourceDamage: finding.damage
+        )
     }
 
     private func uploadWithRetry(
@@ -609,7 +711,14 @@ enum DetailedScanDuplicateMerger {
                 projectionConfidence: best.projectionConfidence,
                 projectionInliers: best.projectionInliers,
                 projectionInlierRatio: best.projectionInlierRatio,
-                damage: best.damage
+                panelValidation: best.panelValidation,
+                projectionRequiresReview: best.projectionRequiresReview,
+                projectionReason: best.projectionReason,
+                projectionVehicleMaskOverlap: best.projectionVehicleMaskOverlap,
+                projectionPanelZoneOverlap: best.projectionPanelZoneOverlap,
+                projectionPanelZoneBounds: best.projectionPanelZoneBounds,
+                damage: best.damage,
+                sourceDamage: best.sourceDamage
             )
         }
         return merged
@@ -649,6 +758,13 @@ enum DetailedScanDuplicateMerger {
         _ first: DetailedProjectedDamageFinding,
         _ second: DetailedProjectedDamageFinding
     ) -> Bool {
+        // Approximate/unverified projections remain separate review candidates.
+        // Merging them before the officer confirms their locations can hide two
+        // distinct scratches near a panel boundary.
+        guard !DetailedProjectionReviewPolicy.requiresManualConfirmation(first),
+              !DetailedProjectionReviewPolicy.requiresManualConfirmation(second) else {
+            return false
+        }
         guard first.damage.angleIndex == second.damage.angleIndex,
               canonicalLabel(first.damage.damageType) == canonicalLabel(second.damage.damageType),
               let firstBox = normalisedBox(first),
@@ -670,6 +786,21 @@ enum DetailedScanDuplicateMerger {
         let verticalOverlap = max(0, min(firstBox.maxY, secondBox.maxY) - max(firstBox.minY, secondBox.minY))
         let smallerHeight = max(0.0001, min(firstBox.height, secondBox.height))
         return horizontalGap <= 0.015 && verticalOverlap / smallerHeight >= 0.35
+    }
+}
+
+enum DetailedProjectionReviewPolicy {
+    static func requiresManualConfirmation(_ finding: DetailedProjectedDamageFinding) -> Bool {
+        finding.projectionRequiresReview
+            || finding.panelValidation.trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() != "matched"
+    }
+
+    static func canAccept(
+        _ finding: DetailedProjectedDamageFinding,
+        manuallyConfirmed: Bool
+    ) -> Bool {
+        !requiresManualConfirmation(finding) || manuallyConfirmed
     }
 }
 
@@ -1002,7 +1133,7 @@ struct DetailedScanAnalysisProgressView: View {
                     return
                 }
 
-                let projected = try await DetailedScanAnalysisService.shared.projectToOverview(
+                let projection = try await DetailedScanAnalysisService.shared.projectToOverview(
                     findings: analysis.findings,
                     captures: captures,
                     overviewImages: overviewImages
@@ -1016,8 +1147,9 @@ struct DetailedScanAnalysisProgressView: View {
                 guard !Task.isCancelled else { return }
                 onComplete(
                     DetailedScanAnalysisBatchResult(
-                        findings: projected,
-                        receipts: analysis.receipts
+                            findings: projection.findings,
+                            receipts: analysis.receipts,
+                            rejectedProjectionCount: projection.rejectedCount
                     )
                 )
             } catch is CancellationError {
