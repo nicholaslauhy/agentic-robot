@@ -65,6 +65,14 @@ struct DetailedVehicleScanView: View {
         }
     }
 
+    private var isSubmissionReady: Bool {
+        orderedCaptures.count == DetailedVehicleScanSpecification.panels.count
+            && orderedCaptures.allSatisfy {
+                $0.representativeFrames.count == DetailedScanFrameProcessor.representativeFrameCount
+                    && $0.qualityAssessment.passed
+            }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -453,13 +461,12 @@ struct DetailedVehicleScanView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 15)
-                    .background(captures.count == DetailedVehicleScanSpecification.panels.count ? HTXTheme.primaryPurple : Color(.systemGray4))
+                    .background(isSubmissionReady ? HTXTheme.primaryPurple : Color(.systemGray4))
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .disabled(
-                captures.count != DetailedVehicleScanSpecification.panels.count
-                    || isPreparingCapture
+                !isSubmissionReady || isPreparingCapture
             )
         }
     }

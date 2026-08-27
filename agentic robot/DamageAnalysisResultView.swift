@@ -260,6 +260,15 @@ class MutableDamageDetection: ObservableObject, Identifiable {
 
 // MARK: - Result List View
 
+private struct DetailedScanWorkflowPresentation: Identifiable {
+    let id = UUID()
+}
+
+private enum DamageSummaryDestination {
+    case detailedScan
+    case reportDetails
+}
+
 struct DamageAnalysisResultView: View {
 
     let plate: String
@@ -280,11 +289,9 @@ struct DamageAnalysisResultView: View {
     @State private var isGeneratingReport = false
     @State private var showIncidentStageOne = false
     @State private var showDamageSummaryReview = false
-    @State private var showDetailedVehicleScan = false
-    @State private var detailedPanelCaptures: [DetailedPanelCapture] = []
-    @State private var showDetailedScanAnalysis = false
-    @State private var detailedScanFindings: [DetailedProjectedDamageFinding] = []
-    @State private var showDetailedFindingsReview = false
+    @State private var pendingSummaryDestination: DamageSummaryDestination?
+    @State private var detailedScanWorkflow: DetailedScanWorkflowPresentation?
+    @State private var openReportAfterDetailedScan = false
 
     // The 4 angle images passed from ScratchScanView
     // We re-use the scanned images stored in the detections; if none exist we show placeholders.
@@ -506,7 +513,10 @@ struct DamageAnalysisResultView: View {
             }
         }
         // ── Damage summary review before report details ───────────────────────
-        .fullScreenCover(isPresented: $showDamageSummaryReview) {
+        .fullScreenCover(
+            isPresented: $showDamageSummaryReview,
+            onDismiss: continueAfterDamageSummary
+        ) {
             DamageSummaryReviewBeforeReportView(
                 plate: plate,
                 carType: carType,
@@ -515,76 +525,37 @@ struct DamageAnalysisResultView: View {
                 scanImages: scanImages,
                 onBack: { showDamageSummaryReview = false },
                 onStartDetailedScan: {
+                    pendingSummaryDestination = .detailedScan
                     showDamageSummaryReview = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showDetailedVehicleScan = true
-                    }
                 },
                 onSkipDetailedScan: {
+                    pendingSummaryDestination = .reportDetails
                     showDamageSummaryReview = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showIncidentStageOne = true
-                    }
                 }
             )
         }
-        .fullScreenCover(isPresented: $showDetailedVehicleScan) {
-            DetailedVehicleScanView(
+        .fullScreenCover(
+            item: $detailedScanWorkflow,
+            onDismiss: continueAfterDetailedScan
+        ) { _ in
+            DetailedScanWorkflowView(
                 plate: plate,
                 carType: carType,
-                onCancel: { showDetailedVehicleScan = false },
-                onComplete: { captures in
-                    detailedPanelCaptures = captures
-                    showDetailedVehicleScan = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showDetailedScanAnalysis = true
-                    }
-                }
-            )
-        }
-        .fullScreenCover(isPresented: $showDetailedScanAnalysis) {
-            DetailedScanAnalysisProgressView(
-                captures: detailedPanelCaptures,
                 overviewImages: scanImages,
-                onComplete: { findings in
-                    detailedScanFindings = findings
-                    cleanupDetailedCaptureFiles()
-                    showDetailedScanAnalysis = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showDetailedFindingsReview = true
-                    }
+                onCancel: {
+                    detailedScanWorkflow = nil
                 },
-                onSkip: {
-                    detailedScanFindings = []
-                    cleanupDetailedCaptureFiles()
-                    showDetailedScanAnalysis = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showIncidentStageOne = true
-                    }
-                }
-            )
-        }
-        .fullScreenCover(isPresented: $showDetailedFindingsReview) {
-            DetailedScanFindingsReviewView(
-                findings: detailedScanFindings,
-                scanImages: scanImages,
+                onContinueWithoutResults: {
+                    openReportAfterDetailedScan = true
+                    detailedScanWorkflow = nil
+                },
                 onComplete: { outcome in
                     mutableDetections = DetailedFindingIntegrator.integrating(
                         existing: mutableDetections,
                         outcome: outcome
                     )
-                    detailedScanFindings = []
-                    showDetailedFindingsReview = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showIncidentStageOne = true
-                    }
-                },
-                onBack: {
-                    cleanupDetailedCaptureFiles()
-                    showDetailedFindingsReview = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        showDetailedVehicleScan = true
-                    }
+                    openReportAfterDetailedScan = true
+                    detailedScanWorkflow = nil
                 }
             )
         }
@@ -614,9 +585,21 @@ struct DamageAnalysisResultView: View {
         }
     }
 
-    private func cleanupDetailedCaptureFiles() {
-        detailedPanelCaptures.forEach { $0.removeTemporaryVideo() }
-        detailedPanelCaptures = []
+    private func continueAfterDamageSummary() {
+        guard let destination = pendingSummaryDestination else { return }
+        pendingSummaryDestination = nil
+        switch destination {
+        case .detailedScan:
+            detailedScanWorkflow = DetailedScanWorkflowPresentation()
+        case .reportDetails:
+            showIncidentStageOne = true
+        }
+    }
+
+    private func continueAfterDetailedScan() {
+        guard openReportAfterDetailedScan else { return }
+        openReportAfterDetailedScan = false
+        showIncidentStageOne = true
     }
 }
 
