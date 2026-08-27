@@ -13,6 +13,7 @@ private struct DetailedReviewCandidate: Identifiable {
 }
 
 struct DetailedScanFindingsReviewView: View {
+    let analysisResult: DetailedScanAnalysisBatchResult
     let scanImages: [UIImage]
     let onComplete: (DetailedScanReviewOutcome) -> Void
     let onBack: () -> Void
@@ -26,10 +27,12 @@ struct DetailedScanFindingsReviewView: View {
 
     init(
         findings: [DetailedProjectedDamageFinding],
+        analysisResult: DetailedScanAnalysisBatchResult,
         scanImages: [UIImage],
         onComplete: @escaping (DetailedScanReviewOutcome) -> Void,
         onBack: @escaping () -> Void
     ) {
+        self.analysisResult = analysisResult
         self.scanImages = scanImages
         self.onComplete = onComplete
         self.onBack = onBack
@@ -59,6 +62,7 @@ struct DetailedScanFindingsReviewView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         reviewHeader
+                        completedAnalysisCard
 
                         if candidates.isEmpty {
                             noFindingsCard
@@ -145,6 +149,34 @@ struct DetailedScanFindingsReviewView: View {
         }
     }
 
+    private var completedAnalysisCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 32))
+                .foregroundColor(.green)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Detailed analysis completed")
+                    .font(.headline)
+                Text(
+                    "The backend processed \(analysisResult.receipts.count) of "
+                        + "\(DetailedScanSubmissionValidator.requiredPanelCount) panels and "
+                        + "\(analysisResult.processedFrameCount) viewpoints."
+                )
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.09))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.green.opacity(0.28), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
     private var reviewHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Confirm what the scan found", systemImage: "checkmark.bubble.fill")
@@ -168,7 +200,7 @@ struct DetailedScanFindingsReviewView: View {
                 .foregroundColor(HTXTheme.primaryPurple)
             Text("No persistent damage was found")
                 .font(.headline)
-            Text("If you can see damage that the scan missed, draw its location manually below. Otherwise, continue without adding damage.")
+            Text("The completed backend analysis returned no persistent damage suggestions. If you can see damage that it missed, draw its location manually below. Otherwise, continue without adding damage.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

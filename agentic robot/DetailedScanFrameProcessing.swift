@@ -126,7 +126,7 @@ enum DetailedScanFrameProcessor {
                 )
             }
 
-            guard frames.count >= 3 else {
+            guard frames.count == representativeFrameCount else {
                 throw DetailedScanFrameProcessingError.frameExtractionFailed
             }
 
@@ -160,7 +160,7 @@ enum DetailedScanFrameProcessor {
         }
 
         return DetailedScanQualityAssessment(
-            passed: frames.count >= 3 && usableCount >= requiredUsable,
+            passed: frames.count == representativeFrameCount && usableCount >= requiredUsable,
             usableFrameCount: usableCount,
             totalFrameCount: frames.count,
             issues: issues
