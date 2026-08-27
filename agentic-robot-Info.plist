@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>HTXBackendBaseURL</key>
-	<string>http://192.168.86.27:8000</string>
+	<string>http://192.168.86.24:8000</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Camera access is used to photograph vehicles and record guided vehicle-panel inspections.</string>
 	<key>NSMicrophoneUsageDescription</key>
