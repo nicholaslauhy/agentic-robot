@@ -22,6 +22,13 @@ struct DetailedPanelCapture: Identifiable {
     }
 }
 
+private struct DetailedDurationOverride: Identifiable {
+    let id = UUID()
+    let videoURL: URL
+    let panel: DetailedVehiclePanel
+    let durationSeconds: Double
+}
+
 /// Optional close-up capture performed after the four overview photographs.
 /// These images are kept separate from the four-angle baseline so later phases
 /// can analyse and project them without changing the existing baseline format.
@@ -41,6 +48,7 @@ struct DetailedVehicleScanView: View {
     @State private var isPreparingCapture = false
     @State private var isRequestingCaptureAccess = false
     @State private var playbackCapture: DetailedPanelCapture?
+    @State private var durationOverride: DetailedDurationOverride?
     @State private var preparationTask: Task<Void, Never>?
 
     private var currentIndex: Int {
@@ -128,6 +136,28 @@ struct DetailedVehicleScanView: View {
             }
             .sheet(item: $playbackCapture) { capture in
                 DetailedVideoPlaybackView(capture: capture)
+            }
+            .alert(item: $durationOverride) { pending in
+                Alert(
+                    title: Text("Use This Recording?"),
+                    message: Text(
+                        String(
+                            format: "This recording is %.1f seconds. A 3–7 second sweep is recommended so the five sampled viewpoints are well spaced, but you can still continue with this recording.",
+                            pending.durationSeconds
+                        )
+                    ),
+                    primaryButton: .default(Text("Use Recording Anyway")) {
+                        prepareCapture(
+                            from: pending.videoURL,
+                            for: pending.panel,
+                            sourceIsPersistent: true,
+                            allowDurationOverride: true
+                        )
+                    },
+                    secondaryButton: .destructive(Text("Retake")) {
+                        try? FileManager.default.removeItem(at: pending.videoURL)
+                    }
+                )
             }
             .onChange(of: selectedPhotoItem) { _, item in
                 guard let item else { return }
@@ -474,7 +504,8 @@ struct DetailedVehicleScanView: View {
     private func prepareCapture(
         from sourceURL: URL,
         for panel: DetailedVehiclePanel,
-        sourceIsPersistent: Bool = false
+        sourceIsPersistent: Bool = false,
+        allowDurationOverride: Bool = false
     ) {
         isPreparingCapture = true
         errorMessage = nil
@@ -491,10 +522,19 @@ struct DetailedVehicleScanView: View {
                 let metadata = try await DetailedCaptureFileStore.previewMetadata(for: storedURL)
                 try Task.checkCancellation()
 
-                guard DetailedVehicleScanSpecification.recordingDurationSeconds
-                    .contains(metadata.durationSeconds) else {
-                    try? FileManager.default.removeItem(at: storedURL)
-                    throw DetailedCaptureError.invalidDuration(metadata.durationSeconds)
+                if !allowDurationOverride,
+                   !DetailedVehicleScanSpecification.recommendedRecordingDurationSeconds
+                    .contains(metadata.durationSeconds) {
+                    await MainActor.run {
+                        isPreparingCapture = false
+                        preparationTask = nil
+                        durationOverride = DetailedDurationOverride(
+                            videoURL: storedURL,
+                            panel: panel,
+                            durationSeconds: metadata.durationSeconds
+                        )
+                    }
+                    return
                 }
 
                 let processed = try await DetailedScanFrameProcessor.process(
@@ -549,6 +589,10 @@ struct DetailedVehicleScanView: View {
     }
 
     private func removeAllCaptureFiles() {
+        if let durationOverride {
+            try? FileManager.default.removeItem(at: durationOverride.videoURL)
+            self.durationOverride = nil
+        }
         for capture in captures.values {
             capture.removeTemporaryVideo()
         }
@@ -557,16 +601,10 @@ struct DetailedVehicleScanView: View {
 }
 
 private enum DetailedCaptureError: LocalizedError {
-    case invalidDuration(Double)
     case previewUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .invalidDuration(let duration):
-            return String(
-                format: "The recording is %.1f seconds. Record one slow sweep between 3 and 7 seconds.",
-                duration
-            )
         case .previewUnavailable:
             return "A preview could not be created from this recording. Please record the panel again."
         }
@@ -711,7 +749,7 @@ private struct DetailedVideoPicker: UIViewControllerRepresentable {
             picker.cameraDevice = .rear
             picker.cameraCaptureMode = .video
             picker.videoQuality = .typeHigh
-            picker.videoMaximumDuration = DetailedVehicleScanSpecification.recordingDurationSeconds.upperBound
+            picker.videoMaximumDuration = DetailedVehicleScanSpecification.maximumRecordingDurationSeconds
             picker.showsCameraControls = true
         }
 
@@ -951,7 +989,7 @@ private struct DetailedCameraOverlay: View {
                         .foregroundColor(.white)
                         .clipShape(Capsule())
                     Spacer()
-                    Text("3–7 seconds")
+                    Text("Aim for ~5 sec")
                         .font(.subheadline.bold())
                         .padding(.horizontal, 12)
                         .padding(.vertical, 9)

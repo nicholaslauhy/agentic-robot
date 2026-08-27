@@ -55,12 +55,16 @@ final class agentic_robotTests: XCTestCase {
 
     func testGuidedRecordingUsesShortControlledSweep() {
         XCTAssertEqual(
-            DetailedVehicleScanSpecification.recordingDurationSeconds,
+            DetailedVehicleScanSpecification.recommendedRecordingDurationSeconds,
             3.0...7.0
         )
         XCTAssertEqual(
             DetailedVehicleScanSpecification.preferredRecordingDurationSeconds,
             5.0
+        )
+        XCTAssertEqual(
+            DetailedVehicleScanSpecification.maximumRecordingDurationSeconds,
+            30.0
         )
     }
 

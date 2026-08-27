@@ -162,8 +162,9 @@ struct DetailedVehicleScanSpecification {
     /// One continuous arc is recorded for each panel. The operator moves around
     /// the panel while keeping it centred; rotating the iPad from one spot is
     /// not sufficient because the reflections need to change with viewpoint.
-    static let recordingDurationSeconds: ClosedRange<Double> = 3.0...7.0
+    static let recommendedRecordingDurationSeconds: ClosedRange<Double> = 3.0...7.0
     static let preferredRecordingDurationSeconds = 5.0
+    static let maximumRecordingDurationSeconds = 30.0
     static let preferredVideoWidth = 3840
     static let preferredVideoHeight = 2160
     static let preferredCameraZoomFactor = 1.0
