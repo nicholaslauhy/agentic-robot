@@ -233,6 +233,7 @@ enum DetailedScanAnalysisError: LocalizedError {
     case mismatchedProcessedFrameCount(panel: DetailedVehiclePanel, expected: Int, actual: Int)
     case backendAnalysisNotConfirmed(DetailedVehiclePanel)
     case invalidFindingReference(panel: String)
+    case panelRecordingRejected(panel: DetailedVehiclePanel, reason: String)
     case projectionRejected(panel: String, reason: String)
     case invalidResponse
     case server(String)
@@ -267,6 +268,8 @@ enum DetailedScanAnalysisError: LocalizedError {
             return "The backend did not confirm that damage analysis ran for \(panel.displayName). No result was accepted."
         case .invalidFindingReference(let panel):
             return "A detailed finding for \(panel) could not be mapped back to its source image. No incomplete result was accepted."
+        case .panelRecordingRejected(let panel, let reason):
+            return "The \(panel.displayName) recording could not be analysed. \(reason) Only this panel needs to be replaced; the other recordings will be kept."
         case .projectionRejected(let panel, let reason):
             return "A finding for \(panel) was excluded because its location could not be verified. \(reason)"
         case .invalidResponse:
@@ -499,6 +502,12 @@ final class DetailedScanAnalysisService {
         guard (200...299).contains(httpResponse.statusCode) else {
             let detail = (try? JSONDecoder().decode(ServerDetail.self, from: data).detail)
                 ?? "Detailed scan analysis failed with status \(httpResponse.statusCode)."
+            if httpResponse.statusCode == 422 {
+                throw DetailedScanAnalysisError.panelRecordingRejected(
+                    panel: capture.panel,
+                    reason: detail
+                )
+            }
             throw DetailedScanAnalysisError.server(detail)
         }
 
@@ -845,6 +854,8 @@ struct DetailedScanWorkflowView: View {
     let onComplete: (DetailedScanReviewOutcome) -> Void
 
     @State private var stage: DetailedScanWorkflowStage = .capture
+    @State private var retainedCaptures: [DetailedPanelCapture] = []
+    @State private var replacementPanel: DetailedVehiclePanel?
 
     var body: some View {
         Group {
@@ -853,8 +864,16 @@ struct DetailedScanWorkflowView: View {
                 DetailedVehicleScanView(
                     plate: plate,
                     carType: carType,
-                    onCancel: onCancel,
+                    initialCaptures: retainedCaptures,
+                    replacementPanel: replacementPanel,
+                    onCancel: {
+                        retainedCaptures = []
+                        replacementPanel = nil
+                        onCancel()
+                    },
                     onComplete: { captures in
+                        retainedCaptures = captures
+                        replacementPanel = nil
                         stage = .analysis(captures)
                     }
                 )
@@ -865,14 +884,25 @@ struct DetailedScanWorkflowView: View {
                     overviewImages: overviewImages,
                     onComplete: { result in
                         removeTemporaryVideos(in: captures)
+                        retainedCaptures = []
+                        replacementPanel = nil
                         stage = .review(result)
                     },
-                    onRetake: {
-                        removeTemporaryVideos(in: captures)
+                    onRetake: { failedPanel in
+                        var preservedCaptures = captures
+                        if let failedPanel,
+                           let failedCapture = preservedCaptures.first(where: { $0.panel == failedPanel }) {
+                            failedCapture.removeTemporaryVideo()
+                            preservedCaptures.removeAll { $0.panel == failedPanel }
+                        }
+                        retainedCaptures = preservedCaptures
+                        replacementPanel = failedPanel
                         stage = .capture
                     },
                     onSkip: {
                         removeTemporaryVideos(in: captures)
+                        retainedCaptures = []
+                        replacementPanel = nil
                         onContinueWithoutResults()
                     }
                 )
@@ -883,7 +913,11 @@ struct DetailedScanWorkflowView: View {
                     analysisResult: result,
                     scanImages: overviewImages,
                     onComplete: onComplete,
-                    onBack: { stage = .capture }
+                    onBack: {
+                        retainedCaptures = []
+                        replacementPanel = nil
+                        stage = .capture
+                    }
                 )
             }
         }
@@ -898,7 +932,7 @@ struct DetailedScanAnalysisProgressView: View {
     let captures: [DetailedPanelCapture]
     let overviewImages: [UIImage]
     let onComplete: (DetailedScanAnalysisBatchResult) -> Void
-    let onRetake: () -> Void
+    let onRetake: (DetailedVehiclePanel?) -> Void
     let onSkip: () -> Void
 
     @State private var progressValue = 0.0
@@ -908,6 +942,7 @@ struct DetailedScanAnalysisProgressView: View {
     @State private var errorMessage: String?
     @State private var receipts: [DetailedPanelAnalysisReceipt] = []
     @State private var failedPanel: DetailedVehiclePanel?
+    @State private var replacementRequired = false
 
     private var processedFrameCount: Int {
         receipts.reduce(0) { $0 + $1.processedFrames }
@@ -964,19 +999,27 @@ struct DetailedScanAnalysisProgressView: View {
                             Text(errorMessage)
                                 .foregroundColor(.red)
                                 .multilineTextAlignment(.center)
-                            Button("Try Again") { startAnalysis() }
+                            if replacementRequired, let failedPanel {
+                                Button("Replace \(failedPanel.displayName) Video") {
+                                    onRetake(failedPanel)
+                                }
                                 .buttonStyle(.borderedProminent)
                                 .tint(HTXTheme.primaryPurple)
-                            Button("Return to Detailed Scan") { onRetake() }
-                                .buttonStyle(.bordered)
-                                .tint(HTXTheme.primaryPurple)
+                            } else {
+                                Button("Try Again") { startAnalysis() }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(HTXTheme.primaryPurple)
+                                Button("Return to Detailed Scan") { onRetake(nil) }
+                                    .buttonStyle(.bordered)
+                                    .tint(HTXTheme.primaryPurple)
+                            }
                             Button("Continue Without Detailed Results") { onSkip() }
                                 .foregroundColor(.secondary)
                         }
                     } else {
                         Button("Cancel and Return to Detailed Scan") {
                             analysisTask?.cancel()
-                            onRetake()
+                            onRetake(nil)
                         }
                         .foregroundColor(.red)
                     }
@@ -1102,6 +1145,7 @@ struct DetailedScanAnalysisProgressView: View {
         stageLabel = "Step 1 of 2 · Multi-frame damage check"
         currentPanel = nil
         failedPanel = nil
+        replacementRequired = false
         errorMessage = nil
         receipts = []
         analysisTask = Task {
@@ -1156,7 +1200,12 @@ struct DetailedScanAnalysisProgressView: View {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
-                if let currentPanel,
+                if case let DetailedScanAnalysisError.panelRecordingRejected(panel, _) = error {
+                    failedPanel = panel
+                    currentPanel = panel
+                    replacementRequired = true
+                    stageLabel = "Replace \(panel.displayName) recording"
+                } else if let currentPanel,
                    !receipts.contains(where: { $0.panel == currentPanel }) {
                     failedPanel = currentPanel
                     stageLabel = "Analysis stopped · \(currentPanel.displayName) failed"
