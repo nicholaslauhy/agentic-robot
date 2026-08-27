@@ -849,20 +849,80 @@ private struct DetailedRecordingGuideView: View {
     }
 }
 
+struct DetailedCameraGuideLayout: Equatable {
+    let guideRect: CGRect
+    let silhouetteRect: CGRect
+
+    init(size: CGSize, angle: VehicleOverviewAngle) {
+        let horizontalInset = max(18, size.width * 0.018)
+        let topInset = max(86, size.height * 0.072)
+        let bottomInset = max(108, size.height * 0.09)
+        let width = max(1, size.width - (horizontalInset * 2))
+        let height = max(1, size.height - topInset - bottomInset)
+
+        guideRect = CGRect(
+            x: horizontalInset,
+            y: topInset,
+            width: width,
+            height: height
+        )
+
+        let contentInset = max(10, min(size.width, size.height) * 0.012)
+        let available = guideRect.insetBy(dx: contentInset, dy: contentInset)
+        let targetAspect: CGFloat = switch angle {
+        case .front, .rear: 1.55
+        case .leftSide, .rightSide: 2.05
+        }
+        let availableAspect = available.width / max(1, available.height)
+        let fittedSize: CGSize
+
+        if availableAspect > targetAspect {
+            fittedSize = CGSize(
+                width: available.height * targetAspect,
+                height: available.height
+            )
+        } else {
+            fittedSize = CGSize(
+                width: available.width,
+                height: available.width / targetAspect
+            )
+        }
+
+        silhouetteRect = CGRect(
+            x: guideRect.midX - (fittedSize.width / 2),
+            y: guideRect.midY - (fittedSize.height / 2),
+            width: fittedSize.width,
+            height: fittedSize.height
+        )
+    }
+}
+
 private struct DetailedCameraOverlay: View {
     let panel: DetailedVehiclePanel
     let carType: CarType
 
     var body: some View {
         GeometryReader { geometry in
-            let horizontalInset = max(34, geometry.size.width * 0.035)
-            let topInset = max(110, geometry.size.height * 0.12)
-            let bottomInset = max(145, geometry.size.height * 0.15)
-            let guideWidth = max(320, geometry.size.width - (horizontalInset * 2))
-            let availableHeight = geometry.size.height - topInset - bottomInset
-            let guideHeight = max(240, min(availableHeight, guideWidth * 0.56))
+            let layout = DetailedCameraGuideLayout(
+                size: geometry.size,
+                angle: panel.overviewAngle
+            )
 
             ZStack {
+                RoundedRectangle(cornerRadius: 24)
+                    .stroke(
+                        Color.white.opacity(0.92),
+                        style: StrokeStyle(lineWidth: 3, dash: [12, 9])
+                    )
+                    .frame(
+                        width: layout.guideRect.width,
+                        height: layout.guideRect.height
+                    )
+                    .position(
+                        x: layout.guideRect.midX,
+                        y: layout.guideRect.midY
+                    )
+
                 ZStack {
                     CarSilhouetteView(
                         carType: carType,
@@ -870,18 +930,16 @@ private struct DetailedCameraOverlay: View {
                     )
                     .opacity(0.48)
 
-                    RoundedRectangle(cornerRadius: 24)
-                        .stroke(
-                            Color.white.opacity(0.92),
-                            style: StrokeStyle(lineWidth: 3, dash: [12, 9])
-                        )
                     DetailedPanelHighlightOverlay(panel: panel)
                     DetailedPanelSweepDirectionOverlay(panel: panel)
                 }
-                .frame(width: guideWidth, height: guideHeight)
+                .frame(
+                    width: layout.silhouetteRect.width,
+                    height: layout.silhouetteRect.height
+                )
                 .position(
-                    x: geometry.size.width / 2,
-                    y: topInset + (availableHeight / 2)
+                    x: layout.silhouetteRect.midX,
+                    y: layout.silhouetteRect.midY
                 )
 
                 HStack {
@@ -902,7 +960,10 @@ private struct DetailedCameraOverlay: View {
                         .clipShape(Capsule())
                 }
                 .padding(.horizontal, 20)
-                .position(x: geometry.size.width / 2, y: 54)
+                .position(
+                    x: geometry.size.width / 2,
+                    y: max(46, layout.guideRect.minY * 0.48)
+                )
 
                 Text("Move with the arrow:  −20°  →  straight  →  +20°")
                     .font(.headline.bold())
@@ -913,7 +974,8 @@ private struct DetailedCameraOverlay: View {
                     .clipShape(Capsule())
                     .position(
                         x: geometry.size.width / 2,
-                        y: geometry.size.height - max(54, bottomInset * 0.42)
+                        y: layout.guideRect.maxY
+                            + ((geometry.size.height - layout.guideRect.maxY) * 0.50)
                     )
             }
         }

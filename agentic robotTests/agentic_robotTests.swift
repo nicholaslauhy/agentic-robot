@@ -64,6 +64,34 @@ final class agentic_robotTests: XCTestCase {
         )
     }
 
+    func testCameraGuideUsesNearlyAllOfPortraitScreen() {
+        let size = CGSize(width: 834, height: 1194)
+        let layout = DetailedCameraGuideLayout(size: size, angle: .front)
+
+        XCTAssertGreaterThanOrEqual(layout.guideRect.width / size.width, 0.95)
+        XCTAssertGreaterThanOrEqual(layout.guideRect.height / size.height, 0.82)
+        XCTAssertTrue(layout.guideRect.contains(layout.silhouetteRect))
+        XCTAssertEqual(
+            layout.silhouetteRect.width / layout.silhouetteRect.height,
+            1.55,
+            accuracy: 0.01
+        )
+    }
+
+    func testCameraGuideUsesNearlyAllOfLandscapeScreen() {
+        let size = CGSize(width: 1194, height: 834)
+        let layout = DetailedCameraGuideLayout(size: size, angle: .leftSide)
+
+        XCTAssertGreaterThanOrEqual(layout.guideRect.width / size.width, 0.95)
+        XCTAssertGreaterThanOrEqual(layout.guideRect.height / size.height, 0.75)
+        XCTAssertTrue(layout.guideRect.contains(layout.silhouetteRect))
+        XCTAssertEqual(
+            layout.silhouetteRect.width / layout.silhouetteRect.height,
+            2.05,
+            accuracy: 0.01
+        )
+    }
+
     func testDetailedScanQualityRequiresThreeUsableViewpoints() {
         let clearFrames = (0..<5).map { index in
             DetailedScanFrame(
