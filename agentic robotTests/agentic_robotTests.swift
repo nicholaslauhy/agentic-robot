@@ -265,6 +265,55 @@ final class agentic_robotTests: XCTestCase {
     }
 
     @MainActor
+    func testDetailedPanelStatusListDistinguishesEveryRunState() {
+        let completedReceipt = DetailedPanelAnalysisReceipt(
+            panel: .frontUpper,
+            submittedFrames: 5,
+            processedFrames: 5,
+            findingCount: 1,
+            requestId: "request-123"
+        )
+        let receipts = [completedReceipt]
+
+        XCTAssertEqual(
+            DetailedPanelAnalysisStatusResolver.state(
+                for: .frontUpper,
+                currentPanel: .frontLower,
+                failedPanel: .leftFrontQuarter,
+                receipts: receipts
+            ),
+            .completed
+        )
+        XCTAssertEqual(
+            DetailedPanelAnalysisStatusResolver.state(
+                for: .frontLower,
+                currentPanel: .frontLower,
+                failedPanel: .leftFrontQuarter,
+                receipts: receipts
+            ),
+            .current
+        )
+        XCTAssertEqual(
+            DetailedPanelAnalysisStatusResolver.state(
+                for: .leftFrontQuarter,
+                currentPanel: .frontLower,
+                failedPanel: .leftFrontQuarter,
+                receipts: receipts
+            ),
+            .failed
+        )
+        XCTAssertEqual(
+            DetailedPanelAnalysisStatusResolver.state(
+                for: .rightFrontQuarter,
+                currentPanel: .frontLower,
+                failedPanel: .leftFrontQuarter,
+                receipts: receipts
+            ),
+            .waiting
+        )
+    }
+
+    @MainActor
     private func makeDetailedCapture(
         panel: DetailedVehiclePanel,
         frameCount: Int = DetailedScanFrameProcessor.representativeFrameCount

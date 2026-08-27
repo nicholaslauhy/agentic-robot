@@ -19,6 +19,33 @@ struct DetailedPanelAnalysisReceipt: Identifiable {
     var id: String { panel.id }
 }
 
+enum DetailedPanelAnalysisRunState: Equatable {
+    case waiting
+    case current
+    case completed
+    case failed
+}
+
+enum DetailedPanelAnalysisStatusResolver {
+    static func state(
+        for panel: DetailedVehiclePanel,
+        currentPanel: DetailedVehiclePanel?,
+        failedPanel: DetailedVehiclePanel?,
+        receipts: [DetailedPanelAnalysisReceipt]
+    ) -> DetailedPanelAnalysisRunState {
+        if receipts.contains(where: { $0.panel == panel }) {
+            return .completed
+        }
+        if failedPanel == panel {
+            return .failed
+        }
+        if currentPanel == panel {
+            return .current
+        }
+        return .waiting
+    }
+}
+
 struct DetailedScanAnalysisBatchResult {
     let findings: [DetailedProjectedDamageFinding]
     let receipts: [DetailedPanelAnalysisReceipt]
@@ -749,6 +776,7 @@ struct DetailedScanAnalysisProgressView: View {
     @State private var analysisTask: Task<Void, Never>?
     @State private var errorMessage: String?
     @State private var receipts: [DetailedPanelAnalysisReceipt] = []
+    @State private var failedPanel: DetailedVehiclePanel?
 
     private var processedFrameCount: Int {
         receipts.reduce(0) { $0 + $1.processedFrames }
@@ -762,99 +790,179 @@ struct DetailedScanAnalysisProgressView: View {
     var body: some View {
         ZStack {
             SubtleHTXBackground()
-            VStack(spacing: 24) {
-                Image(systemName: "waveform.and.magnifyingglass")
-                    .font(.system(size: 56))
-                    .foregroundColor(HTXTheme.primaryPurple)
+            ScrollView {
+                VStack(spacing: 20) {
+                    Image(systemName: "waveform.and.magnifyingglass")
+                        .font(.system(size: 48))
+                        .foregroundColor(HTXTheme.primaryPurple)
 
-                Text("Analysing Detailed Scan")
-                    .font(.largeTitle.bold())
-                    .foregroundColor(HTXTheme.primaryPurple)
+                    Text("Analysing Detailed Scan")
+                        .font(.largeTitle.bold())
+                        .foregroundColor(HTXTheme.primaryPurple)
 
-                Text(currentPanel.map { "Checking \($0.displayName) from several viewpoints" }
-                    ?? "Preparing panel recordings")
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                    Text(currentPanel.map { "Checking \($0.displayName) from several viewpoints" }
+                        ?? "Preparing panel recordings")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
 
-                VStack(spacing: 10) {
-                    ProgressView(value: progressValue)
-                        .tint(HTXTheme.primaryPurple)
-                    HStack {
-                        Text(stageLabel)
-                        Spacer()
-                        Text("\(Int((progressValue * 100).rounded()))%")
-                            .fontWeight(.bold)
+                    VStack(spacing: 10) {
+                        ProgressView(value: progressValue)
+                            .tint(HTXTheme.primaryPurple)
+                        HStack {
+                            Text(stageLabel)
+                            Spacer()
+                            Text("\(Int((progressValue * 100).rounded()))%")
+                                .fontWeight(.bold)
+                        }
+                        .font(.subheadline)
                     }
-                    .font(.subheadline)
-                }
-                .padding()
-                .background(Color(.systemBackground).opacity(0.92))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .padding()
+                    .background(Color(.systemBackground).opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
 
-                Text("A mark must remain visible from more than one camera position. Moving reflections are less likely to be returned as damage.")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-
-                VStack(alignment: .leading, spacing: 9) {
-                    HStack {
-                        Label("Backend receipts", systemImage: "server.rack")
-                            .font(.headline)
-                        Spacer()
-                        Text("\(receipts.count)/\(DetailedScanSubmissionValidator.requiredPanelCount) panels")
-                            .font(.subheadline.bold())
-                            .foregroundColor(receipts.count == DetailedScanSubmissionValidator.requiredPanelCount ? .green : HTXTheme.primaryPurple)
-                    }
-                    Text("\(processedFrameCount)/\(expectedFrameCount) viewpoints processed")
+                    Text("A mark must remain visible from more than one camera position. Moving reflections are less likely to be returned as damage.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
 
-                    ForEach(receipts.suffix(3)) { receipt in
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                            Text(receipt.panel.displayName)
-                            Spacer()
-                            Text("\(receipt.processedFrames)/\(receipt.submittedFrames)")
-                                .foregroundColor(.secondary)
-                            Text("#\(receipt.requestId.prefix(6))")
+                    panelStatusCard
+
+                    if let errorMessage {
+                        VStack(spacing: 12) {
+                            Text(errorMessage)
+                                .foregroundColor(.red)
+                                .multilineTextAlignment(.center)
+                            Button("Try Again") { startAnalysis() }
+                                .buttonStyle(.borderedProminent)
+                                .tint(HTXTheme.primaryPurple)
+                            Button("Return to Detailed Scan") { onRetake() }
+                                .buttonStyle(.bordered)
+                                .tint(HTXTheme.primaryPurple)
+                            Button("Continue Without Detailed Results") { onSkip() }
                                 .foregroundColor(.secondary)
                         }
-                        .font(.caption)
+                    } else {
+                        Button("Cancel and Return to Detailed Scan") {
+                            analysisTask?.cancel()
+                            onRetake()
+                        }
+                        .foregroundColor(.red)
                     }
                 }
-                .padding()
-                .background(Color(.systemBackground).opacity(0.92))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                if let errorMessage {
-                    VStack(spacing: 12) {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .multilineTextAlignment(.center)
-                        Button("Try Again") { startAnalysis() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(HTXTheme.primaryPurple)
-                        Button("Return to Detailed Scan") { onRetake() }
-                            .buttonStyle(.bordered)
-                            .tint(HTXTheme.primaryPurple)
-                        Button("Continue Without Detailed Results") { onSkip() }
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    Button("Cancel and Return to Detailed Scan") {
-                        analysisTask?.cancel()
-                        onRetake()
-                    }
-                    .foregroundColor(.red)
-                }
+                .frame(maxWidth: 760)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 680)
-            .padding(30)
         }
         .task { startAnalysis() }
         .onDisappear { analysisTask?.cancel() }
+    }
+
+    private var panelStatusCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("All panel requests", systemImage: "server.rack")
+                    .font(.headline)
+                Spacer()
+                Text("\(receipts.count)/\(DetailedScanSubmissionValidator.requiredPanelCount) completed")
+                    .font(.subheadline.bold())
+                    .foregroundColor(
+                        receipts.count == DetailedScanSubmissionValidator.requiredPanelCount
+                            ? .green
+                            : HTXTheme.primaryPurple
+                    )
+            }
+
+            Text("\(processedFrameCount)/\(expectedFrameCount) viewpoints processed")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            Divider()
+
+            LazyVStack(spacing: 0) {
+                ForEach(DetailedVehicleScanSpecification.panels) { panel in
+                    panelStatusRow(panel)
+                    if panel != DetailedVehicleScanSpecification.panels.last {
+                        Divider().padding(.leading, 42)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(.systemBackground).opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func panelStatusRow(_ panel: DetailedVehiclePanel) -> some View {
+        let receipt = receipts.first(where: { $0.panel == panel })
+        let state = DetailedPanelAnalysisStatusResolver.state(
+            for: panel,
+            currentPanel: currentPanel,
+            failedPanel: failedPanel,
+            receipts: receipts
+        )
+        let presentation = panelStatusPresentation(state)
+
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: presentation.icon)
+                .foregroundColor(presentation.color)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(panel.sequenceNumber). \(panel.displayName)")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(presentation.label)
+                        .font(.caption.bold())
+                        .foregroundColor(presentation.color)
+                }
+
+                if let receipt {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(receipt.processedFrames)/\(receipt.submittedFrames) frames processed")
+                        Text("Receipt #\(receipt.requestId.prefix(8))")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                } else {
+                    Text(panelStatusDetail(state))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    private func panelStatusPresentation(
+        _ state: DetailedPanelAnalysisRunState
+    ) -> (icon: String, label: String, color: Color) {
+        switch state {
+        case .waiting:
+            return ("clock", "Waiting", .secondary)
+        case .current:
+            return ("arrow.triangle.2.circlepath.circle.fill", "Analysing", HTXTheme.primaryPurple)
+        case .completed:
+            return ("checkmark.circle.fill", "Completed", .green)
+        case .failed:
+            return ("exclamationmark.triangle.fill", "Failed", .red)
+        }
+    }
+
+    private func panelStatusDetail(_ state: DetailedPanelAnalysisRunState) -> String {
+        switch state {
+        case .waiting:
+            return "Waiting to send 5 representative frames"
+        case .current:
+            return "Uploading and running the damage detector on 5 frames"
+        case .completed:
+            return "Backend processing completed"
+        case .failed:
+            return "No verified backend receipt was returned"
+        }
     }
 
     private func startAnalysis() {
@@ -862,6 +970,7 @@ struct DetailedScanAnalysisProgressView: View {
         progressValue = 0
         stageLabel = "Step 1 of 2 · Multi-frame damage check"
         currentPanel = nil
+        failedPanel = nil
         errorMessage = nil
         receipts = []
         analysisTask = Task {
@@ -915,6 +1024,13 @@ struct DetailedScanAnalysisProgressView: View {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
+                if let currentPanel,
+                   !receipts.contains(where: { $0.panel == currentPanel }) {
+                    failedPanel = currentPanel
+                    stageLabel = "Analysis stopped · \(currentPanel.displayName) failed"
+                } else {
+                    stageLabel = "Detailed analysis stopped"
+                }
                 errorMessage = error.localizedDescription
             }
         }
