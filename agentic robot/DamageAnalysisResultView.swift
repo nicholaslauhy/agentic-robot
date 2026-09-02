@@ -1648,6 +1648,13 @@ struct BoundingBoxEditorSheet: View {
     /// The full original scan photo for this angle — used as both the drawing
     /// canvas and the crop source. Falls back to cleanContextImage if nil.
     let scanImage: UIImage?
+    /// Called only after the user explicitly commits a valid box with Done.
+    /// Detailed-scan projections use this acknowledgement to prevent an
+    /// unverified backend location from being accepted silently.
+    var onSave: (() -> Void)? = nil
+    /// A detailed scan keeps its source-frame crop as the classification
+    /// evidence while this editor changes only the overview location.
+    var preserveExistingCropOnSave = false
     @Environment(\.dismiss) private var dismiss
 
     // Local working state — not committed to detection until Done is tapped
@@ -1774,8 +1781,12 @@ struct BoundingBoxEditorSheet: View {
                         detection.contextImage    = renderContext(image: previewImg, bbox: bbox)
                         // cleanContextImage = full car photo preview with no annotations (for future edits)
                         detection.cleanContextImage = normalizedImage(previewImg)
-                        // cropImage = padded crop from the preview photo
-                        detection.cropImage       = renderAnnotatedCrop(image: previewImg, bbox: bbox)
+                        // For ordinary/manual cases, cropImage follows the
+                        // edited overview. Detailed scans retain the original
+                        // panel-frame close-up as their damage evidence.
+                        if !preserveExistingCropOnSave {
+                            detection.cropImage = renderAnnotatedCrop(image: previewImg, bbox: bbox)
+                        }
 
                         // If the user changed the damage type, update explanation to match.
                         if pendingDamageType != detection.damageType {
@@ -1788,6 +1799,7 @@ struct BoundingBoxEditorSheet: View {
 
                         detection.damageType = pendingDamageType
                         detection.confidence = 1.0
+                        onSave?()
                         dismiss()
                     }
                     .disabled(pendingBBox == nil || pendingDamageType.isEmpty)

@@ -35,6 +35,7 @@ private struct DetailedDurationOverride: Identifiable {
 struct DetailedVehicleScanView: View {
     let plate: String
     let carType: CarType
+    let replacementPanel: DetailedVehiclePanel?
     let onCancel: () -> Void
     let onComplete: ([DetailedPanelCapture]) -> Void
 
@@ -50,6 +51,27 @@ struct DetailedVehicleScanView: View {
     @State private var playbackCapture: DetailedPanelCapture?
     @State private var durationOverride: DetailedDurationOverride?
     @State private var preparationTask: Task<Void, Never>?
+
+    init(
+        plate: String,
+        carType: CarType,
+        initialCaptures: [DetailedPanelCapture] = [],
+        replacementPanel: DetailedVehiclePanel? = nil,
+        onCancel: @escaping () -> Void,
+        onComplete: @escaping ([DetailedPanelCapture]) -> Void
+    ) {
+        self.plate = plate
+        self.carType = carType
+        self.replacementPanel = replacementPanel
+        self.onCancel = onCancel
+        self.onComplete = onComplete
+        _selectedPanel = State(
+            initialValue: replacementPanel ?? DetailedVehicleScanSpecification.panels[0]
+        )
+        _captures = State(
+            initialValue: Dictionary(uniqueKeysWithValues: initialCaptures.map { ($0.panel, $0) })
+        )
+    }
 
     private var currentIndex: Int {
         DetailedVehicleScanSpecification.panels.firstIndex(of: selectedPanel) ?? 0
@@ -82,6 +104,10 @@ struct DetailedVehicleScanView: View {
                     VStack(spacing: 18) {
                         header
                         progressCard
+                        if let replacementPanel,
+                           captures[replacementPanel] == nil {
+                            replacementNotice(replacementPanel)
+                        }
                         panelGuideCard
                         captureCard
                         panelStrip
@@ -235,6 +261,25 @@ struct DetailedVehicleScanView: View {
         }
         .padding()
         .background(HTXTheme.softPurpleCard)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func replacementNotice(_ panel: DetailedVehiclePanel) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Replace only \(panel.displayName)", systemImage: "exclamationmark.arrow.triangle.2.circlepath")
+                .font(.headline)
+                .foregroundColor(.orange)
+            Text("Your other \(captures.count) panel recordings are still saved. Keep the highlighted panel centred and fully visible while taking one or two small sideways steps from the start position through the centre to the end position. Do not continue into the next panel.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
